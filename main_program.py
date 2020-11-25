@@ -47,10 +47,11 @@ grid.set_temperature(T_c, T_f)
 # opening file
 
 phonons = Phonon()
-phonons.load_data(filename)
-phonons.initialise_positions(100, grid)
+phonons.load_properties(filename)
 
-print(phonons.positions)
+k = np.random.rand(3)
+
+print(k, phonons.get_frequency(k, 0))
 
 
 
