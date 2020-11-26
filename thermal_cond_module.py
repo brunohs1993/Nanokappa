@@ -4,7 +4,7 @@ import scipy.constants as ct
 import phonopy
 from scipy.interpolate import LinearNDInterpolator, griddata
 
-class Grid:
+class Geometry:
     def __init__(self):
         pass
 
@@ -29,14 +29,12 @@ class Grid:
         self.L_z = L_z
 
     def set_cells(self, N_x, N_y, N_z):
-
         self.N_x = N_x
         self.N_y = N_y
         self.N_z = N_z
         self.N_c = N_x*N_y*N_z
 
     def set_boundaries(self):
-
         self.dL_x = self.L_x/self.N_x
         self.dL_y = self.L_y/self.N_y
         self.dL_z = self.L_z/self.N_z
@@ -56,13 +54,14 @@ class Grid:
         self.temperature = np.ones( (self.N_z, self.N_x, self.N_y) )*self.T_f
         self.temperature[0,:,:] = self.T_c
 
+#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=
 
 class Phonon:
     def __init__(self):
         pass
     
-    def load_properties(self, filename):
-        self.load_data(filename)
+    def load_properties(self, hdf5_file, poscar_file):
+        self.load_data(hdf5_file)
         self.load_frequency()
         self.convert_to_omega()
         self.load_points()
@@ -71,8 +70,8 @@ class Phonon:
         self.load_temperature()
         self.load_heat_cap()
 
-    def load_data(self, filename):
-        self.data = h5py.File(filename,'r')
+    def load_data(self, hdf5_file,):
+        self.data = h5py.File(hdf5_file,'r')
 
     def load_frequency(self):
         '''frequency shape = q-points X p-branches '''
@@ -80,7 +79,7 @@ class Phonon:
     
     def convert_to_omega(self):
         '''omega shape = q-points X p-branches '''
-        self.omega = self.frequency*2*ct.pi # Trad/s
+        self.omega = self.frequency*2*ct.pi*10**12 # rad/s
     
     def load_points(self):
         '''q-points shape = q-points X reciprocal reduced coordinates '''
@@ -101,33 +100,52 @@ class Phonon:
     def load_heat_cap(self):
         '''heat_cap shape = temperatures X q-points X p-branches '''
         self.heat_cap = np.array(self.data['heat_capacity'])
+    
+    def load_lattice_vectors(self, poscar_file):
+        f = open(poscar_file, 'r')
+        lines = [line.strip() for line in f.readlines()]
         
+        self.a = [s.strip() for s in lines[2].split(' ')]
+        self.a = np.array([i for i in self.a if i!=''], dtype=float)
+
+        self.b = [s.strip() for s in lines[3].split(' ')]
+        self.b = np.array([i for i in self.b if i!=''], dtype=float)
+
+        self.c = [s.strip() for s in lines[4].split(' ')]
+        self.c = np.array([i for i in self.c if i!=''], dtype=float)
+
+        f.close()
+    
+    def load_atoms(self, poscar_file):
+        self.atoms = []
+        f = open(poscar_file, 'r')
+        lines = [line.strip() for line in f.readlines()]
+
+        at = [s.strip() for s in lines[5].split(' ')]
+        at = np.array([i for i in at if i!=''])
+
+        qt = [s.strip() for s in lines[6].split(' ')]
+        qt = np.array([i for i in qt if i!=''])
+
+        atoms = []
+        for i in range(len(atoms)):
+            atoms += [{'name': at[i], 'quantity':qt[i]}]
+
+        f.close()
+    
     def initialise_positions(self, N, grid):
         self.positions = np.random.rand(grid.N_z, N, 3, grid.N_x, grid.N_y)
 
     def calculate_occupation(self, T, omega):
         return 1/(np.exp(ct.hbar*omega/ct.k * T)-1)
 
-    def calculate_energy(self, n, omega):
-        return ct.hbar * omega * (n + 0.5)
+    def calculate_energy(self, T, omega):
+        n = self.calculate_occupation(T, omega)
+        return ct.hbar * omega * (n + 0.5) / ct.eV # eV
+
     
-    def get_frequency(self, k, p):
-        ''' k should be a 1d array with 3 coordinates of the q-points between 0 and 0.5; branch should be an integer'''
-        k = self.adjust_k(k)
-        return griddata(self.q_points, self.omega[:,p], k, method='nearest') # fix this 'nearest' later
-    
-    def adjust_k(self, k):
-        ''' for structures with symmetry [100] = [010]  = [-100] = [0-10] and [001] = [00-1]'''
-        k = np.abs(k)   # transfering to positive quadrant
-        k = k % 1     # taking away extra periods
 
-        if k[0]<k[1]:
-            k = np.array([k[1], k[0], k[2]])
 
-        return k
-
-    def get_heat_cap(self, T, k, p):
-        pass
 
 
 
