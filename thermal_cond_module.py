@@ -1,150 +1,249 @@
 import numpy as np
 import h5py
+import dpdata
 import scipy.constants as ct
 import phonopy
-from scipy.interpolate import LinearNDInterpolator, griddata
+# from scipy.interpolate import LinearNDInterpolator, griddata
 
-class Geometry:
+class Constants:
     def __init__(self):
-        pass
-
-    def __str__(self):
-        try:
-            self.L_x
-        except NameError:
-            print('Dimensions - L_x: Undefined, L_y: Undefined, L_z: Undefined')
-        else:
-            print('Dimensions - L_x: {:<6.2f}, L_y: {:<6.2f}, L_z: {:<6.2f}'.format(self.L_x, self.L_y, self.L_z))
-        
-        try:
-            self.N_x
-        except NameError:
-            print('     Cells - N_x: Undefined, N_y: Undefined, N_z: Undefined')
-        else:
-            print('     Cells - N_x: {:<6d}, N_y: {:<6d}, N_z: {:<6d}'.format(self.N_x, self.N_y, self.N_z))
-
-    def set_dimensions(self, L_x, L_y, L_z):
-        self.L_x = L_x
-        self.L_y = L_y
-        self.L_z = L_z
-
-    def set_cells(self, N_x, N_y, N_z):
-        self.N_x = N_x
-        self.N_y = N_y
-        self.N_z = N_z
-        self.N_c = N_x*N_y*N_z
-
-    def set_boundaries(self):
-        self.dL_x = self.L_x/self.N_x
-        self.dL_y = self.L_y/self.N_y
-        self.dL_z = self.L_z/self.N_z
-
-        self.cell_bounds_x = np.arange(self.N_x+1)*self.dL_x
-        self.cell_bounds_y = np.arange(self.N_y+1)*self.dL_y
-        self.cell_bounds_z = np.arange(self.N_z+1)*self.dL_z
-
-    def set_temperature(self, T_c, T_f):
-        self.T_c = T_c
-        self.T_f = T_f
-    
-        self.T_mean = (self.T_f + self.T_c)/2
-
-        self.T_diff = self.T_c - self.T_f
-
-        self.temperature = np.ones( (self.N_z, self.N_x, self.N_y) )*self.T_f
-        self.temperature[0,:,:] = self.T_c
+        self.hbar = ct.physical_constants['Planck constant over 2 pi in eV s'][0]   # hbar in eV s
+        self.kb   = ct.physical_constants['Boltzmann constant in eV/K'       ][0]   # kb in eV/K
 
 #=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=
 
-class Phonon:
-    def __init__(self):
-        pass
-    
-    def load_properties(self, hdf5_file, poscar_file):
-        self.load_data(hdf5_file)
+#   TO DO
+#
+#   - Think about definition of geometry. Simple, standard geometries (polyhedra) will be a good exercise to test this. Pymesh allows working with .obj files, indexing vertices, edges and faces. Allows to import external geometries.
+#   - This also has to do with the optimisation/AI process to be implemented later. Which variables will we be dealing with? If optimising geometry we could have points coordinates, but depending of the complexity of geometry there would be too many variables.
+
+class Geometry:
+    def __init__(self, arguments):
+        
+        self.args = arguments
+
+        self.shape = self.args.geometry
+        self.dimensions = self.args.dimensions
+
+    def set_dimensions(self):
+
+        self.dimensions = np.array(self.args.dimensions)
+
+        if self.args.geometry == 'cuboid':
+            self.L_x = self.dimensions[0]
+            self.L_y = self.dimensions[1]
+            self.L_z = self.dimensions[2]
+
+    def set_boundary_cond(self):
+        # THINKING ABOUT IMPOSING BOUNDARY CONDITIONS IN COLLISION DETECTION: WHEN A PARTICLE COLLIDES WITH A BOUNDARY, THE TEMPERATURE OF THE BOUNDARY IS IMPOSED TO THAT PARTICLE (WHEN APPLICABLE). BUT FIRST I NEED TO THINK ON HOW TO DEFINE FACES.
+        
+        self.bound_cond = np.array(self.args.bound_cond)
+
+#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=
+
+#   TO DO
+#
+#   - Get the wave vector in cartesian coordinates.
+#   - Think in how to get the direct or cartesian coordinates of atoms positions from POSCAR file.
+#   - 
+#   - 
+#   - 
+#   - 
+#   - 
+
+class Phonon(Constants):    
+    ''' Class to get phonon properties and manipulate them. '''
+    def __init__(self, arguments):
+        self.args = arguments
+        
+    def load_properties(self):
+        '''Initialise all phonon properties from input files.'''
+
+        self.load_hdf_data(self.args.hdf_file)
         self.load_frequency()
         self.convert_to_omega()
-        self.load_points()
+        self.load_q_points()
         self.load_weights()
         self.load_group_vel()
         self.load_temperature()
         self.load_heat_cap()
+        # self.load_energy_levels()
+        
+        self.load_poscar_data(self.args.poscar_file)
+        self.load_atom_coord()
+        self.load_atoms_types()
+        self.load_lattice_vectors()
 
-    def load_data(self, hdf5_file,):
-        self.data = h5py.File(hdf5_file,'r')
+    def load_hdf_data(self, hdf_file,):
+        ''' Get all data from hdf file.
+            Module documentation: https://docs.h5py.org/en/stable/'''
+
+        self.data_hdf = h5py.File(hdf_file,'r')
+    
+    def load_poscar_data(self, poscar_file):
+        ''' Get all data from poscar file.
+            Module documentation: https://pypi.org/project/dpdata/'''
+
+        self.data_poscar = dpdata.System(poscar_file, fmt = 'vasp/poscar')
 
     def load_frequency(self):
         '''frequency shape = q-points X p-branches '''
-        self.frequency = np.array(self.data['frequency']) # THz
+        self.frequency = np.array(self.data_hdf['frequency']) # THz
     
     def convert_to_omega(self):
         '''omega shape = q-points X p-branches '''
-        self.omega = self.frequency*2*ct.pi*10**12 # rad/s
+        self.omega = self.frequency*2*ct.pi*1e12 # rad/s
     
-    def load_points(self):
+    def load_q_points(self):
         '''q-points shape = q-points X reciprocal reduced coordinates '''
-        self.q_points = np.array(self.data['qpoint'])
+        self.q_points = np.array(self.data_hdf['qpoint'])   # reduced reciprocal coordinates
     
     def load_weights(self):
         '''weights shape = q_points '''
-        self.weights = np.array(self.data['weight'])
+        self.weights = np.array(self.data_hdf['weight'])    # Question: what is this weight??
 
     def load_temperature(self):
         '''temperature_array shape = temperatures '''
-        self.temperature_array = np.array(self.data['temperature'])
+        self.temperature_array = np.array(self.data_hdf['temperature']) # K
     
     def load_group_vel(self):
         '''groupvel shape = q_points X p-branches X cartesian coordinates '''
-        self.group_vel = np.array(self.data['group_velocity'])
+        self.group_vel = np.array(self.data_hdf['group_velocity'])  # THz * angstrom
 
     def load_heat_cap(self):
         '''heat_cap shape = temperatures X q-points X p-branches '''
-        self.heat_cap = np.array(self.data['heat_capacity'])
+        self.heat_cap = np.array(self.data_hdf['heat_capacity'])    # eV/K
     
-    def load_lattice_vectors(self, poscar_file):
-        f = open(poscar_file, 'r')
-        lines = [line.strip() for line in f.readlines()]
-        
-        self.a = [s.strip() for s in lines[2].split(' ')]
-        self.a = np.array([i for i in self.a if i!=''], dtype=float)
-
-        self.b = [s.strip() for s in lines[3].split(' ')]
-        self.b = np.array([i for i in self.b if i!=''], dtype=float)
-
-        self.c = [s.strip() for s in lines[4].split(' ')]
-        self.c = np.array([i for i in self.c if i!=''], dtype=float)
-
-        f.close()
+    def load_lattice_vectors(self):
+        '''Unit cell coordinates from poscar file.'''
+        self.lattice_vectors = self.data_poscar['cells']    # lattice vectors in cartesian coordinates, angstrom
     
-    def load_atoms(self, poscar_file):
-        self.atoms = []
-        f = open(poscar_file, 'r')
-        lines = [line.strip() for line in f.readlines()]
-
-        at = [s.strip() for s in lines[5].split(' ')]
-        at = np.array([i for i in at if i!=''])
-
-        qt = [s.strip() for s in lines[6].split(' ')]
-        qt = np.array([i for i in qt if i!=''])
-
-        atoms = []
-        for i in range(len(atoms)):
-            atoms += [{'name': at[i], 'quantity':qt[i]}]
-
-        f.close()
+    def load_atoms_types(self):
+        '''Dictionary defining elements and its quantities.'''
+        self.atoms =  { self.data_poscar['atom_names'][i] : self.data_poscar['atom_numbs'][i] for i in range( len( self.data_poscar['atom_names'] ) ) }
     
-    def initialise_positions(self, N, grid):
-        self.positions = np.random.rand(grid.N_z, N, 3, grid.N_x, grid.N_y)
-
-    def calculate_occupation(self, T, omega):
-        return 1/(np.exp(ct.hbar*omega/ct.k * T)-1)
+    def load_atom_coord(self):
+        '''Loads atom coordinates.'''
+        self.atom_coord = self.data_poscar['coords'] # need to see how to read if direct or cartesian. dpdata doesn't seem to do it.
 
     def calculate_energy(self, T, omega):
+        '''Energy of a mode given T'''
         n = self.calculate_occupation(T, omega)
-        return ct.hbar * omega * (n + 0.5) / ct.eV # eV
-
+        return self.hbar * omega * (n + 0.5)
     
+    def crystal_energy(self, T):
+        '''Calculate the total energy of the crystal considering the input modes, at a given T.'''
+        return self.calculate_energy(T, self.omega).sum()
+        
+    def load_energy_levels(self):
+        '''Calculate an array of energy levels to recalculate T'''
+        self.energy_levels = self.crystal_energy(self.temperature_array)
+    
+#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=
 
+#   TO DO
+#
+#   - Set units to the positions
+#   - Drift, scatter functions
+#   - Collision detection with boundaries to impose boundary conditions. How to detect collision efficiently?
+#   - Transport equations
+#   - 
+#   - 
+
+
+class Population(Constants):
+    '''Class comprising the particles to be simulated.'''
+
+    def __init__(self, arguments, geometry):
+        self.args = arguments
+        self.N_p = self.args.particles
+
+        self.initialise_positions(geometry)
+
+
+    def initialise_positions(self, geometry):
+        '''Initialise positions of phonons: normalised coordinates'''
+        if geometry.shape == 'cuboid':
+            self.positions = np.random.rand(self.N_p, 3)*np.array([geometry.L_x, geometry.L_y, geometry.L_z])
+    
+    def atribute_modes(self, phonon):
+        '''Randomly generate indexes according to an uniform distribution, linking particle positions and phonon properties.'''
+
+        branches = phonon.omega.shape[1]    # number of branches
+        q_points = phonon.omega.shape[0]    # number of q points
+
+        self.indexes = np.zeros( (self.N_p, 2) )
+        self.indexes[:,0] = np.floor( np.random.rand(self.N_p)*q_points )
+        self.indexes[:,1] = np.floor( np.random.rand(self.N_p)*branches )
+        self.indexes = self.indexes.astype(int)
+
+    def atribute_properties(self, phonon):
+        '''Get properties from the indexes.'''
+
+        self.frequencies = phonon.omega[ self.indexes[:,0], self.indexes[:,1] ]         # rad/s
+        self.wavevectors = phonon.q_points[ self.indexes[:,0] ]                         # reduced reciprocal coordinates
+        self.velocities  = phonon.group_vel[ self.indexes[:,0], self.indexes[:,1], : ]  # THz * angstrom
+
+    def randomize_drift_directions(self):
+        '''Randomize signs of the components''' # NEED TO CHECK IF JUST FLIPPING SIGNS IS CORRECT - PROBABLY NOT - BUT METHOD IS NECESSARY
+
+        random_directions = np.random.rand(self.N_p, 3)*2-1
+        random_directions = np.sign(random_directions)
+
+        self.velocities *= random_directions
+
+    def calculate_distances(self, main_position):
+        '''Calculates de distance from a given phonon or group of phonons (main position) in relation to all others'''
+        distances = main_position-self.positions.reshape(-1, 1, 3)
+        distances = distances**2
+        distances = distances.sum(axis = 2)
+        distances = distances**(1/2)
+        return distances
+
+    def locate_all_neighbours(self, position, radius):
+        '''Locates neighbours within radius for every particle.'''
+        distances = self.calculate_distances(position)
+        self.neighbours = (distances<=radius).astype(int)   # mask matrix classifying as neighbours (1) or not (0) all other particles (columns) for each particle (lines)
+    
+    def initialise_temperatures(self, geometry, key = 'random'):
+        '''Atribute initial temperatures according to the geometry. Randomly within delta T unless specified otherwise.'''
+
+        # DO THESE FUNCTIONS MATTER? THE IMPORTANT SHOULD BE THE END RESULT ANYWAY, INDEPENDENTLY OF THE STARTING DISTRIBUTION, THOUGH SURELY THEY MAY HELP CONVERGENCE SPEED.
+
+        if   key == 'random':
+            self.temperatures = np.random.rand(self.N_p)*(geometry.T_diff) + geometry.T_f
+        elif key == 'linear':
+            pass # need to get positions. See how to do it with different geometries.
+        elif key == 'constant_hot':
+            self.temperatures = np.ones(self.N_p)*geometry.T_h
+        elif key == 'constant_cold':
+            self.temperatures = np.ones(self.N_p)*geometry.T_c
+        elif key == 'constant_mean':
+            self.temperatures = np.ones(self.N_p)*geometry.T_mean
+        
+    def calculate_occupation(self):
+        '''Occupation number of a mode given T'''
+        self.occupation = 1/(np.exp(self.hbar*self.frequencies/self.kb * self.temperatures)-1)
+
+    def calculate_local_energies(self):
+        '''Calculates local energies for every particle'''
+
+        self.energies = self.hbar*self.frequencies*(0.5+self.occupation)
+
+    def refresh_temperatures(self, geometry):
+        '''Refresh temperatures while enforcing boundary conditions as given by geometry.'''
+        # DO
+        pass
+
+
+    def drift(self, geometry):
+        '''Drift operation.'''
+
+        self.positions += self.velocities*geometry.dt*1e-12     # adjustment to angstrom/s
+
+    def check_boundaries(self, geometry):
+        '''Check boundaries and apply reflection or periodic boundary conditions.'''
+        pass
 
 
 

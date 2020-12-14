@@ -2,6 +2,23 @@ import os
 from datetime import datetime
 import numpy as np
 from thermal_cond_module import *
+import argparse
+
+# Setting arguments:
+
+parser = argparse.ArgumentParser()
+
+parser.add_argument('--geometry'   , '-g' , help='Geometry of the domain.'                             , default = 'cuboid'          , type = str  , nargs = 1  ) # SET SOME STANDARD SIMPLE GEOMETRIES (POLYHEDRA, CIRCLE, HEMISPHERE, ETC), AND MAYBE THINK ABOUT IMPORTING EXTERNAL GEOMETRIES, DEFINED BY AN OBJ FILE, FOR EXAMPLE. THE PYMESH MODULE COULD HELP WITH THAT.
+parser.add_argument('--dimensions' , '-d' , help='Dimensions in angstroms according to given geometry.', default = [1, 1, 1]         , type = float, nargs = '*') # number of dimensions may vary with geometry
+parser.add_argument('--particles'  , '-p' , help='Number of particles.'                                , default = 100               , type = int  , nargs = 1  )
+parser.add_argument('--timestep'   , '-t' , help='Timestep size in seconds'                            , default = 0.01              , type = float, nargs = 1  )
+parser.add_argument('--iterations' , '-i' , help='Number of timesteps (iterations) to be run'          , default = 1000              , type = int  , nargs = 1  )
+parser.add_argument('--bound_cond' , '-bc', help='Set boundary conditions'                             , default = [(0,290),(5, 300)], type = int  , nargs = '*') # THOUGHT ABOUT GIVING NUMBERS FOR IMPOSED TEMPERATURE, 'ISO' FOR ISOLATED AND 'PER' FOR PERIODIC. STUDY WICH TYPES OF BOUNDARY CONDITIONS TO USE. NEED TO INDICATE FACES. THIS COULD GIVE FLEXIBILITY IF LOADING A CUSTOM GEOMETRY.
+
+parser.add_argument('--poscar_file', '-pf', help='Set the POSCAR file to be read.', required = True, type = str) # lattice properties
+parser.add_argument('--hdf_file'   , '-hf', help='Set the hdf5 file to be read.'  , required = True, type = str) # phonon properties of the material
+
+args = parser.parse_args()
 
 # getting start time
 
@@ -12,47 +29,18 @@ print("Year: {:<4d}, Month: {:<2d}, Day: {:<2d}".format(start_time.year, start_t
 print("Start at: {:<2d} h {:<2d} min {:<2d} s".format(start_time.hour, start_time.minute, start_time.second))	
 print(' ---------- o ----------- o ------------- o ------------')
 
-# taking user input
-
-filename = 'kappa-m20206.hdf5' #input("Data filename: ")
-
-T_c = float(input("HOT temperature in K: ") )
-T_f = float(input("COLD temperature in K: ") )
-
-(L_x, L_y, L_z) = input("Dimensions L_x, L_y, L_z: ").split(',')
-
-L_x = float(L_x)
-L_y = float(L_y)
-L_z = float(L_z)
-
-(N_x, N_y, N_z) = input("Number of cells N_x, N_y, N_z: ").split(',')
-
-N_x = int(N_x)
-N_y = int(N_y)
-N_z = int(N_z)
-
-dt = float(input("Timestep: "))
-
-N_dt = int(input("Number of timesteps: "))
-
 # initialising grid
 
-grid = Grid()
+geo = Geometry(args)
 
-grid.set_dimensions(L_x, L_y, L_z)
-grid.set_cells(N_x, N_y, N_z)
-grid.set_boundaries()
-grid.set_temperature(T_c, T_f)
+geo.set_dimensions()
 
 # opening file
 
-phonons = Phonon()
-phonons.load_properties(filename)
+phonons = Phonon(args)
+phonons.load_properties()
 
-k = np.random.rand(3)
+pop = Population(args, geo)
 
-print(k, phonons.get_frequency(k, 0))
-
-
-
+print(pop.positions)
 
