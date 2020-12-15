@@ -5,6 +5,7 @@ import numpy as np
 import scipy.stats as st
 # from scipy.interpolate import RegularGridInterpolator as rg
 import copy
+import time
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -15,33 +16,36 @@ import h5py
 import dpdata
 from thermal_cond_module import *
 
-hdf5_file = 'kappa-m20206.hdf5'
-poscar_file = 'POSCAR-unitcell'
+import pymesh as pm
+import pywavefront as pwf
+from pywavefront import visualization
 
-data_poscar = dpdata.System(poscar_file, fmt = 'vasp/poscar') 
+body = pm.load_mesh('std geo/untitled.stl')
+body.enable_connectivity()
 
-phonon = Phonon()
-phonon.load_properties(hdf5_file, poscar_file)
 
-population = Population(10000)
-population.atribute_modes(phonon)
-population.atribute_properties(phonon)
+for i in range(10):
 
-v_old = copy.deepcopy(population.velocities)
+    n = 10**i
 
-population.randomize_drift_directions()
+    start = time.time()
 
-v_new = copy.deepcopy(population.velocities)
+    point = np.random.rand(n,3)*6-3
 
-print(np.any( np.abs(v_new-v_old)>0) )
+    wind = pm.compute_winding_number(body, point)
 
-branches = phonon.frequency.shape[1]
-q_points = phonon.frequency.shape[0]
+    end = time.time()
 
-fig = plt.figure()
-ax = fig.add_subplot(111)
+    
 
-ax.hist(population.indexes[:,0], bins = q_points)
+    print('10^{} - {:.3f} sec'.format(i, end-start))
 
-plt.tight_layout()
-plt.show()
+# fig = plt.figure()
+# ax = fig.add_subplot(111, projection='3d')
+
+# ax.scatter(closest_pts[:,0], closest_pts[:,1], closest_pts[:,2], marker='o', color='b')
+# ax.scatter(point[:,0], point[:,1], point[:,2], marker='o', color='r')
+# ax.scatter(body.vertices[:,0], body.vertices[:,1], body.vertices[:,2], marker='o', color='g')
+
+# plt.tight_layout()
+# plt.show()

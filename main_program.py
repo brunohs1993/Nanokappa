@@ -4,6 +4,11 @@ import numpy as np
 from thermal_cond_module import *
 import argparse
 
+import matplotlib
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import matplotlib.cm as cm
+
 # Setting arguments:
 
 parser = argparse.ArgumentParser()
@@ -42,5 +47,14 @@ phonons.load_properties()
 
 pop = Population(args, geo)
 
-print(pop.positions)
+print(phonons.group_vel.shape)
 
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+
+band = 0
+
+ax.scatter(np.abs(phonons.group_vel[:,band,0]), np.abs(phonons.group_vel[:,band,1]), np.abs(phonons.group_vel[:,band,2]), cmap='flag')
+
+plt.tight_layout()
+plt.show()

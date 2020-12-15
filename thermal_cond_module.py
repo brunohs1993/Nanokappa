@@ -3,6 +3,8 @@ import h5py
 import dpdata
 import scipy.constants as ct
 import phonopy
+import pymesh as pm
+
 # from scipy.interpolate import LinearNDInterpolator, griddata
 
 class Constants:
@@ -14,8 +16,7 @@ class Constants:
 
 #   TO DO
 #
-#   - Think about definition of geometry. Simple, standard geometries (polyhedra) will be a good exercise to test this. Pymesh allows working with .obj files, indexing vertices, edges and faces. Allows to import external geometries.
-#   - This also has to do with the optimisation/AI process to be implemented later. Which variables will we be dealing with? If optimising geometry we could have points coordinates, but depending of the complexity of geometry there would be too many variables.
+#   - 
 
 class Geometry:
     def __init__(self, arguments):
@@ -35,7 +36,9 @@ class Geometry:
             self.L_z = self.dimensions[2]
 
     def set_boundary_cond(self):
-        # THINKING ABOUT IMPOSING BOUNDARY CONDITIONS IN COLLISION DETECTION: WHEN A PARTICLE COLLIDES WITH A BOUNDARY, THE TEMPERATURE OF THE BOUNDARY IS IMPOSED TO THAT PARTICLE (WHEN APPLICABLE). BUT FIRST I NEED TO THINK ON HOW TO DEFINE FACES.
+        # THINKING ABOUT IMPOSING BOUNDARY CONDITIONS IN COLLISION DETECTION: WHEN A PARTICLE
+        # COLLIDES WITH A BOUNDARY, THE TEMPERATURE OF THE BOUNDARY IS IMPOSED TO THAT PARTICLE
+        # (WHEN APPLICABLE). BUT FIRST I NEED TO THINK ON HOW TO DEFINE FACES.
         
         self.bound_cond = np.array(self.args.bound_cond)
 
@@ -183,14 +186,6 @@ class Population(Constants):
         self.frequencies = phonon.omega[ self.indexes[:,0], self.indexes[:,1] ]         # rad/s
         self.wavevectors = phonon.q_points[ self.indexes[:,0] ]                         # reduced reciprocal coordinates
         self.velocities  = phonon.group_vel[ self.indexes[:,0], self.indexes[:,1], : ]  # THz * angstrom
-
-    def randomize_drift_directions(self):
-        '''Randomize signs of the components''' # NEED TO CHECK IF JUST FLIPPING SIGNS IS CORRECT - PROBABLY NOT - BUT METHOD IS NECESSARY
-
-        random_directions = np.random.rand(self.N_p, 3)*2-1
-        random_directions = np.sign(random_directions)
-
-        self.velocities *= random_directions
 
     def calculate_distances(self, main_position):
         '''Calculates de distance from a given phonon or group of phonons (main position) in relation to all others'''
