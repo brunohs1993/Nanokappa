@@ -3,6 +3,7 @@ import h5py
 import dpdata
 import scipy.constants as ct
 import phonopy
+import trimesh as tm
 import pymesh as pm
 
 # from scipy.interpolate import LinearNDInterpolator, griddata
@@ -142,13 +143,20 @@ class Phonon(Constants):
         '''Calculate an array of energy levels to recalculate T'''
         self.energy_levels = self.crystal_energy(self.temperature_array)
     
+    # FOR LAURENT DO EDIT:
+
+    def build_full_bz(self, symetry):
+        return
+
+
+
 #=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=
 
 #   TO DO
 #
 #   - Set units to the positions
 #   - Drift, scatter functions
-#   - Collision detection with boundaries to impose boundary conditions. How to detect collision efficiently?
+#   - Collision with trimesh ray function
 #   - Transport equations
 #   - 
 #   - 
@@ -159,7 +167,8 @@ class Population(Constants):
 
     def __init__(self, arguments, geometry):
         self.args = arguments
-        self.N_p = self.args.particles
+        self.N_p  = self.args.particles
+        self.dt   = self.args.timestep
 
         self.initialise_positions(geometry)
 
@@ -183,16 +192,18 @@ class Population(Constants):
     def atribute_properties(self, phonon):
         '''Get properties from the indexes.'''
 
-        self.frequencies = phonon.omega[ self.indexes[:,0], self.indexes[:,1] ]         # rad/s
-        self.wavevectors = phonon.q_points[ self.indexes[:,0] ]                         # reduced reciprocal coordinates
-        self.velocities  = phonon.group_vel[ self.indexes[:,0], self.indexes[:,1], : ]  # THz * angstrom
+        self.omega          = phonon.omega[ self.indexes[:,0], self.indexes[:,1] ]          # rad/s
+        self.q_points       = phonon.q_points[ self.indexes[:,0] ]                          # reduced reciprocal coordinates
+        self.group_vel      = phonon.group_vel[ self.indexes[:,0], self.indexes[:,1], : ]   # THz * angstrom
+        self.group_vel_norm = np.norm(self.group_vel, axis = 1)                             # Absolute value of group velocity in the same unit
 
     def calculate_distances(self, main_position):
         '''Calculates de distance from a given phonon or group of phonons (main position) in relation to all others'''
         distances = main_position-self.positions.reshape(-1, 1, 3)
-        distances = distances**2
-        distances = distances.sum(axis = 2)
-        distances = distances**(1/2)
+        distances = np.norm(distances, axis = 2)
+        # distances = distances**2
+        # distances = distances.sum(axis = 2)
+        # distances = distances**(1/2)
         return distances
 
     def locate_all_neighbours(self, position, radius):
@@ -218,12 +229,12 @@ class Population(Constants):
         
     def calculate_occupation(self):
         '''Occupation number of a mode given T'''
-        self.occupation = 1/(np.exp(self.hbar*self.frequencies/self.kb * self.temperatures)-1)
+        self.occupation = 1/(np.exp(self.hbar*self.omega/self.kb * self.temperatures)-1)
 
     def calculate_local_energies(self):
         '''Calculates local energies for every particle'''
 
-        self.energies = self.hbar*self.frequencies*(0.5+self.occupation)
+        self.energies = self.hbar*self.omega*(0.5+self.occupation)
 
     def refresh_temperatures(self, geometry):
         '''Refresh temperatures while enforcing boundary conditions as given by geometry.'''
@@ -234,11 +245,33 @@ class Population(Constants):
     def drift(self, geometry):
         '''Drift operation.'''
 
-        self.positions += self.velocities*geometry.dt*1e-12     # adjustment to angstrom/s
+        self.positions += self.group_vel*self.dt*1e-12     # adjustment to angstrom/s
 
     def check_boundaries(self, geometry):
         '''Check boundaries and apply reflection or periodic boundary conditions.'''
         pass
+
+    def find_collision_face(self, mesh):
+        '''Finds which mesh triangle the particle will hit, given an initial position and velocity
+        direction. It works with individual particles as well with a group of particles.
+        Returns: array of faces indexes for each particle'''
+
+        return mesh.ray.intersects_first(self.positions, self.group_vel)
+
+    def calculate_time_to_collision(self, mesh, indexes = 'all'):
+        '''Calculate how many timesteps to collision.
+           indexes = array of indexes of the particles'''
+
+        if indexes == 'all':
+            indexes = np.arange(self.N_p)    # all particles
+        
+        collision_locations = map(mesh.ray.ray_triangle_id, )
+
+
+
+
+
+
 
 
 
