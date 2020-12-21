@@ -17,30 +17,36 @@ class Constants:
 
 #   TO DO
 #
-#   - 
+#   - Using pymesh, maybe this becomes unnecessary?
 
 class Geometry:
     def __init__(self, arguments):
         
         self.args = arguments
 
-        self.shape = self.args.geometry
+        self.standard_shapes = ['cuboid', 'cillinder', 'sphere']
         self.dimensions = self.args.dimensions
+
+    def load_geo_file(self):
+        '''Load the file informed in --geometry.'''
+        
+        self.shape = self.args.geometry
+
+        if self.shape in self.standard_shapes:
+            self.shape = 'std_geo/'+self.shape+'.stl'
+        
+        self.mesh = pm.load_mesh(self.shape)
+
+    def get_mesh_properties(self):
+        self.bbox = self.mesh.bbox
+        self.
 
     def set_dimensions(self):
 
         self.dimensions = np.array(self.args.dimensions)
 
-        if self.args.geometry == 'cuboid':
-            self.L_x = self.dimensions[0]
-            self.L_y = self.dimensions[1]
-            self.L_z = self.dimensions[2]
-
     def set_boundary_cond(self):
-        # THINKING ABOUT IMPOSING BOUNDARY CONDITIONS IN COLLISION DETECTION: WHEN A PARTICLE
-        # COLLIDES WITH A BOUNDARY, THE TEMPERATURE OF THE BOUNDARY IS IMPOSED TO THAT PARTICLE
-        # (WHEN APPLICABLE). BUT FIRST I NEED TO THINK ON HOW TO DEFINE FACES.
-        
+                
         self.bound_cond = np.array(self.args.bound_cond)
 
 #=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=
@@ -49,10 +55,6 @@ class Geometry:
 #
 #   - Get the wave vector in cartesian coordinates.
 #   - Think in how to get the direct or cartesian coordinates of atoms positions from POSCAR file.
-#   - 
-#   - 
-#   - 
-#   - 
 #   - 
 
 class Phonon(Constants):    
@@ -104,7 +106,7 @@ class Phonon(Constants):
     
     def load_weights(self):
         '''weights shape = q_points '''
-        self.weights = np.array(self.data_hdf['weight'])    # Question: what is this weight??
+        self.weights = np.array(self.data_hdf['weight'])
 
     def load_temperature(self):
         '''temperature_array shape = temperatures '''
@@ -142,6 +144,15 @@ class Phonon(Constants):
     def load_energy_levels(self):
         '''Calculate an array of energy levels to recalculate T'''
         self.energy_levels = self.crystal_energy(self.temperature_array)
+
+    # FOR LAURENT TO BUILD FULL BRELLOUIN ZONE
+    # My idea is to have a method to return all properties (omega, q_points, etc) in the fbz
+
+    def build_fbz(self):
+        
+        self.omega = 
+        
+        return 
     
     # FOR LAURENT DO EDIT:
 
@@ -154,7 +165,6 @@ class Phonon(Constants):
 
 #   TO DO
 #
-#   - Set units to the positions
 #   - Drift, scatter functions
 #   - Collision with trimesh ray function
 #   - Transport equations
@@ -172,11 +182,27 @@ class Population(Constants):
 
         self.initialise_positions(geometry)
 
-
     def initialise_positions(self, geometry):
         '''Initialise positions of phonons: normalised coordinates'''
-        if geometry.shape == 'cuboid':
-            self.positions = np.random.rand(self.N_p, 3)*np.array([geometry.L_x, geometry.L_y, geometry.L_z])
+        
+        # Get geometry bounding box
+        bbox = geometry.bbox
+        bbox_range = bbox[1,:]- bbox[0,:]
+
+        self.positions = np.random.rand(self.N_p, 3)*bbox_range + bbox[0,:] # Generate random points inside bounding box
+        self.positions, points_out = self.remove_out_points(geometry)       # Remove points outside mesh
+
+        while self.positions.shape[0] != self.N_p:
+            # Keep generating points until all of them are inside the mesh
+            new_positions = np.random.rand(points_out, 3)*bbox_range + bbox[0,:] # generate new
+            new_positions, points_out = self.remove_out_points(geometry)         # check which are inside
+            self.positions = np.append(self.positions, new_positions, 0)         # add the good ones
+
+    def remove_out_points(self, geometry):
+        '''Remove points outside the geometry mesh.'''
+        out_points = pm.compute_winding_number(geometry, self.positions)
+        indexes = np.where(out_points == 0)[0]
+        return np.delete(self.positions, indexes, 0), np.indexes.shape[0]
     
     def atribute_modes(self, phonon):
         '''Randomly generate indexes according to an uniform distribution, linking particle positions and phonon properties.'''
@@ -229,12 +255,12 @@ class Population(Constants):
         
     def calculate_occupation(self):
         '''Occupation number of a mode given T'''
-        self.occupation = 1/(np.exp(self.hbar*self.omega/self.kb * self.temperatures)-1)
+        self.occupation = 1/(np.exp( self.hbar*self.omega / (self.kb * self.temperatures) )-1)
 
     def calculate_local_energies(self):
         '''Calculates local energies for every particle'''
 
-        self.energies = self.hbar*self.omega*(0.5+self.occupation)
+        self.energies = self.hbar*self.omega*(0.5+self.occupation) 
 
     def refresh_temperatures(self, geometry):
         '''Refresh temperatures while enforcing boundary conditions as given by geometry.'''
