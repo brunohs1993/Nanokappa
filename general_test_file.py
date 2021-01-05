@@ -3,7 +3,6 @@
 
 import numpy as np
 import scipy.stats as st
-# from scipy.interpolate import RegularGridInterpolator as rg
 import copy
 import time
 
@@ -13,39 +12,50 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.cm
 
 import h5py
-import dpdata
 from thermal_cond_module import *
 
-import pymesh as pm
-import pywavefront as pwf
-from pywavefront import visualization
+import trimesh
+import pyiron.vasp.structure as pistr
 
-body = pm.load_mesh('std geo/untitled.stl')
-body.enable_connectivity()
+phonons = h5py.File('kappa-m20206.hdf5')
+
+gamma = np.array(phonons['gamma'])
+
+tau = np.where(gamma>0, 1/(4*np.pi*gamma), 0)
+
+print( (gamma == 0).sum(), (gamma.shape[0]*gamma.shape[1]*gamma.shape[2]) )
+
+quit()
 
 
-for i in range(10):
 
-    n = 10**i
+body = trimesh.load_mesh('std_geo/untitled.stl')    # load mesh
 
-    start = time.time()
+atoms = pistr.read_atoms('POSCAR-unitcell')
 
-    point = np.random.rand(n,3)*6-3
 
-    wind = pm.compute_winding_number(body, point)
+n = 100
 
-    end = time.time()
+point    = np.random.rand(n,3)*4-2
 
-    
+velocity = np.random.rand(n,3)-0.5
 
-    print('10^{} - {:.3f} sec'.format(i, end-start))
+faces, rays = body.ray.intersects_id(point, velocity, multiple_hits = False)    # check colisions
 
-# fig = plt.figure()
-# ax = fig.add_subplot(111, projection='3d')
+print(faces)
+print(rays )
 
-# ax.scatter(closest_pts[:,0], closest_pts[:,1], closest_pts[:,2], marker='o', color='b')
-# ax.scatter(point[:,0], point[:,1], point[:,2], marker='o', color='r')
-# ax.scatter(body.vertices[:,0], body.vertices[:,1], body.vertices[:,2], marker='o', color='g')
+is_in = body.contains(point)    # check inside
 
-# plt.tight_layout()
-# plt.show()
+in_ind  = np.where(is_in == True)[0]
+out_ind = np.where(is_in == False)[0]
+
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+
+ax.scatter(point[in_ind ,0], point[in_ind ,1], point[in_ind ,2], marker='o', color='r')
+ax.scatter(point[out_ind,0], point[out_ind,1], point[out_ind,2], marker='o', color='b')
+ax.scatter(body.vertices[:,0], body.vertices[:,1], body.vertices[:,2], marker='o', color='g')
+
+plt.tight_layout()
+plt.show()
