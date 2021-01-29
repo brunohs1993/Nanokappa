@@ -25,6 +25,10 @@ import trimesh.ray.ray_pyembree
 # other
 import sys
 
+# laurent
+import math
+from phonopy import Phonopy
+from phonopy.interface.calculator import read_crystal_structure
 
 np.set_printoptions(precision=3, threshold=sys.maxsize)
 
@@ -118,24 +122,65 @@ class Phonon(Constants):
     def load_properties(self):
         '''Initialise all phonon properties from input files.'''
 
+        #### we have to discuss for the following ####
+        unitcell, _ = read_crystal_structure(self.args.poscar_file, interface_mode='vasp')
+        lattice = unitcell.get_cell()   # vectors as lines
+        reciprocal_lattice = np.linalg.inv(lattice)*2*math.pi # vectors as columns
+
+        phonon = Phonopy(unitcell,
+                    [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+                    primitive_matrix=[[1, 0, 0], 
+                                      [0, 1, 0], 
+                                      [0, 0, 1]])
+
+        symmetry_obj = phonon.primitive_symmetry
+        rotations = symmetry_obj.get_reciprocal_operations()
+        #############################################
+
         self.load_hdf_data(self.args.hdf_file)
-        self.load_frequency()
-        self.convert_to_omega()
-        
+
         self.load_q_points()
         self.load_weights()
-        self.load_group_vel()
-        self.load_temperature()
-        self.load_heat_cap()
-        self.load_gamma()
+
+        self.load_frequency()
+        qpoints_FBZ,frequency=expand_FBZ(0,self.weights,self.q_points,self.frequency,0,rotations,reciprocal_lattice)
+        self.frequency= frequency
+        self.convert_to_omega()
         
+        self.load_group_vel()
+        qpoints_FBZ,group_vel=expand_FBZ(0,self.weights,self.q_points,self.group_vel,1,rotations,reciprocal_lattice)
+        self.group_vel=group_vel
+
+        self.load_temperature()
+    
+        self.load_heat_cap()
+        qpoints_FBZ,heat_cap=expand_FBZ(1,self.weights,self.q_points,self.heat_cap,0,rotations,reciprocal_lattice)
+        self.heat_cap=heat_cap
+
+        self.load_gamma()
+        qpoints_FBZ,gamma=expand_FBZ(1,self.weights,self.q_points,self.gamma,0,rotations,reciprocal_lattice)
+        self.gamma=gamma
+
+        self.q_points=qpoints_FBZ
+        self.weights = np.ones((len(self.q_points[:,0]),))
+        self.number_of_qpoints = self.q_points.shape[0]
+        self.number_of_branches = self.frequency.shape[1]
+        self.number_of_modes = self.number_of_qpoints*self.number_of_branches
+
+        print('To describe phonons:')
+        print('	nq=',self.number_of_qpoints)
+        print(' nb=',self.number_of_branches)
+        print(' number of modes=', self.number_of_modes)
+
+        ### please explain the following during the next meeting
         self.rank_energies()
         self.calculate_lifetime()
         self.initialise_temperature_function()
         
         self.load_poscar_data(self.args.poscar_file)
+
+        ### I am surpised than you need lattice vectors, and nor reciprocal lattice vectors. Check that it is the same as "lattice" computed before.
         self.load_lattice_vectors()
-        
 
     def load_hdf_data(self, hdf_file,):
         ''' Get all data from hdf file.
@@ -152,9 +197,6 @@ class Phonon(Constants):
     def load_frequency(self):
         '''frequency shape = q-points X p-branches '''
         self.frequency = np.array(self.data_hdf['frequency']) # THz
-        self.number_of_qpoints = self.frequency.shape[0]
-        self.number_of_branches = self.frequency.shape[1]
-        self.number_of_modes = self.number_of_qpoints*self.number_of_branches
 
     def convert_to_omega(self):
         '''omega shape = q-points X p-branches '''
@@ -167,7 +209,6 @@ class Phonon(Constants):
     def load_q_points(self):
         '''q-points shape = q-points X reciprocal reduced coordinates '''
         self.q_points = np.array(self.data_hdf['qpoint'])   # reduced reciprocal coordinates
-        self.number_of_qpoints = self.q_points.shape[0]
     
     def load_weights(self):
         '''weights shape = q_points '''
@@ -221,11 +262,59 @@ class Phonon(Constants):
         self.energy_array = self.calculate_crystal_energy( self.temperature_array )
         self.temperature_function = interp1d( self.energy_array, self.temperature_array )
 
-    # FOR LAURENT TO BUILD FULL BRELLOUIN ZONE
-    # My idea is to have a method to return all properties (omega, q_points, etc) in the fbz
 
-    def build_fbz(self):        
-        return 
+def expand_FBZ(axis,weight,qpoints,tensor,rank,rotations,reciprocal_lattice):
+        # expand tensor from IBZ to BZ
+        # q is in the direction "axis" in tensor, and #rank cartesian coordinates the last
+
+       for i,q in enumerate(qpoints):
+           q_in_BZ = np.mod(q,1.0)
+           tq=np.take(tensor,i,axis=axis)
+
+           l_q=[]
+           l_t=[]
+
+           for r in rotations:
+               rot_q = np.dot(r, q_in_BZ)
+               l_q.append(rot_q)
+
+               r_cart = np.dot(reciprocal_lattice, np.dot(r, np.linalg.inv(reciprocal_lattice)))
+
+               if rank == 0:
+                  l_t.append(tq)
+               elif rank == 1:
+                  rot_t=np.dot(r_cart, tq.T).T
+                  l_t.append(rot_t)
+               else:
+                  sys.exit("error in exapand_FBZ: not coded")
+
+           star_mul=np.array(l_q, dtype='double', order='C')
+           star_mulv=np.array(l_t, dtype='double', order='C')
+
+           star_mul=np.mod(star_mul,1.0)
+           star_mul=np.around(star_mul, decimals=6)
+           star_q,return_index,return_inverse,return_counts=np.unique(star_mul,
+                                                               return_index=True,
+                                                               return_inverse=True,
+                                                               return_counts=True,
+                                                               axis=0)
+           if weight[i] != len(return_index) :
+               sys.exit("error in exapand_FBZ")
+
+           star_t=star_mulv[return_index]
+           #print(star_q.shape,star_t.shape)
+
+           if (i == 0):
+              qpoints_out=star_q
+              tensor_out=star_t
+           else:
+              qpoints_out=np.concatenate((qpoints_out,star_q),axis=0)
+              tensor_out=np.concatenate((tensor_out,star_t),axis=0)
+
+       tensor_out=np.swapaxes(tensor_out,0,axis)
+       return qpoints_out,tensor_out
+
+
     
 #=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=
 
