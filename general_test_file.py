@@ -2,60 +2,66 @@
 # EXAMPLES: VISUALISE DATA, TEST FUNCTIONS, TRY DIFFERENT CALCULATION METHODS
 
 import numpy as np
-import scipy.stats as st
-import copy
-import time
-
-import matplotlib
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-import matplotlib.cm
-
-import h5py
-from thermal_cond_module import *
-
-import trimesh
-import pyiron.vasp.structure as pistr
-
-phonons = h5py.File('kappa-m20206.hdf5')
-
-gamma = np.array(phonons['gamma'])
-
-tau = np.where(gamma>0, 1/(4*np.pi*gamma), 0)
-
-print( (gamma == 0).sum(), (gamma.shape[0]*gamma.shape[1]*gamma.shape[2]) )
-
-quit()
+import sys
+from scipy.interpolate import interp1d
+# from thermal_cond_module import *
+np.set_printoptions(precision=3, threshold=sys.maxsize, linewidth=np.nan)
 
 
+modes = 10
+branches = 5
+particles = 1000
+temperatures = 29
+dT = 0.1
+sample = 100
 
-body = trimesh.load_mesh('std_geo/untitled.stl')    # load mesh
+temperature_array = np.arange(10, 10+temperatures, dT)
 
-atoms = pistr.read_atoms('POSCAR-unitcell')
+mode_omega = np.random.rand(modes, branches)*100
+
+mode_occupation = 1/( np.exp( mode_omega/temperature_array.reshape(-1, 1, 1) ) - 1)
+
+mode_energy = mode_omega*(0.5+mode_occupation)
+
+particle_modes = np.random.rand(particles, 2)
+
+particle_modes[:,0] *= modes
+particle_modes[:,1] *= branches
+particle_modes = np.floor(particle_modes).astype(int)
+
+particle_omega = mode_omega[particle_modes[:,0], particle_modes[:,1]]
+
+particle_T = np.random.rand(particles)*temperature_array.ptp()+temperature_array.min()
+particle_occupation = 1/( np.exp( particle_omega/particle_T ) - 1)
+
+particle_energy = particle_omega*(0.5+particle_occupation)
+
+indexes = np.floor(np.random.rand(sample)*particles).astype(int)
+
+selected_modes = particle_modes[indexes, :]
+
+selected_energies = mode_energy[:, selected_modes[:,0], selected_modes[:,1]]
+
+mean_energies_T = selected_energies.sum(axis = 1)
+
+mean_energies_particles = particle_energy[indexes].sum()
+
+interpolated_T = interp1d(mean_energies_T, temperature_array, kind = 'cubic')(mean_energies_particles) 
+
+# print('Original energies and T:')
+# print(mean_energies_T, mean_energies_particles)
+# print(temperature_array, interpolated_T)
 
 
-n = 100
+particle_occupation[indexes] = 1/( np.exp( particle_omega[indexes]/interpolated_T ) - 1)
+particle_energy[indexes] = particle_omega[indexes]*(0.5+particle_occupation[indexes])
 
-point    = np.random.rand(n,3)*4-2
+print('Initial energy:', mean_energies_particles)
+print('Corrected mean energy:', particle_energy[indexes].sum())
 
-velocity = np.random.rand(n,3)-0.5
+print('Error:', (particle_energy[indexes].sum() - mean_energies_particles)*100/mean_energies_particles, '%')
 
-faces, rays = body.ray.intersects_id(point, velocity, multiple_hits = False)    # check colisions
 
-print(faces)
-print(rays )
 
-is_in = body.contains(point)    # check inside
 
-in_ind  = np.where(is_in == True)[0]
-out_ind = np.where(is_in == False)[0]
 
-fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
-
-ax.scatter(point[in_ind ,0], point[in_ind ,1], point[in_ind ,2], marker='o', color='r')
-ax.scatter(point[out_ind,0], point[out_ind,1], point[out_ind,2], marker='o', color='b')
-ax.scatter(body.vertices[:,0], body.vertices[:,1], body.vertices[:,2], marker='o', color='g')
-
-plt.tight_layout()
-plt.show()
