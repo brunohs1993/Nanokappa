@@ -1,8 +1,7 @@
 
 # calculations
 import numpy as np
-# import numpy.linalg
-import time
+from datetime import datetime
 
 import scipy.constants as ct
 from scipy.spatial.transform import Rotation as rot
@@ -17,21 +16,20 @@ from mpl_toolkits.mplot3d import Axes3D
 import h5py
 
 # crystal structure
-import phonopy
+# import phonopy
+from phonopy import Phonopy
+from phonopy.interface.calculator import read_crystal_structure
 import pyiron.vasp.structure
 
 # geometry
 import trimesh as tm
-import trimesh.ray.ray_pyembree
+from trimesh.ray.ray_pyembree import RayMeshIntersector
 
 # other
 import sys
+import os
 import copy
-
-# laurent
-import math
-from phonopy import Phonopy
-from phonopy.interface.calculator import read_crystal_structure
+from functools import partial
 
 np.set_printoptions(precision=3, threshold=sys.maxsize, linewidth=np.nan)
 
@@ -42,6 +40,7 @@ class Constants:
         self.hbar = ct.physical_constants['reduced Planck constant in eV s'  ][0]   # hbar in eV s
         # self.hbar = ct.physical_constants['Planck constant over 2 pi in eV s'][0]   # hbar in eV s
         self.kb   = ct.physical_constants['Boltzmann constant in eV/K'       ][0]   # kb in eV/K
+        self.ev_in_J = ct.physical_constants['electron volt'][0]                     # J/eV
 
 #=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=
 
@@ -56,16 +55,16 @@ class Geometry:
 
         self.standard_shapes = ['cuboid', 'cillinder', 'sphere']
         self.scale           = self.args.scale
-        self.dimensions      = self.args.dimensions
+        self.dimensions      = self.args.dimensions             # angstrom
         self.rotation        = np.array(self.args.rotation)
         self.rot_order       = self.args.rot_order
         self.shape           = self.args.geometry
 
         # Processing mesh
 
-        self.load_geo_file(self.shape)          # loading
-        self.transform_mesh()         # transforming
-        self.get_mesh_properties()    # defining useful properties
+        self.load_geo_file(self.shape)  # loading
+        self.transform_mesh()           # transforming
+        self.get_mesh_properties()      # defining useful properties
 
 
     def load_geo_file(self, shape):
@@ -116,6 +115,7 @@ class Geometry:
 #   - Think in how to get the direct or cartesian coordinates of atoms positions from POSCAR file.
 #   - 
 
+
 class Phonon(Constants):    
     ''' Class to get phonon properties and manipulate them. '''
     def __init__(self, arguments):
@@ -128,7 +128,7 @@ class Phonon(Constants):
         #### we have to discuss for the following ####
         unitcell, _ = read_crystal_structure(self.args.poscar_file, interface_mode='vasp')
         lattice = unitcell.get_cell()   # vectors as lines
-        reciprocal_lattice = np.linalg.inv(lattice)*2*math.pi # vectors as columns
+        reciprocal_lattice = np.linalg.inv(lattice)*2*np.pi # vectors as columns
 
         phonon = Phonopy(unitcell,
                     [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
@@ -169,8 +169,6 @@ class Phonon(Constants):
         self.number_of_qpoints = self.q_points.shape[0]
         self.number_of_branches = self.frequency.shape[1]
         self.number_of_modes = self.number_of_qpoints*self.number_of_branches
-        self.number_of_inactive_modes = int((self.frequency==0).sum())
-        self.number_of_active_modes = self.number_of_modes - self.number_of_inactive_modes   # adjustment to exclude modes of frequency 0
 
         print('To describe phonons:')
         print(' nq=',self.number_of_qpoints)
@@ -236,10 +234,13 @@ class Phonon(Constants):
     def load_gamma(self):
         '''gamma = temperatures X q-pointsX p-branches'''
         self.gamma = np.array(self.data_hdf['gamma'])   # THz
+        self.gamma = np.where(self.gamma > 0 , self.gamma, -1)
 
     def calculate_lifetime(self):
         '''lifetime = temperatures X q-pointsX p-branches'''
-        self.lifetime = np.where( self.gamma>0, 1/( 2*2*np.pi*self.gamma), 0)*1e12  # s
+
+        self.lifetime = np.where( self.gamma>0, 1/( 2*2*np.pi*self.gamma), 0)*1e-12  # s
+
         self.lifetime_function = [[interp1d(self.temperature_array, self.lifetime[:, i, j], kind = 'cubic') for j in range(self.number_of_branches)] for i in range(self.number_of_qpoints)]
         
     def load_lattice_vectors(self):
@@ -262,39 +263,20 @@ class Phonon(Constants):
         T = np.array(T)             # ensuring right type
         T = T.reshape( (-1, 1, 1) ) # ensuring right dimensionality
 
-        return self.calculate_energy(T, self.omega).sum( axis = (1, 2) )/self.number_of_active_modes
+        return self.calculate_energy(T, self.omega).sum( axis = (1, 2) )
 
     def initialise_temperature_function(self):
         '''Calculate an array of energy levels and initialises the function to recalculate T = f(E)'''
 
-        T_boundary = np.array([min(self.args.temperatures)-10, max(self.args.temperatures)+10]) # setting temperature interval with 10K of upper and lower margin
+        margin = 10
+        dT = 0.1
+        
+        T_boundary = np.array([min(self.args.temperatures)-margin, max(self.args.temperatures)+margin]) # setting temperature interval with 10K of upper and lower margin
 
-        T_array = np.arange(T_boundary.min(), T_boundary.max()+0.1, 0.1)    # defining discretisations
+        T_array = np.arange(T_boundary.min(), T_boundary.max()+dT, dT)    # defining discretisations
 
         self.energy_array = self.calculate_crystal_energy(T_array)
         self.temperature_function = interp1d( self.energy_array, T_array, kind = 'cubic' )
-
-        # plotting error for the T(e) function
-
-        # T_test_array = np.arange(T_boundary.min(), T_boundary.max()+0.01, 0.01)
-        # e_test_array = self.calculate_crystal_energy(T_test_array)
-
-        # error = self.temperature_function(e_test_array) - T_test_array
-
-        # fig = plt.figure()
-        # ax = fig.add_subplot(111)
-        # ax.plot(e_test_array, T_test_array, '--', c = 'k')
-        # ax.plot(e_test_array, self.temperature_function(e_test_array), '--', c = 'r',)
-        # plt.show()
-        
-        # fig = plt.figure()
-        # ax = fig.add_subplot(111)
-        # ax.plot(T_test_array, error, '--')
-        # plt.show()
-
-        # quit()
-
-
 
 def expand_FBZ(axis,weight,qpoints,tensor,rank,rotations,reciprocal_lattice):
         # expand tensor from IBZ to BZ
@@ -352,10 +334,13 @@ def expand_FBZ(axis,weight,qpoints,tensor,rank,rotations,reciprocal_lattice):
 #=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=
 
 #   TO DO
-#
-#   - Conservation of momentum (wavevector), umklapp scattering
-#   - Time
-#   - Refresh temperature
+#   - Generalise functions for other geometries --> calculate slice volume based on mesh
+#   - Add option to apply heat flux as boundary condition
+#   
+#   QUESTIONS
+#   
+#   - Do the q-poins even matter? Because they are not used in any calculation, and they
+#     can be recovered by using self.modes i.e. q-point and branch references.
 
 class Population(Constants):
     '''Class comprising the particles to be simulated.'''
@@ -372,7 +357,7 @@ class Population(Constants):
             self.N_p   = int(float(self.args.particles_ex[0]))
             self.exact = True
          
-        self.dt            = float(self.args.timestep)
+        self.dt            = float(self.args.timestep[0])
         self.n_of_slices   = self.args.slices[0]
         self.slice_axis    = self.args.slices[1]
         self.slice_length  = geometry.bounds[:, self.slice_axis].ptp()/self.n_of_slices
@@ -388,7 +373,11 @@ class Population(Constants):
         self.t = 0
 
         self.initialise_all_particles(phonon, geometry) # initialising particles
-        self.calculate_ts_lifetime(geometry)            # calculating timesteps [boundary, scatter]
+        self.initialise_reservoirs(geometry, phonon)            # initialise reservoirs
+        self.n_timesteps = self.timesteps_to_boundary(self.positions, self.group_vel, geometry) # calculating timesteps to boundary
+
+        self.conv_filename = self.args.conv_file
+        self.open_convergence(self.conv_filename)
 
         if len(self.rt_plot) > 0:
             
@@ -398,15 +387,23 @@ class Population(Constants):
     def initialise_modes(self, number_of_particles, phonon):
         '''Uniformily organise modes for a given number of particlesprioritising low energy ones.'''
 
-        part_p_mode = np.floor(number_of_particles/phonon.number_of_active_modes)    # particles per mode
+        part_p_mode = np.floor(number_of_particles/phonon.number_of_modes)    # particles per mode
 
-        ppm_array = (np.ones(phonon.number_of_active_modes)*part_p_mode).astype(int)
+        ppm_array = (np.ones(phonon.number_of_modes)*part_p_mode).astype(int)
 
-        lack = int(number_of_particles - part_p_mode*phonon.number_of_active_modes)    # lack of particles due to rounding
+        if self.exact: # if the exact number of particles is enforced
+
+            lack = int(number_of_particles - part_p_mode*phonon.number_of_modes)    # lack of particles due to rounding
+
+            lack_modes = np.where( np.delete(phonon.rank, [0, 1, 2]).reshape(-1) < lack )[0]    # modes to correct based on rank
+
+            ppm_array[lack_modes] += 1   # corrected number of particles per mode
         
-        lack_modes = np.where( np.delete(phonon.rank, [0, 1, 2]).reshape(-1) < lack )[0]    # modes to correct based on rank
+        else: # if not
+            ppm_array += 1  # add to all modes
 
-        ppm_array[lack_modes] += 1   # corrected number of particles per mode
+            self.N_p = ppm_array.sum()
+            number_of_particles = self.N_p
 
         modes = np.empty( (number_of_particles, 2) ) # initialising mode array
 
@@ -415,14 +412,12 @@ class Population(Constants):
         for i in range(phonon.number_of_qpoints):
             for j in range(phonon.number_of_branches):
 
-                if phonon.frequency[i, j] > 0:
+                index = int(i*phonon.number_of_branches+j)
 
-                    index = int(i*phonon.number_of_branches+j-phonon.number_of_inactive_modes)
+                modes[ counter:counter+ppm_array[index], 0] = i                         
+                modes[ counter:counter+ppm_array[index], 1] = j
 
-                    modes[ counter:counter+ppm_array[index], 0] = i                         
-                    modes[ counter:counter+ppm_array[index], 1] = j
-
-                    counter += ppm_array[index]
+                counter += ppm_array[index]
     
         return modes.astype(int), ppm_array
 
@@ -433,7 +428,7 @@ class Population(Constants):
         bounds = geometry.bounds
         bounds_range = bounds[1,:]- bounds[0,:]
 
-        positions = np.random.rand(number_of_particles, 3)*bounds_range + bounds[0,:] # Generate random points inside bounding box
+        positions = np.random.rand(number_of_particles, 3)*bounds_range + bounds[0,:] # Generate random points inside bounding box, positions in angstrom
         positions, points_out = self.remove_out_points(positions, geometry)       # Remove points outside mesh
 
         while positions.shape[0] != number_of_particles:
@@ -463,34 +458,139 @@ class Population(Constants):
         for i in range(phonon.number_of_qpoints):
             for j in range(phonon.number_of_branches):
 
-                if phonon.frequency[i, j] > 0:
+                index = int(i*phonon.number_of_branches+j)
                 
-                    index = int(i*phonon.number_of_branches+j-phonon.number_of_inactive_modes)
-                    
-                    self.positions[counter:counter+ppm_array[index], :] = self.generate_positions(ppm_array[index], geometry)
+                self.positions[counter:counter+ppm_array[index], :] = self.generate_positions(ppm_array[index], geometry)
 
-                    counter += ppm_array[index]
+                counter += ppm_array[index]
         
         self.temperatures = self.assign_temperatures(self.positions, geometry)
         
         # assigning properties from Phonon
-        self.omega, self.q_points, self.group_vel, self.lifetime, self.lifetime_functions = self.assign_properties(self.modes, self.temperatures, phonon)
+        self.omega, self.q_points, self.group_vel = self.assign_properties(self.modes, self.temperatures, phonon)
         
         self.occupation   = phonon.calculate_occupation(self.temperatures, self.omega)
         self.energies     = phonon.calculate_energy(self.temperatures, self.omega)
+
+    def initialise_reservoirs(self, geometry, phonon):
+        # coded at first for simple boxes at the extremities of reservoirs.
+
+        self.res1_active_modes = np.stack(np.meshgrid( np.arange(phonon.number_of_qpoints), np.arange(phonon.number_of_branches) ), axis = -1 ).reshape(-1, 2)
+        self.res2_active_modes = np.stack(np.meshgrid( np.arange(phonon.number_of_qpoints), np.arange(phonon.number_of_branches) ), axis = -1 ).reshape(-1, 2)
+
+
+        reservoir_length = self.slice_length
+
+        self.N_p_res = int(self.N_p/self.n_of_slices) # equivalent number of particles in that distance
+
+        self.bound_res1 = copy.deepcopy(geometry.bounds)
+        self.bound_res1[:, self.slice_axis] = np.array([-reservoir_length, 0])
+        
+        self.bound_res2 = copy.deepcopy(geometry.bounds)
+        self.bound_res2[:, self.slice_axis] = np.array([self.bound_res2[1, self.slice_axis], self.bound_res2[1, self.slice_axis]+reservoir_length])
+
+        # Generate first particles
+        self.fill_reservoirs(phonon)
+
+    def generate_reservoir_particles(self, box, modes):
+
+        '''Generates radomly particles and modes for reservoirs given their bounding box and phonon properties'''
+
+        # positions
+
+        positions_res = np.random.rand(self.N_p_res, 3)*np.ptp(box, axis = 0)+box[0,:]
+
+        # modes
+
+        modes_res = np.floor(np.random.rand(self.N_p_res)*modes.shape[0]).astype(int)
+        modes_res = modes[modes_res, :]
+
+        return positions_res, modes_res
+    
+    def fill_reservoirs(self, phonon):
+
+        # - positions and modes
+        self.positions_res1, self.modes_res1 = self.generate_reservoir_particles(self.bound_res1, self.res1_active_modes) #phonon)
+        self.positions_res2, self.modes_res2 = self.generate_reservoir_particles(self.bound_res2, self.res2_active_modes) #phonon)
+
+        # temperatures
+        self.temperatures_res1 = np.ones(self.N_p_res)*self.T_boundary[0]
+        self.temperatures_res2 = np.ones(self.N_p_res)*self.T_boundary[1]
+
+        # - assign angular frequencies, q points, group velocities and lifetimes
+        self.omega_res1, self.q_points_res1, self.group_vel_res1 = self.assign_properties(self.modes_res1, self.temperatures_res1, phonon)
+        self.omega_res2, self.q_points_res2, self.group_vel_res2 = self.assign_properties(self.modes_res2, self.temperatures_res2, phonon)
+
+        self.energies_res1 = phonon.calculate_energy(self.temperatures_res1, self.omega_res1)
+        self.energies_res2 = phonon.calculate_energy(self.temperatures_res2, self.omega_res2)
+
+        self.occupation_res1 = phonon.calculate_occupation(self.temperatures_res1, self.omega_res1)
+        self.occupation_res2 = phonon.calculate_occupation(self.temperatures_res2, self.omega_res2)
+        
+    def add_reservoir_particles(self, geometry, phonon):
+        '''Add the particles that came from the reservoir into the geometry. Similar to the boundary scattering method.'''
+        
+        positions    = np.vstack((self.positions_res1, self.positions_res2))
+        modes        = np.vstack((self.modes_res1    , self.modes_res2    ))
+        group_vel    = np.vstack((self.group_vel_res1, self.group_vel_res2))
+        q_points     = np.vstack((self.q_points_res1 , self.q_points_res2 ))
+
+        temperatures       = np.concatenate((self.temperatures_res1      , self.temperatures_res2      ))
+        omega              = np.concatenate((self.omega_res1             , self.omega_res2             ))
+        occupation         = np.concatenate((self.occupation_res1        , self.occupation_res2        ))
+        energies           = np.concatenate((self.energies_res1          , self.energies_res2          ))
+        
+
+        if (self.bound_cond == 'periodic') and (geometry.shape == 'cuboid'):    # applicable just for cuboids
+
+            check = positions >= geometry.bounds.reshape(2, 1, 3)    # True if less or equal than each bound value
+
+            check = check.sum(axis = 0) # this will result in 0 for numbers out of the lower limit, 1 for points inside the limits, 2 for outside de upper limit
+
+            # deleting particles that stil are in the reservoirs
+            indexes_del = (check[:, self.slice_axis] != 1)
+
+            positions    = positions[~indexes_del, :]
+            modes        = modes[~indexes_del, :]
+            check        = check[~indexes_del, :]
+
+            # applying periodicity
+            lower_points = np.where(check == 0, geometry.bounds[1,:] - positions % np.ptp(geometry.bounds, axis = 0), 0)
+            in_points    = np.where(check == 1, positions                                                           , 0)
+            upper_points = np.where(check == 2, geometry.bounds[0,:] + positions % np.ptp(geometry.bounds, axis = 0), 0)
+
+            new_positions = lower_points + in_points + upper_points
+
+            temperatures       = temperatures[~indexes_del]
+            omega              = omega[~indexes_del]
+            group_vel          = group_vel[~indexes_del, :]
+            occupation         = occupation[~indexes_del]
+            energies           = energies[~indexes_del]
+            q_points           = q_points[~indexes_del, :]
+
+            n_timesteps = self.timesteps_to_boundary(new_positions, group_vel, geometry)  # calculates ts until boundary scattering
+            
+        # add new particles to the population
+
+        self.positions          = np.vstack((self.positions  , new_positions))
+        self.modes              = np.vstack((self.modes      , modes      ))
+        self.q_points           = np.vstack((self.q_points   , q_points   ))
+        self.group_vel          = np.vstack((self.group_vel  , group_vel  ))
+        self.n_timesteps        = np.concatenate((self.n_timesteps, n_timesteps))
+        self.temperatures       = np.concatenate((self.temperatures      , temperatures      ))
+        self.omega              = np.concatenate((self.omega             , omega             ))
+        self.energies           = np.concatenate((self.energies          , energies          ))
+        self.occupation         = np.concatenate((self.occupation        , occupation        ))
 
     def assign_properties(self, modes, temperatures, phonon):
         '''Get properties from the indexes.'''
 
         omega              = phonon.omega[ modes[:,0], modes[:,1] ]        # rad/s
-        q_points           = phonon.q_points[ modes[:,0] ]                 # reduced reciprocal coordinates
-        group_vel          = phonon.group_vel[ modes[:,0], modes[:,1], : ] # THz * angstrom
+        q_points           = phonon.q_points[ modes[:,0], : ]                 # reduced reciprocal coordinates
+        group_vel          = phonon.group_vel[ modes[:,0], modes[:,1], : ] # Hz * angstrom
 
-        lifetime_functions = [phonon.lifetime_function[modes[i,0]][modes[i,1]] for i in range(modes.shape[0])]  # functions of lifetime for each particle
-        lifetime = np.array([lifetime_functions[i](temperatures[i]) for i in range(temperatures.shape[0])])
+        return omega, q_points, group_vel
 
-        return omega, q_points, group_vel, lifetime, lifetime_functions
-   
     def assign_temperatures(self, positions, geometry):
         '''Atribute initial temperatures imposing fixed temperatures on first and last slice. Randomly within delta T unless specified otherwise.'''
 
@@ -532,34 +632,99 @@ class Population(Constants):
     def refresh_temperatures(self, geometry, phonon):
         '''Refresh energies and temperatures while enforcing boundary conditions as given by geometry.'''
         slice_energy = np.empty(self.n_of_slices)
-        slice_temperature = np.empty(self.n_of_slices)
+        self.slice_temperature = np.empty(self.n_of_slices)
+        self.slice_heat_flux = np.empty(self.n_of_slices)
 
-        slice_energy_sum = np.empty(self.n_of_slices)
+        self.slice_id = np.empty(self.positions.shape[0])
 
         for i in range(self.n_of_slices):   # assign temperatures for particles in each slice
             indexes = (self.positions[:, self.slice_axis] >= i*self.slice_length) & (self.positions[:, self.slice_axis] < (i+1)*self.slice_length)
-            slice_energy[i]      = self.energies[indexes].mean()
-            slice_energy_sum[i]      = self.energies[indexes].sum()
 
-            slice_temperature[i] = phonon.temperature_function(slice_energy[i])
+            self.slice_id[indexes] = i
 
-            self.temperatures[indexes] = copy.deepcopy(slice_temperature[i])
+            slice_energy[i]      = self.energies[indexes].mean()*phonon.number_of_modes
+            self.slice_heat_flux[i] = self.calculate_heat_flux(indexes, geometry)
+            self.slice_temperature[i] = phonon.temperature_function( slice_energy[i] )
+            # self.slice_temperature[i] = self.calculate_slice_temperature(i, phonon) # THIS IS FOR DEBUGGING
 
-            self.energies[indexes] = phonon.calculate_energy(slice_temperature[i], self.omega[indexes])
+            self.temperatures[indexes] = copy.deepcopy(self.slice_temperature[i])
+
+    #=#=#=#=#=#=#=#=#=#=#= DEBUGGING / SPECULATION #=#=#=#=#=#=#=#=#=#=
+    # def calculate_slice_temperature(self, slice_index, phonon):
         
-        print(slice_energy_sum, self.energies.sum(), phonon.temperature_function(self.energies.mean()))
+    #     indexes = (self.slice_id == slice_index)
+
+    #     modes = self.modes[indexes]
+
+    #     unique_modes, unique_times = np.unique(modes, axis = 0, return_counts=True)
+
+    #     weights = np.zeros( (phonon.number_of_qpoints, phonon.number_of_branches) )
+
+    #     weights[unique_modes[:, 0], unique_modes[:,1]] = unique_times
+
+    #     if slice_index == 0:
+    #         T_min = self.T_boundary[0]
+    #     else:
+    #         T_min = self.slice_temperature[slice_index-1]
+        
+    #     if slice_index+1 == self.n_of_slices:
+    #         T_max = self.T_boundary[1]
+    #     else:
+    #         T_max = self.slice_temperature[slice_index+1]
+        
+    #     dT = (T_max-T_min)/100
+
+    #     T_array = np.arange(T_min-dT, T_max+2*dT, dT)
+
+    #     e_array = (phonon.calculate_energy(T_array.reshape(-1, 1, 1), phonon.omega)*weights).sum(axis = (1, 2) )
+
+    #     T_function = interp1d(e_array, T_array, kind = 'cubic')
+
+    #     energy = self.energies[indexes].sum()
+
+    #     return T_function(energy)
+
+
+    #=#=#=#=#=#=#=#=#=#=#= DEBUGGING / SPECULATION #=#=#=#=#=#=#=#=#=#=
+
+    def calculate_heat_flux(self, indexes, geometry):
+
+        group_vel = self.group_vel[indexes, self.slice_axis]   # angstrom * Hz
+
+        energies   = self.energies[indexes]     # eV
+        omega      = self.omega[indexes]        # rad/s
+        occupation = self.occupation[indexes]   # -
+
+        energies  = self.hbar*omega*occupation
+        
+        if geometry.shape == 'cuboid':
+            volume = np.delete(geometry.bounds, self.slice_axis, axis = 1)
+            volume = np.ptp(volume, axis = 0).prod()
+            volume *= self.slice_length                                      # angstrom^3
+
+        # For other geometries, check later:
+        # trimesh.mass_properties(volume)
+        
+        heat_flux = ((group_vel*energies).mean()/volume)*self.ev_in_J*1e20  # W/m²
+
+        return heat_flux
 
     def drift(self, geometry):
         '''Drift operation.'''
 
         self.positions += self.group_vel*self.dt
 
+        self.positions_res1 += self.group_vel_res1*self.dt
+        self.positions_res2 += self.group_vel_res2*self.dt
+
     def find_boundary(self, positions, velocities, geometry):
         '''Finds which mesh triangle will be hit by the particle, given an initial position and velocity
         direction. It works with individual particles as well with a group of particles.
         Returns: array of faces indexes for each particle'''
 
-        boundary_pos, index_ray, _ = geometry.ray.intersects_location(positions, velocities, multiple_hits=False)
+        boundary_pos, index_ray, _ = geometry.mesh.ray.intersects_location(ray_origins      = positions ,
+                                                                            ray_directions   = velocities,
+                                                                            multiple_hits    = False     )
 
         stationary = ~np.in1d(np.arange(positions.shape[0]), index_ray)   # find which particles have zero velocity, so no ray
 
@@ -583,86 +748,118 @@ class Population(Constants):
 
         return ts_to_boundary.astype(int)
     
-    def timesteps_to_scatter(self, lifetimes):
-        '''Calculate the number of timestepps until a particle scatters according to its lifetime.'''
-        return np.ceil(self.dt/lifetimes).astype(int)   # such that particle scatters when no_timesteps == 0 (decays)
-    
-    def calculate_ts_lifetime(self, geometry, indexes='all'):
-        '''Calculate number of timesteps until annihilation for particles given their indexes in the population.'''
-
-        if indexes == 'all':
-            indexes = np.arange(self.N_p)
-            self.n_timesteps = np.empty( (self.N_p, 2) )
-        
-        new_ts_to_boundary = self.timesteps_to_boundary(self.positions[indexes, :], self.group_vel[indexes, :], geometry.mesh)  # calculates ts until boundary scattering
-
-        new_ts_to_scatter   = self.timesteps_to_scatter(self.lifetime[indexes]) # calculates ts until scatter according to lifetime
-
-        self.n_timesteps[indexes, 0] = new_ts_to_boundary   # saves boundary scattering timestep counter
-        self.n_timesteps[indexes, 1] = new_ts_to_scatter    # saves scatter timestep counter
-
     def delete_particles(self, indexes):
         '''Delete all information about particles according to the given indexes'''
 
-        self.positions    = self.positions[~indexes]
-        self.q_points     = self.q_points[~indexes]
-        self.group_vel    = self.group_vel[~indexes]
-        self.omega        = self.omega[~indexes]
-        self.lifetime     = self.lifetime[~indexes]
-        self.energies     = self.energies[~indexes]
-        self.occupation   = self.occupation[~indexes]
-        self.temperatures = self.temperatures[~indexes]
+        self.positions          = np.delete(self.positions         , indexes, axis = 0)
+        self.q_points           = np.delete(self.q_points          , indexes, axis = 0)
+        self.group_vel          = np.delete(self.group_vel         , indexes, axis = 0)
+        self.omega              = np.delete(self.omega             , indexes, axis = 0)
+        self.energies           = np.delete(self.energies          , indexes, axis = 0)
+        self.occupation         = np.delete(self.occupation        , indexes, axis = 0)
+        self.temperatures       = np.delete(self.temperatures      , indexes, axis = 0)
+        self.n_timesteps        = np.delete(self.n_timesteps       , indexes, axis = 0)
+        self.modes              = np.delete(self.modes             , indexes, axis = 0)
     
-    def generate_new_particles(self, number_of_particles, geometry, slice_index = 'all'):
-        
-        if slice_index == 'all':
-            positions = np.random.rand(number_of_particles)
-    
-    def boundary_scattering(self, indexes, geometry):
+    def boundary_scattering(self, geometry):
         '''Applies boundary scattering or other conditions to the particles where it happened, given their indexes.'''
 
-        positions = self.positions[indexes]
-        modes     = self.modes[indexes]
+        indexes = self.n_timesteps <= 0   # find all boundary scattering particles
+
+        positions = self.positions[indexes, :]
+        modes     = self.modes[indexes, :]
+        reference = np.where(indexes)[0]
+        group_vel = self.group_vel[indexes, :]
 
         if (self.bound_cond == 'periodic') and (geometry.shape == 'cuboid'):    # applicable just for cuboids
 
-            check = positions >= geometry.bounds.reshape(2, 1, 3)    # True if less or equal than each bound value
+            check = positions >= geometry.bounds.reshape(2, 1, 3)    # True if plus or equal than each bound value
 
-            check = check.sum(axis = 0) # this will result in 0 for numbers out of the lower limit, 1 for points inside the limits, 2 for outside de upper limit
+            check = check.sum(axis = 0).round().astype(int) # this will result in 0 for numbers out of the lower limit, 1 for points inside the limits, 2 for outside de upper limit
 
-            lower_points = np.where(check == 0, positions + np.ptp(geometry.bounds, axis = 0), 0)
-            in_points    = np.where(check == 1, positions                                    , 0)
-            upper_points = np.where(check == 2, positions - np.ptp(geometry.bounds, axis = 0), 0)
+            # deleting particles that are in the reservoirs
+            indexes_del = (check[:, self.slice_axis] != 1)
+
+            positions = positions[~indexes_del, :]
+            modes     = modes[~indexes_del, :]
+            check     = check[~indexes_del, :]
+            group_vel = group_vel[~indexes_del, :]
+
+            # applying periodicity
+
+            lower_points = np.where(check == 0, geometry.bounds[1,:] - positions % np.ptp(geometry.bounds, axis = 0), 0)
+            in_points    = np.where(check == 1, positions                                                           , 0)
+            upper_points = np.where(check == 2, geometry.bounds[0,:] + positions % np.ptp(geometry.bounds, axis = 0), 0)
 
             new_positions = lower_points + in_points + upper_points
-            new_modes = modes
-            
-        return new_positions, new_modes
 
-
-    def scatter(self, geometry, phonon):
+            new_ts_to_boundary = self.timesteps_to_boundary(new_positions, group_vel, geometry)  # calculates new ts until boundary scattering
         
-        # boundary_indexes = self.n_timesteps[:,0] <= 0   # find all boundary scattering particles
+            indexes = np.delete(indexes, reference[indexes_del])
+            self.delete_particles(reference[indexes_del])
+            
+            self.positions[indexes, :] = new_positions
+            self.n_timesteps[indexes] = new_ts_to_boundary
 
-        boundary_indexes = np.arange(self.N_p)
+    def lifetime_scattering(self, geometry, phonon):
+        '''Performs lifetime scattering.'''
 
-        self.positions[boundary_indexes, :], self.modes[boundary_indexes, :] = self.boundary_scattering(boundary_indexes, geometry)
+        # N_as = N_ad + dt/tau (N_BE(T*) - N_ad)
 
-        return
+        # identifying unique combinations of modes and slices
 
+        ids = np.hstack((self.modes, self.slice_id.reshape(-1, 1))).astype(int)
 
+        unique_ids = np.unique(ids, axis = 0)
+        
+        func = partial(self.update_occupation, ids = ids, phonon = phonon)
 
-    def run_timestep(self, geometry, phonon, plot_real_time = False):
+        map(func, unique_ids)
 
-        self.drift(geometry)        # drift particles
-        self.scatter(geometry, phonon)
-        self.refresh_temperatures(geometry, phonon)
+        self.energies = self.omega*self.hbar*(0.5 + self.occupation)
 
-        # self.generate_new_particles()
+    def update_occupation(self, id_array, ids, phonon):
+            
+            q      = id_array[0]
+            branch = id_array[1]
+            slc    = id_array[2]
 
-        self.n_timesteps -= 1      # -1 timestep in the counter
+            indexes = np.equal(ids, id_array)
+            indexes = (indexes.sum(axis = 1).round().astype(int) == 3)
 
-        self.t += self.dt           # 1 dt passed
+            occupation_ad = copy.deepcopy(self.occupation[indexes])
+
+            omega = phonon.omega[q, branch]
+            T     = self.slice_temperature[slc]
+            occupation_BE = phonon.calculate_occupation(T, omega)
+
+            tau = phonon.lifetime_function[q][branch](T)
+
+            self.occupation[indexes] = occupation_ad + (self.dt/tau) *(occupation_BE - occupation_ad)
+
+    def run_timestep(self, geometry, phonon):
+
+        self.drift(geometry)                            # drift particles
+
+        self.add_reservoir_particles(geometry, phonon)  # add reservoir particles that come in the domain
+
+        self.boundary_scattering(geometry)              # perform boundary scattering/periodicity and particle deletion
+
+        self.refresh_temperatures(geometry, phonon)     # refresh cell temperatures
+
+        self.lifetime_scattering(geometry, phonon)      # perform lifetime scattering
+
+        self.fill_reservoirs(phonon)                    # refill reservoirs
+
+        self.n_timesteps -= 1                           # -1 timestep in the counter to boundary scattering
+
+        if  ( int(self.t/self.dt) % 100) == 0:
+            print('Timestep {:>5d}'.format(int(self.t/self.dt)))
+            self.write_modes_data()
+        
+        self.write_convergence()      # write data on file
+
+        self.t += self.dt                               # 1 dt passed
 
         if len(self.rt_plot) > 0:
             self.plot_real_time(geometry)
@@ -683,7 +880,7 @@ class Population(Constants):
         ax = fig.add_subplot(111, projection='3d')
         ax.set_box_aspect( np.ptp(geometry.bounds, axis = 0) )
 
-        graph = ax.scatter(self.positions[:, 0], self.positions[:, 1], self.positions[:, 2], cmap = self.colormap, c = colors, s = 1)
+        graph = ax.scatter(self.positions[:, 0], self.positions[:, 1], self.positions[:, 2], cmap = self.colormap, s = 1)
 
         plt.show()
         
@@ -707,9 +904,9 @@ class Population(Constants):
         
         self.rt_graph._offsets3d = [self.positions[:,0], self.positions[:,1], self.positions[:,2]]
 
-        rgba_colors = matplotlib.cm.ScalarMappable(cmap = colormap).to_rgba(colors)
+        # rgba_colors = matplotlib.cm.ScalarMappable(cmap = colormap).to_rgba(colors)
 
-        self.rt_graph._color = rgba_colors
+        # self.rt_graph._color = rgba_colors
 
         self.rt_fig.canvas.draw()
         self.rt_fig.canvas.flush_events()
@@ -719,7 +916,8 @@ class Population(Constants):
     def plot_figures(self, geometry, property_plot=['temperature'], colormap = 'viridis'):
 
         fig = plt.figure( figsize = (8, 8), dpi = 150 )
-        
+        n = len(property_plot)
+
         for i in range(n):
             if property_plot[i] in ['T', 'temperature']:
                 data = self.temperatures
@@ -749,118 +947,112 @@ class Population(Constants):
             
             plt.savefig('figures/'+figname+'.png')
 
+    def open_convergence(self,
+                         filename,
+                         timestep   = True,
+                         sim_time   = True,
+                         avg_energy = True,
+                         N_p        = True,
+                         slice_T    = True,
+                         slice_phi  = True,
+                         real_time  = True):
 
+        filename = filename + '.txt'
 
+        self.f = open(filename, 'a+')
 
+        line = ''
 
-
-
-
-
-
-
-
-
-
-
-
-    # POSSIBLY DELETED CODE
-
-    # def calculate_distances(self, main_position, mesh):
-    #     '''Calculates de distance from a given phonon or group of phonons (main position) in relation to all others'''
-    #     distances = main_position-self.positions.reshape(-1, 1, 3)  # difference vector
+        if real_time:
+            line += 'Real Time                  '
+        if timestep:
+            line += 'Timest. '
+        if sim_time:
+            line += 'Simula. Time '
+        if avg_energy:
+            line += 'Average Ene. '
+        if slice_T:
+            for i in range(self.n_of_slices):
+                line += 'T Sl {:>2d} '.format(i)
+        if slice_phi:
+            for i in range(self.n_of_slices):
+                line += 'Hf Sl {:>2d} '.format(i)
+        if N_p:
+            line += 'No. Part. '
         
-    #     # _, indexes, _ = mesh.intersects_id(main_position,
-    #     #                                    distances,
-    #     #                                    return_locations=False,
-    #     #                                    multiple_hits=False)    # check whether there is a wall in between
+        line += '\n'
+
+        self.f.write(line)
+
+    def write_convergence(self,
+                          timestep   = True,
+                          sim_time   = True,
+                          avg_energy = True,
+                          N_p        = True,
+                          slice_T    = True,
+                          slice_phi  = True,
+                          real_time  = True):
+        line = ''
+
+        if real_time:
+            line += datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f ')  # real time in ISO format
+        if timestep:
+            line += '{:>8d} '.format( int(np.round(self.t/self.dt)) )   # timestep
+        if sim_time:
+            line += '{:>11.5e} '.format( self.t )   # time
+        if avg_energy:
+            line += '{:>11.5e} '.format( self.energies.mean() )  # average energy
+        if slice_T:
+            for i in range(self.n_of_slices):
+                line += '{:>7.2f} '.format( self.slice_temperature[i] ) # temperature per slice
+        if slice_phi:
+            for i in range(self.n_of_slices):
+                line += '{:>9.5f} '.format( self.slice_heat_flux[i] ) # heat flux per slice
+        if N_p:
+            line += '{:>10d}'.format( self.energies.shape[0] )  # number of particles
         
-    #     distances = np.norm(distances, axis = 2)    # compute euclidean norms
+        line += '\n'
 
-
-
-    #     return distances
-
-    # def locate_all_neighbours(self, position, radius):
-    #     '''Locates neighbours within radius for every particle.'''
-    #     # import shape to use mesh.contain to locate neighbours
-
-    #     distances = self.calculate_distances(position)
-    #     return (distances<=radius).astype(int)   # mask matrix classifying as neighbours (1) or not (0) all other particles (columns) for each particle (lines)
-
-
-    # def distribute_energies(self, indexes, radius):
-    #     '''Distribute their energies of scattered particles.'''
-
-    #     scattered_positions = self.positions[indexes, :]                        # get their positions
-    #     scattered_energies  = self.energies[indexes]                            # get their energies
-
-    #     neighbours = self.locate_all_neighbours(scattered_positions, radius)    # find their neighbours
-    #     neighbours[:, indexes] = 0                                              # removing scattering neighbours
-    #     neighbours = neighbours.astype(bool)                                    # converting to boolean
-
-    #     n_neighbours = neighbours.sum(axis=1)                                   # number of neighbours for each scattered particle
-
-    #     add_energy = scattered_energies/n_neighbours                            # calculate energy addition from each scattering particle
-    #     add_energy = add_energy.reshape(-1, 1)                                  # reshape to column array
-
-    #     add_energy = neighbours*add_energy                                      # set the contribution to each neighbour
-    #     add_energy = add_energy.sum(axis = 0)                                   # add all contributions for each non-scattered particle
-    #     add_energy = add_energy.reshape(-1, 1)                                  # reshape to column array
-
-    #     return self.energies + add_energy                                       # change energy level of particles
-
-    # def scatter(self, scatter_radius = 1):
-    #     '''Checks which particles have to be collided or scattered and distribute its energies around.'''
-
-    #     # THINK ABOUT HOW TO CONSERVE MOMENTUM, UMKLAPP SCATTERING AND BOUNDARY EFFECTS
-
-    #     indexes = np.where(self.n_timesteps == 0, True, False)[0] # define which particles to be scattered (boolean array)
-
-    #     self.energies     = self.distribute_energies(indexes, radius = scatter_radius)  # update energies
-
-    #     self.delete_particles(indexes)
-
-    #     # Do i need this? Because I have to update local temperature anyway...
-    #     # self.occupation   = self.calculate_n_from_E(self.omega, self.energies)          # update occupation from energies
-    #     # self.temperatures = self.calculate_T_from_n(self.omega, self.occupation)        # update temperature from occupation
-
-    # def calculate_n_from_T(self, omega, temperature):
-    #     '''Occupation number of a mode given T'''
-    #     return 1/(np.exp( self.hbar*omega / (self.kb * temperature) )-1)
+        self.f.writelines(line)
     
-    # def calculate_n_from_E(self, omega, energy):
-    #     '''Occupation number of a mode given E'''
-    #     return energy/(self.kb*self.hbar) - 0.5
+    def plot_modes_histograms(self, phonon):
 
-    # def calculate_T_from_n(self, omega, occupation):
-    #     '''Occupation number of a mode given E'''
-    #     return (self.hbar*omega/self.kb) * 1/np.log(1/occupation + 1)
+        columns = 5
+        rows = int(np.ceil(self.n_of_slices/columns))
 
-    # def check_boundaries(self, geometry):
-    #     '''Check boundaries and apply reflection or periodic boundary conditions.'''
-    #     pass
-
-    # def build_T_function(self, phonon, indexes):
-
-    #     if self.temperatures[indexes].ptp() > 0:
-    #         dT = self.temperatures[indexes].ptp()/10
-    #     else:
-    #         dT = 0.1
+        self.hist_fig = plt.figure(figsize = (columns*3, rows*3) )
         
-    #     T_array = np.arange(self.temperatures[indexes].min(), self.temperatures[indexes].max()+3*dT, dT)
-    #     e_array = phonon.calculate_energy(T_array.reshape(-1, 1), self.omega[indexes]).sum(axis = 1)
+        ax = []
 
-    #     return interp1d(e_array, T_array, kind='cubic')
+        for i in range(self.n_of_slices):
+            ax += [self.hist_fig.add_subplot(rows, columns, i+1)]
 
+            data = []
 
+            for j in range(phonon.number_of_branches):
 
+                indexes = (self.modes[:,1] == j) & (self.slice_id == i)
 
+                data += [self.modes[indexes, 0]]
 
+            ax[i].hist(data, stacked = True, histtype = 'bar', density = True, bins = int(phonon.number_of_qpoints/20) )
+    
+        plt.tight_layout()
+        plt.savefig('histograms/time_{:>.3e}'.format(self.t)+'.png')
+        # plt.show()
 
+        plt.clf()
 
+    def write_modes_data(self):
 
+        folder = 'modes_data'
 
+        if folder not in os.listdir():
+            os.mkdir(folder)
 
-        
+        filename = 'modes_data/time_{:>.3e}'.format(self.t)+'.txt'
 
+        data = np.hstack((self.modes, self.slice_id.reshape(-1, 1)))
+
+        np.savetxt(filename, data, '%4d %2d %2d')
+                
