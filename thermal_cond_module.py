@@ -59,12 +59,15 @@ class Geometry:
         self.rotation        = np.array(self.args.rotation)
         self.rot_order       = self.args.rot_order
         self.shape           = self.args.geometry
+        self.n_of_slices     = int(self.args.slices[0])
+        self.slice_axis      = int(self.args.slices[1])
 
         # Processing mesh
 
         self.load_geo_file(self.shape)  # loading
         self.transform_mesh()           # transforming
         self.get_mesh_properties()      # defining useful properties
+        self.calculate_slice_volume()
 
 
     def load_geo_file(self, shape):
@@ -102,6 +105,17 @@ class Geometry:
         '''Get useful properties of the mesh.'''
 
         self.bounds = self.mesh.bounds
+    
+    def calculate_slice_volume(self):
+        self.slice_length = self.bounds[:, self.slice_axis].ptp()/self.n_of_slices
+
+        # For other geometries, check later:
+        # trimesh.mass_properties(volume)
+
+        if self.shape == 'cuboid':
+            volume = np.ptp(self.bounds, axis = 0).prod()/self.n_of_slices
+            
+            self.slice_volume = np.ones(self.n_of_slices)*volume # angstrom^3
 
     # def set_boundary_cond(self):
                 
@@ -360,7 +374,8 @@ class Population(Constants):
         self.dt            = float(self.args.timestep[0])
         self.n_of_slices   = self.args.slices[0]
         self.slice_axis    = self.args.slices[1]
-        self.slice_length  = geometry.bounds[:, self.slice_axis].ptp()/self.n_of_slices
+        self.slice_length  = geometry.slice_length
+        self.slice_volume  = geometry.slice_volume
 
         self.bound_cond     = self.args.bound_cond    
         self.T_boundary     = np.array(self.args.temperatures)
@@ -370,7 +385,7 @@ class Population(Constants):
         self.fig_plot = self.args.fig_plot
         self.rt_plot  = self.args.rt_plot
 
-        self.t = 0
+        self.current_timestep = 0
 
         self.initialise_all_particles(phonon, geometry) # initialising particles
         self.initialise_reservoirs(geometry, phonon)            # initialise reservoirs
@@ -643,7 +658,7 @@ class Population(Constants):
             self.slice_id[indexes] = i
 
             slice_energy[i]      = self.energies[indexes].mean()*phonon.number_of_modes
-            self.slice_heat_flux[i] = self.calculate_heat_flux(indexes, geometry)
+            self.slice_heat_flux[i] = self.calculate_heat_flux(i, indexes, geometry)
             self.slice_temperature[i] = phonon.temperature_function( slice_energy[i] )
             # self.slice_temperature[i] = self.calculate_slice_temperature(i, phonon) # THIS IS FOR DEBUGGING
 
@@ -687,7 +702,7 @@ class Population(Constants):
 
     #=#=#=#=#=#=#=#=#=#=#= DEBUGGING / SPECULATION #=#=#=#=#=#=#=#=#=#=
 
-    def calculate_heat_flux(self, indexes, geometry):
+    def calculate_heat_flux(self, slice_id, indexes, geometry):
 
         group_vel = self.group_vel[indexes, self.slice_axis]   # angstrom * Hz
 
@@ -697,15 +712,7 @@ class Population(Constants):
 
         energies  = self.hbar*omega*occupation
         
-        if geometry.shape == 'cuboid':
-            volume = np.delete(geometry.bounds, self.slice_axis, axis = 1)
-            volume = np.ptp(volume, axis = 0).prod()
-            volume *= self.slice_length                                      # angstrom^3
-
-        # For other geometries, check later:
-        # trimesh.mass_properties(volume)
-        
-        heat_flux = ((group_vel*energies).mean()/volume)*self.ev_in_J*1e20  # W/m²
+        heat_flux = ((group_vel*energies).mean()/self.slice_volume[slice_id])*self.ev_in_J*1e20  # W/m²
 
         return heat_flux
 
@@ -853,13 +860,15 @@ class Population(Constants):
 
         self.n_timesteps -= 1                           # -1 timestep in the counter to boundary scattering
 
-        if  ( int(self.t/self.dt) % 100) == 0:
-            print('Timestep {:>5d}'.format(int(self.t/self.dt)))
-            self.write_modes_data()
+        self.current_timestep += 1                      # +1 timestep index
+
+        self.t = self.current_timestep*self.dt          # 1 dt passed
+
+        if  ( self.current_timestep % 100) == 0:
+            print('Timestep {:>5d}'.format( int(self.current_timestep) ) )
+            # self.write_modes_data()
         
         self.write_convergence()      # write data on file
-
-        self.t += self.dt                               # 1 dt passed
 
         if len(self.rt_plot) > 0:
             self.plot_real_time(geometry)
@@ -957,7 +966,7 @@ class Population(Constants):
                          slice_phi  = True,
                          real_time  = True):
 
-        filename = filename + '.txt'
+        filename = 'final_result/'+filename + '.txt'
 
         self.f = open(filename, 'a+')
 
@@ -997,7 +1006,7 @@ class Population(Constants):
         if real_time:
             line += datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f ')  # real time in ISO format
         if timestep:
-            line += '{:>8d} '.format( int(np.round(self.t/self.dt)) )   # timestep
+            line += '{:>8d} '.format( int(self.current_timestep) )   # timestep
         if sim_time:
             line += '{:>11.5e} '.format( self.t )   # time
         if avg_energy:
@@ -1044,6 +1053,7 @@ class Population(Constants):
         plt.clf()
 
     def write_modes_data(self):
+        '''Write on file the mode distribution in a given timestep (qpoint, branch, slice).'''
 
         folder = 'modes_data'
 
@@ -1055,4 +1065,52 @@ class Population(Constants):
         data = np.hstack((self.modes, self.slice_id.reshape(-1, 1)))
 
         np.savetxt(filename, data, '%4d %2d %2d')
+    
+    def write_final_state(self):
+        
+        # create folder
+        folder = 'final_result'
+        time = datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f')
+        
+        if folder not in os.listdir():
+            os.mkdir(folder)
+        
+        # saving final particle states: modes, positions, slice id and occupation number.
+        # Obs.: phonon properties of particles can be retrieved by mode information and slice temperature
+
+        filename = folder+'/particle_data.txt'
+
+        header ='Particles final state data \n' + \
+                'Date and time: {}\n'.format(time) + \
+                'hdf file = {}, POSCAR file = {}\n'.format(self.args.hdf_file, self.args.poscar_file) + \
+                'q-point, branch, pos x [angs], pos y [angs], pos z [angs], slice, occupation'
+
+        data = np.hstack( (self.modes,
+                           self.positions,
+                           self.slice_id.reshape(-1, 1),
+                           self.occupation.reshape(-1, 1)) )
+        
+        # comma separated
+        np.savetxt(filename, data, '%d, %d, %.3f, %.3f, %.3f, %d, %.6e', delimiter = ',', header = header)
+
+        # saving final slice states: temperatures and heat flux
+
+        filename = folder+'/slice_data.txt'
+
+        header ='Slices final state data \n' + \
+                'Date and time: {}\n'.format(time) + \
+                'hdf file = {}, POSCAR file = {}\n'.format(self.args.hdf_file, self.args.poscar_file) + \
+                'slice id, temperature [K], heat flux [W/m^2]'
+
+        data = np.hstack( (np.arange(self.n_of_slices).reshape(-1, 1),
+                           self.slice_temperature.reshape(-1, 1),
+                           self.slice_heat_flux.reshape(-1, 1),
+                           self.slice_volume.reshape(-1, 1)) )
+        
+        # comma separated
+        np.savetxt(filename, data, '%d, %.3f, %.3e, %.3e', delimiter = ',', header = header)
+
+        
+
+        
                 

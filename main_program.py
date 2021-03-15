@@ -48,6 +48,20 @@ parser.add_argument('--conv_file'  , '-cf', default  ='convergence', type = str,
 
 args = parser.parse_args()
 
+# saving arguments on file
+folder = 'final_result'
+if folder not in os.listdir():
+    os.mkdir(folder)
+
+args_filename = folder + '/arguments.txt'
+
+f = open(args_filename, 'w')
+
+for key in vars(args).keys():
+    f.write( '{} = {} \n'.format(key, vars(args)[key]) )
+
+f.close()
+
 # getting start time
 
 start_time = datetime.now()
@@ -72,15 +86,11 @@ pop = Population(args, geo, phonons)
 
 # pop.plot_figures(geo, property_plot = ['T', 'n', 'omega', 'e'])
 
-it_counter = 0
-
-while it_counter < args.iterations[0]:
+while pop.current_timestep < args.iterations[0]:
     
     pop.run_timestep(geo, phonons)
 
-    # print(pop.temperatures.max(), pop.temperatures.mean(), pop.temperatures.min())
-    
-    it_counter += 1
+pop.write_final_state()
 
 pop.f.close()
 
