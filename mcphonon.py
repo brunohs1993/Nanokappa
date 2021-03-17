@@ -23,7 +23,7 @@ import pyiron.vasp.structure
 
 # geometry
 import trimesh as tm
-from trimesh.ray.ray_pyembree import RayMeshIntersector
+from trimesh.ray.ray_pyembree import RayMeshIntersector # CHANGE LATER FROM RAY_TRIANGLE TO RAY_PÝEMBREE (FASTER)
 
 # other
 import sys
@@ -140,7 +140,7 @@ class Phonon(Constants):
         '''Initialise all phonon properties from input files.'''
 
         #### we have to discuss for the following ####
-        unitcell, _ = read_crystal_structure(self.args.poscar_file, interface_mode='vasp')
+        unitcell, _ = read_crystal_structure('materials/'+self.args.poscar_file, interface_mode='vasp')
         lattice = unitcell.get_cell()   # vectors as lines
         reciprocal_lattice = np.linalg.inv(lattice)*2*np.pi # vectors as columns
 
@@ -154,7 +154,7 @@ class Phonon(Constants):
         rotations = symmetry_obj.get_reciprocal_operations()
         #############################################
 
-        self.load_hdf_data(self.args.hdf_file)
+        self.load_hdf_data('materials/'+self.args.hdf_file)
 
         self.load_q_points()
         self.load_weights()
@@ -194,12 +194,12 @@ class Phonon(Constants):
         self.calculate_lifetime()
         self.initialise_temperature_function()
         
-        self.load_poscar_data(self.args.poscar_file)
+        self.load_poscar_data('materials/'+self.args.poscar_file)
 
         ### I am surpised than you need lattice vectors, and nor reciprocal lattice vectors. Check that it is the same as "lattice" computed before.
         self.load_lattice_vectors()
 
-    def load_hdf_data(self, hdf_file,):
+    def load_hdf_data(self, hdf_file):
         ''' Get all data from hdf file.
             Module documentation: https://docs.h5py.org/en/stable/'''
 

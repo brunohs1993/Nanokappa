@@ -1,0 +1,4 @@
+h5py
+pyiron
+trimesh
+phonopy

@@ -5,7 +5,7 @@
 import os
 from datetime import datetime
 import numpy as np
-from thermal_cond_module import *
+from mcphonon import *
 import argparse
 
 import matplotlib
