@@ -1,0 +1,7 @@
+# Script to create the environment and install all needed packages
+
+# Modules used in the library:
+# h5py     --> to read hdf5 files
+# trimesh  --> to deal with complex geometries
+# phonopy  --> to make atomic calculations whenever needed
+# pyembree --> for fast ray-mesh intersections calculation. Easy to install on Linux, tricky on windows.

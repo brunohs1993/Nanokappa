@@ -16,10 +16,8 @@ from mpl_toolkits.mplot3d import Axes3D
 import h5py
 
 # crystal structure
-# import phonopy
 from phonopy import Phonopy
 from phonopy.interface.calculator import read_crystal_structure
-import pyiron.vasp.structure
 
 # geometry
 import trimesh as tm
@@ -140,7 +138,7 @@ class Phonon(Constants):
         '''Initialise all phonon properties from input files.'''
 
         #### we have to discuss for the following ####
-        unitcell, _ = read_crystal_structure('materials/'+self.args.poscar_file, interface_mode='vasp')
+        unitcell, _ = read_crystal_structure(self.args.poscar_file, interface_mode='vasp')
         lattice = unitcell.get_cell()   # vectors as lines
         reciprocal_lattice = np.linalg.inv(lattice)*2*np.pi # vectors as columns
 
@@ -154,7 +152,7 @@ class Phonon(Constants):
         rotations = symmetry_obj.get_reciprocal_operations()
         #############################################
 
-        self.load_hdf_data('materials/'+self.args.hdf_file)
+        self.load_hdf_data(self.args.hdf_file)
 
         self.load_q_points()
         self.load_weights()
@@ -190,27 +188,15 @@ class Phonon(Constants):
         print(' number of modes=', self.number_of_modes)
 
         ### please explain the following during the next meeting
-        self.rank_energies()
         self.calculate_lifetime()
         self.initialise_temperature_function()
         
-        self.load_poscar_data('materials/'+self.args.poscar_file)
-
-        ### I am surpised than you need lattice vectors, and nor reciprocal lattice vectors. Check that it is the same as "lattice" computed before.
-        self.load_lattice_vectors()
-
     def load_hdf_data(self, hdf_file):
         ''' Get all data from hdf file.
             Module documentation: https://docs.h5py.org/en/stable/'''
 
         self.data_hdf = h5py.File(hdf_file,'r')
     
-    def load_poscar_data(self, poscar_file):
-        ''' Get structure from poscar file.
-            Module documentation: https://pyiron.readthedocs.io/en/latest/index.html'''
-
-        self.data_poscar = pyiron.vasp.structure.read_atoms(poscar_file)
-
     def load_frequency(self):
         '''frequency shape = q-points X p-branches '''
         self.frequency = np.array(self.data_hdf['frequency']) # THz
@@ -219,11 +205,6 @@ class Phonon(Constants):
     def convert_to_omega(self):
         '''omega shape = q-points X p-branches '''
         self.omega = self.frequency*2*ct.pi*1e12 # rad/s
-    
-    def rank_energies(self):
-        matrix = self.calculate_energy(10, self.omega)
-        matrix = np.where(matrix == 0, np.inf, matrix)
-        self.rank = matrix.argsort(axis = None).argsort().reshape(matrix.shape)
 
     def load_q_points(self):
         '''q-points shape = q-points X reciprocal reduced coordinates '''
@@ -257,10 +238,6 @@ class Phonon(Constants):
 
         self.lifetime_function = [[interp1d(self.temperature_array, self.lifetime[:, i, j], kind = 'cubic') for j in range(self.number_of_branches)] for i in range(self.number_of_qpoints)]
         
-    def load_lattice_vectors(self):
-        '''Unit cell coordinates from poscar file.'''
-        self.lattice_vectors = self.data_poscar.cell    # lattice vectors in cartesian coordinates, angstrom
-    
     def calculate_occupation(self, T, omega):
         flag = (T>0) & (omega>0)
         occupation = np.where(~flag, 0, 1/( np.exp( omega*self.hbar/ (T*self.kb) ) - 1) )
@@ -364,15 +341,12 @@ class Population(Constants):
 
         self.args = arguments
         
-        if self.args.particles_ex == None:
-            self.N_p   = int(float(self.args.particles[0]))
-            self.exact = False
-        else:
-            self.N_p   = int(float(self.args.particles_ex[0]))
-            self.exact = True
+        self.n_of_slices   = self.args.slices[0]
+
+        self.N_p   = int(float(self.args.particles[0])*phonon.number_of_modes*self.n_of_slices)
          
         self.dt            = float(self.args.timestep[0])
-        self.n_of_slices   = self.args.slices[0]
+        
         self.slice_axis    = self.args.slices[1]
         self.slice_length  = geometry.slice_length
         self.slice_volume  = geometry.slice_volume
@@ -402,25 +376,9 @@ class Population(Constants):
     def initialise_modes(self, number_of_particles, phonon):
         '''Uniformily organise modes for a given number of particlesprioritising low energy ones.'''
 
-        part_p_mode = np.floor(number_of_particles/phonon.number_of_modes)    # particles per mode
+        part_p_mode = int(float(self.args.particles[0])*self.n_of_slices) # particles per mode
 
-        ppm_array = (np.ones(phonon.number_of_modes)*part_p_mode).astype(int)
-
-        if self.exact: # if the exact number of particles is enforced
-
-            lack = int(number_of_particles - part_p_mode*phonon.number_of_modes)    # lack of particles due to rounding
-
-            lack_modes = np.where( np.delete(phonon.rank, [0, 1, 2]).reshape(-1) < lack )[0]    # modes to correct based on rank
-
-            ppm_array[lack_modes] += 1   # corrected number of particles per mode
-        
-        else: # if not
-            ppm_array += 1  # add to all modes
-
-            self.N_p = ppm_array.sum()
-            number_of_particles = self.N_p
-
-        modes = np.empty( (number_of_particles, 2) ) # initialising mode array
+        modes = np.empty( (self.N_p, 2) ) # initialising mode array
 
         counter = 0
 
@@ -429,12 +387,12 @@ class Population(Constants):
 
                 index = int(i*phonon.number_of_branches+j)
 
-                modes[ counter:counter+ppm_array[index], 0] = i                         
-                modes[ counter:counter+ppm_array[index], 1] = j
+                modes[ counter:counter+part_p_mode, 0] = i                         
+                modes[ counter:counter+part_p_mode, 1] = j
 
-                counter += ppm_array[index]
+                counter += part_p_mode
     
-        return modes.astype(int), ppm_array
+        return modes.astype(int)
 
     def generate_positions(self, number_of_particles, geometry):
         '''Initialise positions of a given number of particles'''
@@ -463,7 +421,9 @@ class Population(Constants):
     def initialise_all_particles(self, phonon, geometry):
         '''Uses Population atributes to generate all particles.'''
         
-        self.modes, ppm_array = self.initialise_modes(self.N_p, phonon) # getting modes
+        self.modes = self.initialise_modes(self.N_p, phonon) # getting modes
+
+        part_p_mode = int(float(self.args.particles[0])*self.n_of_slices)
         
         # initialising positions one mode at a time (slower but uses less memory)
 
@@ -475,9 +435,9 @@ class Population(Constants):
 
                 index = int(i*phonon.number_of_branches+j)
                 
-                self.positions[counter:counter+ppm_array[index], :] = self.generate_positions(ppm_array[index], geometry)
+                self.positions[counter:counter+part_p_mode, :] = self.generate_positions(part_p_mode, geometry)
 
-                counter += ppm_array[index]
+                counter += part_p_mode
         
         self.temperatures = self.assign_temperatures(self.positions, geometry)
         
@@ -492,7 +452,6 @@ class Population(Constants):
 
         self.res1_active_modes = np.stack(np.meshgrid( np.arange(phonon.number_of_qpoints), np.arange(phonon.number_of_branches) ), axis = -1 ).reshape(-1, 2)
         self.res2_active_modes = np.stack(np.meshgrid( np.arange(phonon.number_of_qpoints), np.arange(phonon.number_of_branches) ), axis = -1 ).reshape(-1, 2)
-
 
         reservoir_length = self.slice_length
 
@@ -601,7 +560,7 @@ class Population(Constants):
         '''Get properties from the indexes.'''
 
         omega              = phonon.omega[ modes[:,0], modes[:,1] ]        # rad/s
-        q_points           = phonon.q_points[ modes[:,0], : ]                 # reduced reciprocal coordinates
+        q_points           = phonon.q_points[ modes[:,0], : ]              # reduced reciprocal coordinates
         group_vel          = phonon.group_vel[ modes[:,0], modes[:,1], : ] # Hz * angstrom
 
         return omega, q_points, group_vel
@@ -664,7 +623,7 @@ class Population(Constants):
 
             self.temperatures[indexes] = copy.deepcopy(self.slice_temperature[i])
 
-    #=#=#=#=#=#=#=#=#=#=#= DEBUGGING / SPECULATION #=#=#=#=#=#=#=#=#=#=
+    #=#=#=#=#=#=#=#=#=#=#= DEBUGGING #=#=#=#=#=#=#=#=#=#=
     # def calculate_slice_temperature(self, slice_index, phonon):
         
     #     indexes = (self.slice_id == slice_index)
@@ -700,7 +659,7 @@ class Population(Constants):
     #     return T_function(energy)
 
 
-    #=#=#=#=#=#=#=#=#=#=#= DEBUGGING / SPECULATION #=#=#=#=#=#=#=#=#=#=
+    #=#=#=#=#=#=#=#=#=#=#= DEBUGGING #=#=#=#=#=#=#=#=#=#=
 
     def calculate_heat_flux(self, slice_id, indexes, geometry):
 
