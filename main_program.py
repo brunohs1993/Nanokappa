@@ -5,7 +5,7 @@
 import os
 from datetime import datetime
 import numpy as np
-from mcphonon import *
+import mcphonon
 import argparse
 
 # Setting arguments:
@@ -32,18 +32,17 @@ parser.add_argument('--colormap'    ,'-cm' , default = 'viridis'          , type
 # THOUGHT ABOUT GIVING NUMBERS FOR IMPOSED TEMPERATURE, 'ISO' FOR ISOLATED AND 'PER' FOR PERIODIC. STUDY WICH TYPES OF BOUNDARY CONDITIONS TO USE. NEED TO INDICATE FACES. THIS COULD GIVE FLEXIBILITY IF LOADING A CUSTOM GEOMETRY.
 # parser.add_argument('--bound_cond' , '-bc', default = [(0,290),(5, 300)], type = int  , nargs = '*', help='Set boundary conditions') 
 
-parser.add_argument('--poscar_file', '-pf', required = True        , type = str, help='Set the POSCAR file to be read.') # lattice properties
-parser.add_argument('--hdf_file'   , '-hf', required = True        , type = str, help='Set the hdf5 file to be read.'  ) # phonon properties of the material
-parser.add_argument('--conv_file'  , '-cf', default  ='convergence', type = str, help='Set the convergence file name.' ) # convergence file name
+parser.add_argument('--poscar_file'   , '-pf', required = True     , type = str, help='Set the POSCAR file to be read.' ) # lattice properties
+parser.add_argument('--hdf_file'      , '-hf', required = True     , type = str, help='Set the hdf5 file to be read.'   ) # phonon properties of the material
+parser.add_argument('--results_folder', '-rf', default  = 'results', type = str, help='Set the results folder name.'    ) # convergence file name
 
 args = parser.parse_args()
 
 # saving arguments on file
-folder = 'final_result'
-if folder not in os.listdir():
-    os.mkdir(folder)
 
-args_filename = folder + '/arguments.txt'
+args.results_folder = mcphonon.generate_results_folder(args.result_folder)
+
+args_filename = args.results_folder + 'arguments.txt'
 
 f = open(args_filename, 'w')
 
