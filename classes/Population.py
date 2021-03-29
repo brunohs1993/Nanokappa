@@ -16,7 +16,7 @@ import sys
 import copy
 from functools import partial
 
-from Constants import *
+from classes.Constants import Constants
 
 np.set_printoptions(precision=3, threshold=sys.maxsize, linewidth=np.nan)
 

@@ -12,7 +12,7 @@ from phonopy.interface.calculator import read_crystal_structure
 # other
 import sys
 
-from Constants import *
+from classes.Constants import Constants
 
 np.set_printoptions(precision=3, threshold=sys.maxsize, linewidth=np.nan)
 
