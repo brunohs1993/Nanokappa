@@ -650,6 +650,7 @@ class Population(Constants):
         line += '\n'
 
         self.f.write(line)
+        self.f.close()
 
     def write_convergence(self,
                           timestep   = True,
@@ -680,7 +681,13 @@ class Population(Constants):
         
         line += '\n'
 
+        filename = self.results_folder_name+'convergence.txt'
+
+        self.f = open(filename, 'a+')
+
         self.f.writelines(line)
+
+        self.f.close()
     
     def plot_modes_histograms(self, phonon):
 
