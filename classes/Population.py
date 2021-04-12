@@ -1,5 +1,6 @@
 # calculations
 import numpy as np
+from scipy.interpolate import interp1d
 from datetime import datetime
 
 # plotting
@@ -176,8 +177,10 @@ class Population(Constants):
 
         # modes
 
-        modes_res = np.floor(np.random.rand(self.N_p_res)*modes.shape[0]).astype(int)
-        modes_res = modes[modes_res, :]
+        # modes_res = np.floor(np.random.rand(self.N_p_res)*modes.shape[0]).astype(int)
+        # modes_res = modes[modes_res, :]
+
+        modes_res = np.tile( modes, (self.args.particles[0], 1) )
 
         return positions_res, modes_res
     
@@ -316,7 +319,7 @@ class Population(Constants):
 
             self.slice_id[indexes] = i
 
-            slice_energy[i]      = self.energies[indexes].mean()*phonon.number_of_modes
+            slice_energy[i]      = self.energies[indexes].sum()/self.args.particles[0] # *phonon.number_of_modes
             self.slice_heat_flux[i] = self.calculate_heat_flux(i, indexes, geometry)
             self.slice_temperature[i] = phonon.temperature_function( slice_energy[i] )
             # self.slice_temperature[i] = self.calculate_slice_temperature(i, phonon) # THIS IS FOR DEBUGGING
@@ -324,39 +327,34 @@ class Population(Constants):
             self.temperatures[indexes] = copy.deepcopy(self.slice_temperature[i])
 
     #=#=#=#=#=#=#=#=#=#=#= DEBUGGING #=#=#=#=#=#=#=#=#=#=
-    # def calculate_slice_temperature(self, slice_index, phonon):
+    def calculate_slice_temperature(self, slice_index, phonon):
         
-    #     indexes = (self.slice_id == slice_index)
+        indexes = (self.slice_id == slice_index)    # pick particles
 
-    #     modes = self.modes[indexes]
+        modes = self.modes[indexes]                 # identify modes
 
-    #     unique_modes, unique_times = np.unique(modes, axis = 0, return_counts=True)
+        unique_modes, unique_times = np.unique(modes, axis = 0, return_counts=True) # identify unique modes
 
-    #     weights = np.zeros( (phonon.number_of_qpoints, phonon.number_of_branches) )
+        weights = np.zeros( (phonon.number_of_qpoints, phonon.number_of_branches) ) # pick how frequently each mode appears
 
-    #     weights[unique_modes[:, 0], unique_modes[:,1]] = unique_times
+        weights[unique_modes[:, 0], unique_modes[:,1]] = unique_times
 
-    #     if slice_index == 0:
-    #         T_min = self.T_boundary[0]
-    #     else:
-    #         T_min = self.slice_temperature[slice_index-1]
+        # define T limits
         
-    #     if slice_index+1 == self.n_of_slices:
-    #         T_max = self.T_boundary[1]
-    #     else:
-    #         T_max = self.slice_temperature[slice_index+1]
+        margin = 10
+        T_min = self.T_boundary[0] - margin
+        T_max = self.T_boundary[1] + margin
+        dT = 0.1  # define interpolation precision
+
+        T_array = np.arange(T_min, T_max, dT)   # T array for interpolation
+
+        e_array = (phonon.calculate_energy(T_array.reshape(-1, 1, 1), phonon.omega)*weights).sum(axis = (1, 2) )
+
+        T_function = interp1d(e_array, T_array, kind = 'cubic')
+
+        energy = self.energies[indexes].sum()
         
-    #     dT = (T_max-T_min)/100
-
-    #     T_array = np.arange(T_min-dT, T_max+2*dT, dT)
-
-    #     e_array = (phonon.calculate_energy(T_array.reshape(-1, 1, 1), phonon.omega)*weights).sum(axis = (1, 2) )
-
-    #     T_function = interp1d(e_array, T_array, kind = 'cubic')
-
-    #     energy = self.energies[indexes].sum()
-
-    #     return T_function(energy)
+        return T_function(energy)   # equivalent temperature according to interpolation
 
 
     #=#=#=#=#=#=#=#=#=#=#= DEBUGGING #=#=#=#=#=#=#=#=#=#=
@@ -500,8 +498,14 @@ class Population(Constants):
             occupation_BE = phonon.calculate_occupation(T, omega)
 
             tau = phonon.lifetime_function[q][branch](T)
+            
+            # # Threshold
+            # margin      = 10 # K
+            # T_threshold = self.T_boundary.min() - margin
+            # threshold = phonon.calculate_occupation(T_threshold, omega)
 
             self.occupation[indexes] = occupation_ad + (self.dt/tau) *(occupation_BE - occupation_ad)
+            # self.occupation[indexes] = occupation_ad + (self.dt/tau) *(occupation_BE - threshold - occupation_ad)
 
     def run_timestep(self, geometry, phonon):
 
@@ -526,8 +530,8 @@ class Population(Constants):
         if  ( self.current_timestep % 100) == 0:
             print('Timestep {:>5d}'.format( int(self.current_timestep) ) )
             # self.write_modes_data()
-        
-        self.write_convergence()      # write data on file
+        if ( self.current_timestep % 10) == 0:
+            self.write_convergence()      # write data on file
 
         if len(self.rt_plot) > 0:
             self.plot_real_time(geometry)

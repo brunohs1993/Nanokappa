@@ -14,6 +14,8 @@
 module purge                # closing all open modules
 module load anaconda/3/5.1  # opening the most recent anaconda
 
+
+
 ## Creating temporary directory in $SCRATCHDIR
 WORKDIR=$SCRATCHDIR/job.$SLURM_JOB_ID.$USER
 mkdir -p $WORKDIR

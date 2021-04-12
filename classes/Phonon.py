@@ -137,8 +137,15 @@ class Phonon(Constants):
         self.lifetime_function = [[interp1d(self.temperature_array, self.lifetime[:, i, j], kind = 'cubic') for j in range(self.number_of_branches)] for i in range(self.number_of_qpoints)]
         
     def calculate_occupation(self, T, omega):
+        # Threshold
+        margin      = 10 # K
+        T_threshold = min(self.args.temperatures) - margin
+        
+        flag = (omega>0)
+        threshold = np.where(~flag, 0, 1/( np.exp( omega*self.hbar/ (T_threshold*self.kb) ) - 1))
+
         flag = (T>0) & (omega>0)
-        occupation = np.where(~flag, 0, 1/( np.exp( omega*self.hbar/ (T*self.kb) ) - 1) )
+        occupation = np.where(~flag, 0, 1/( np.exp( omega*self.hbar/ (T*self.kb) ) - 1) - threshold)
         return occupation
 
     def calculate_energy(self, T, omega):
@@ -158,7 +165,7 @@ class Phonon(Constants):
         '''Calculate an array of energy levels and initialises the function to recalculate T = f(E)'''
 
         margin = 10
-        dT = 0.1
+        dT = 0.01
         
         T_boundary = np.array([min(self.args.temperatures)-margin, max(self.args.temperatures)+margin]) # setting temperature interval with 10K of upper and lower margin
 

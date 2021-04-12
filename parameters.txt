@@ -1,2 +1,9 @@
--hf ../materials/Si/kappa-m313131.hdf5
--pf ../materials/Si/POSCAR1
+-hf ../Materials/Si/kappa-m313131.hdf5
+-pf ../Materials/Si/POSCAR
+-d  8e3 1e3 1e3
+-i  5000
+-p  5
+-sl 8 0
+-ts 1e-12
+-t  303 297
+-td linear
