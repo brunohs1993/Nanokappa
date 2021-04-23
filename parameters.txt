@@ -1,9 +1,13 @@
--hf ../Materials/Si/kappa-m313131.hdf5
--pf ../Materials/Si/POSCAR
--d  8e3 1e3 1e3
--i  5000
--p  5
--sl 8 0
--ts 1e-12
+-hf ../Materials/Pb2_I4/kappa-m20206.hdf5
+-pf ../Materials/Pb2_I4/POSCAR-unitcell
+-d  5e3 1e3 1e3
+-i  500
+-p  1
+-pd random_slice
+-sl 5 0
+-ts 0.2
 -t  303 297
--td linear
+-td constant_cold
+-rl main
+-rf forAnimation
+-rp energy

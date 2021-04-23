@@ -18,7 +18,7 @@ It is recommended to run MC Phonon through Conda. This is set by following the s
 2. Install Anaconda on your computer (https://www.anaconda.com/);
 3. Create an environment (here called `mcphonon`, but it is an user's choice) and activate it:
    
-       conda create -n mcphonon python=3.6
+       conda create -n mcphonon python=3.8
        conda activate mcphonon
 
 4. Add conda-forge to the available channels:
@@ -30,6 +30,16 @@ It is recommended to run MC Phonon through Conda. This is set by following the s
         conda install --file <mcphonon-folder>/set_env/modules.txt
 
 **Obs.**: Sometimes this process may take excessive time or raise errors. If you find any problems with the Python version during the environment setup, it may work by creating the environment initially with whatever Python version is installed (typing only `conda create -n mcphonon`), activating it and installing all modules listed in `modules.txt`, then downgrading the environment to Python 3.6 by typing `conda -n mcphonon install python=3.6`. Anaconda will take care of the dependencies while downgrading.
+
+**Obs.**: To install on the cluster:
+
+        conda create -n mcphonon -c conda-forge python=3.8
+        conda activate mcphonon
+        conda install -c conda-forge h5py trimesh phonopy pyembree
+        mkdir mcphonon
+        cd mcphonon
+        git clone https://github.com/brunohs1993/MultiscaleThermalCond
+        conda install -c conda-forge ipython
 
 # Running a simulation
 

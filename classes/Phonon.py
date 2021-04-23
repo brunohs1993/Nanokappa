@@ -1,6 +1,7 @@
 # calculations
 import numpy as np
 from scipy.interpolate import interp1d
+from functools import partial
 
 # hdf5 files
 import h5py
@@ -13,6 +14,8 @@ from phonopy.interface.calculator import read_crystal_structure
 import sys
 
 from classes.Constants import Constants
+
+import matplotlib.pyplot as plt
 
 np.set_printoptions(precision=3, threshold=sys.maxsize, linewidth=np.nan)
 
@@ -50,26 +53,37 @@ class Phonon(Constants):
         rotations = symmetry_obj.get_reciprocal_operations()
         #############################################
 
+        self.volume_unitcell = unitcell.get_volume()   # angstrom³
+        
+        print('Reading hdf file...')
+
         self.load_hdf_data(self.args.hdf_file)
 
         self.load_q_points()
         self.load_weights()
 
+        print('Expanding frequency to FBZ...')
         self.load_frequency()
         qpoints_FBZ,frequency=expand_FBZ(0,self.weights,self.q_points,self.frequency,0,rotations,reciprocal_lattice)
         self.frequency= frequency
         self.convert_to_omega()
         
+
+        print('Expanding group velocity to FBZ...')
         self.load_group_vel()
         qpoints_FBZ,group_vel=expand_FBZ(0,self.weights,self.q_points,self.group_vel,1,rotations,reciprocal_lattice)
         self.group_vel=group_vel
 
         self.load_temperature()
-    
+        self.T_cold = min(self.args.temperatures)
+        self.T_hot  = max(self.args.temperatures)
+
+        print('Expanding heat capacity to FBZ...')  # Do we need heat capacity? For now it is not used anywhere...  
         self.load_heat_cap()
         qpoints_FBZ,heat_cap=expand_FBZ(1,self.weights,self.q_points,self.heat_cap,0,rotations,reciprocal_lattice)
         self.heat_cap=heat_cap
 
+        print('Expanding gamma to FBZ...')
         self.load_gamma()
         qpoints_FBZ,gamma=expand_FBZ(1,self.weights,self.q_points,self.gamma,0,rotations,reciprocal_lattice)
         self.gamma=gamma
@@ -85,9 +99,14 @@ class Phonon(Constants):
         print(' nb=',self.number_of_branches)
         print(' number of modes=', self.number_of_modes)
 
-        ### please explain the following during the next meeting
+        print('Interpolating lifetime...')
         self.calculate_lifetime()
+
+        print('Generating T = f(E)...')
+        self.zero_point = self.calculate_zeropoint()
         self.initialise_temperature_function()
+
+        print('Material initialisation done!')
         
     def load_hdf_data(self, hdf_file):
         ''' Get all data from hdf file.
@@ -102,7 +121,7 @@ class Phonon(Constants):
 
     def convert_to_omega(self):
         '''omega shape = q-points X p-branches '''
-        self.omega = self.frequency*2*self.pi*1e12 # rad/s
+        self.omega = self.frequency*2*self.pi # THz*rad
 
     def load_q_points(self):
         '''q-points shape = q-points X reciprocal reduced coordinates '''
@@ -118,7 +137,7 @@ class Phonon(Constants):
     
     def load_group_vel(self):
         '''groupvel shape = q_points X p-branches X cartesian coordinates '''
-        self.group_vel = np.array(self.data_hdf['group_velocity'])*1e12  # Hz * angstrom
+        self.group_vel = np.array(self.data_hdf['group_velocity'])  # THz * angstrom
 
     def load_heat_cap(self):
         '''heat_cap shape = temperatures X q-points X p-branches '''
@@ -132,47 +151,70 @@ class Phonon(Constants):
     def calculate_lifetime(self):
         '''lifetime = temperatures X q-pointsX p-branches'''
 
-        self.lifetime = np.where( self.gamma>0, 1/( 2*2*np.pi*self.gamma), 0)*1e-12  # s
+        self.lifetime = np.where( self.gamma>0, 1/( 2*2*np.pi*self.gamma), 0) # ps
 
-        self.lifetime_function = [[interp1d(self.temperature_array, self.lifetime[:, i, j], kind = 'cubic') for j in range(self.number_of_branches)] for i in range(self.number_of_qpoints)]
-        
+        self.lifetime_function = [[interp1d(self.temperature_array, self.lifetime[:, i, j], kind = 'linear') for j in range(self.number_of_branches)] for i in range(self.number_of_qpoints)]
+
+
     def calculate_occupation(self, T, omega):
-        # Threshold
-        margin      = 10 # K
-        T_threshold = min(self.args.temperatures) - margin
-        
-        flag = (omega>0)
-        threshold = np.where(~flag, 0, 1/( np.exp( omega*self.hbar/ (T_threshold*self.kb) ) - 1))
+        '''Calculate the Bose-Einstein occupation number of a given mode at temperature T'''
 
         flag = (T>0) & (omega>0)
-        occupation = np.where(~flag, 0, 1/( np.exp( omega*self.hbar/ (T*self.kb) ) - 1) - threshold)
+        with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
+            occupation = np.where(~flag, 0, 1/( np.exp( omega*self.hbar/ (T*self.kb) ) - 1) )
+        
         return occupation
 
     def calculate_energy(self, T, omega):
-        '''Energy of a mode given T'''
+        '''Energy of a mode given T and omega due to its occupation (ignoring zero-point energy).'''
         n = self.calculate_occupation(T, omega)
-        return self.hbar * omega * (n + 0.5)
+        return self.hbar*omega*n    # eV
     
     def calculate_crystal_energy(self, T):
-        '''Calculates the average energy per mode at a given temperature for the crystal.'''
+        '''Calculates the energy density at a given temperature for the crystal.'''
 
         T = np.array(T)             # ensuring right type
         T = T.reshape( (-1, 1, 1) ) # ensuring right dimensionality
 
-        return self.calculate_energy(T, self.omega).sum( axis = (1, 2) )
+        crystal_energy = self.calculate_energy(T, self.omega).sum( axis = (1, 2) )  # eV - energy sum of all modes
+        crystal_energy = self.normalise_to_density(crystal_energy)                  # eV / a³ - normalising to density
+        crystal_energy += self.zero_point                                           # eV / a³ - adding zero-point energy density
+
+        return crystal_energy
+
+    def calculate_zeropoint(self):
+        '''Calculates the minimum possible energy density the system can have, called zero-point energy density'''
+        
+        zero = self.hbar*self.omega.sum()/2      # 1/2 sum of all modes
+        zero = self.normalise_to_density(zero)   # normalising to density
+
+        return zero
 
     def initialise_temperature_function(self):
-        '''Calculate an array of energy levels and initialises the function to recalculate T = f(E)'''
+        '''Calculate an array of energy density levels and initialises the function to recalculate T = f(E)'''
 
-        margin = 10
-        dT = 0.01
+        # Temperature array
+        dT = 0.1
+        T_boundary = np.array([0, 1000+dT])
+
+        T_array = np.arange(T_boundary.min(), T_boundary.max()+dT, dT)
+
+        # Energy array
+        self.energy_array = np.array( list( map(self.calculate_crystal_energy, T_array) ) ).reshape(-1)
+
+        # Interpolating        
+        self.temperature_function = interp1d( self.energy_array, T_array, kind = 'linear' )
+
+    def normalise_to_density(self, x):
+        '''Defines conversion from energy to energy density here so it is easy to change.'''
         
-        T_boundary = np.array([min(self.args.temperatures)-margin, max(self.args.temperatures)+margin]) # setting temperature interval with 10K of upper and lower margin
+        # Q = N_uc              - Number of available q-points is equal to the number of unitcells in the crystal
+        # 
+        # N_uc = V_s / V_uc     - The number of unit cells is how many of them fit in the volume of the solid
+        #
+        # V_s = Q x V_uc        - Hence the volume of the equivalent solid can be estimated by Q x V_uc
 
-        T_array = np.arange(T_boundary.min(), T_boundary.max()+dT, dT)    # defining discretisations
-
-        self.energy_array = self.calculate_crystal_energy(T_array)
-        self.temperature_function = interp1d( self.energy_array, T_array, kind = 'cubic' )
+        return x/(self.number_of_qpoints*self.volume_unitcell)  # unit / angstrom³
 
 def expand_FBZ(axis,weight,qpoints,tensor,rank,rotations,reciprocal_lattice):
         # expand tensor from IBZ to BZ

@@ -8,8 +8,8 @@ import sys
 
 args = read_args()
 
-# creating result folder
-args.results_folder = generate_results_folder(args.results_folder)
+# seting result files location
+args = generate_results_folder(args)
 
 # saving arguments on file
 args_filename = args.results_folder + 'arguments.txt'
@@ -43,6 +43,8 @@ pop = Population(args, geo, phonons)
 
 # pop.plot_figures(geo, property_plot = ['T', 'n', 'omega', 'e'])
 
+print('Simulating...')
+
 while pop.current_timestep < args.iterations[0]:
     
     pop.run_timestep(geo, phonons)
@@ -50,6 +52,8 @@ while pop.current_timestep < args.iterations[0]:
 pop.write_final_state()
 
 pop.f.close()
+
+pop.save_plot_real_time()
 
 end_time = datetime.now()
 
