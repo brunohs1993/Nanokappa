@@ -68,20 +68,20 @@ class Phonon(Constants):
         self.frequency= frequency
         self.convert_to_omega()
         
-
         print('Expanding group velocity to FBZ...')
         self.load_group_vel()
         qpoints_FBZ,group_vel=expand_FBZ(0,self.weights,self.q_points,self.group_vel,1,rotations,reciprocal_lattice)
         self.group_vel=group_vel
 
         self.load_temperature()
-        self.T_cold = min(self.args.temperatures)
-        self.T_hot  = max(self.args.temperatures)
+        self.T_cold      = min(self.args.temperatures)
+        self.T_hot       = max(self.args.temperatures)
+        self.T_threshold = self.args.threshold_temp[0]
 
-        print('Expanding heat capacity to FBZ...')  # Do we need heat capacity? For now it is not used anywhere...  
-        self.load_heat_cap()
-        qpoints_FBZ,heat_cap=expand_FBZ(1,self.weights,self.q_points,self.heat_cap,0,rotations,reciprocal_lattice)
-        self.heat_cap=heat_cap
+        # print('Expanding heat capacity to FBZ...')  # Do we need heat capacity? For now it is not used anywhere...  
+        # self.load_heat_cap()
+        # qpoints_FBZ,heat_cap=expand_FBZ(1,self.weights,self.q_points,self.heat_cap,0,rotations,reciprocal_lattice)
+        # self.heat_cap=heat_cap
 
         print('Expanding gamma to FBZ...')
         self.load_gamma()
@@ -94,6 +94,8 @@ class Phonon(Constants):
         self.number_of_branches = self.frequency.shape[1]
         self.number_of_modes = self.number_of_qpoints*self.number_of_branches
 
+        self.unique_modes = np.stack(np.meshgrid( np.arange(self.number_of_qpoints), np.arange(self.number_of_branches) ), axis = -1 ).reshape(-1, 2).astype(int)
+
         print('To describe phonons:')
         print(' nq=',self.number_of_qpoints)
         print(' nb=',self.number_of_branches)
@@ -104,6 +106,7 @@ class Phonon(Constants):
 
         print('Generating T = f(E)...')
         self.zero_point = self.calculate_zeropoint()
+        self.calculate_threshold(self.T_threshold)
         self.initialise_temperature_function()
 
         print('Material initialisation done!')
@@ -139,9 +142,9 @@ class Phonon(Constants):
         '''groupvel shape = q_points X p-branches X cartesian coordinates '''
         self.group_vel = np.array(self.data_hdf['group_velocity'])  # THz * angstrom
 
-    def load_heat_cap(self):
-        '''heat_cap shape = temperatures X q-points X p-branches '''
-        self.heat_cap = np.array(self.data_hdf['heat_capacity'])    # eV/K
+    # def load_heat_cap(self):
+    #     '''heat_cap shape = temperatures X q-points X p-branches '''
+    #     self.heat_cap = np.array(self.data_hdf['heat_capacity'])    # eV/K
     
     def load_gamma(self):
         '''gamma = temperatures X q-pointsX p-branches'''
@@ -156,18 +159,21 @@ class Phonon(Constants):
         self.lifetime_function = [[interp1d(self.temperature_array, self.lifetime[:, i, j], kind = 'linear') for j in range(self.number_of_branches)] for i in range(self.number_of_qpoints)]
 
 
-    def calculate_occupation(self, T, omega):
-        '''Calculate the Bose-Einstein occupation number of a given mode at temperature T'''
+    def calculate_occupation(self, T, omega, threshold = False):
+        '''Calculate the Bose-Einstein occupation number of a given frequency at temperature T.'''
 
         flag = (T>0) & (omega>0)
         with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
-            occupation = np.where(~flag, 0, 1/( np.exp( omega*self.hbar/ (T*self.kb) ) - 1) )
+            if threshold:
+                occupation = np.where(~flag, 0, 1/( np.exp( omega*self.hbar/ (T*self.kb) ) - 1) - 1/( np.exp( omega*self.hbar/ (self.T_threshold*self.kb) ) - 1) )
+            elif not threshold:
+                occupation = np.where(~flag, 0, 1/( np.exp( omega*self.hbar/ (T*self.kb) ) - 1) )
         
         return occupation
 
-    def calculate_energy(self, T, omega):
+    def calculate_energy(self, T, omega, threshold = False):
         '''Energy of a mode given T and omega due to its occupation (ignoring zero-point energy).'''
-        n = self.calculate_occupation(T, omega)
+        n = self.calculate_occupation(T, omega, threshold = threshold)
         return self.hbar*omega*n    # eV
     
     def calculate_crystal_energy(self, T):
@@ -189,6 +195,11 @@ class Phonon(Constants):
         zero = self.normalise_to_density(zero)   # normalising to density
 
         return zero
+    
+    def calculate_threshold(self, T):
+        '''Calculate minimum occupation for each modes'''
+        self.threshold_occupation = self.calculate_occupation(T, self.omega)        # shape = q_points x branches
+        self.threshold_energy = self.calculate_crystal_energy(self.T_threshold)     # float, eV/a³
 
     def initialise_temperature_function(self):
         '''Calculate an array of energy density levels and initialises the function to recalculate T = f(E)'''

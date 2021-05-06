@@ -43,6 +43,10 @@ pop = Population(args, geo, phonons)
 
 # pop.plot_figures(geo, property_plot = ['T', 'n', 'omega', 'e'])
 
+visuals = Visualisation(args, geo, phonons)
+
+visuals.preprocess()
+
 print('Simulating...')
 
 while pop.current_timestep < args.iterations[0]:
@@ -54,6 +58,8 @@ pop.write_final_state()
 pop.f.close()
 
 pop.save_plot_real_time()
+
+visuals.postprocess()
 
 end_time = datetime.now()
 

@@ -1,13 +1,14 @@
 -hf ../Materials/Pb2_I4/kappa-m20206.hdf5
 -pf ../Materials/Pb2_I4/POSCAR-unitcell
--d  5e3 1e3 1e3
--i  500
+-d  50 1e3 1e3
+-i  5
 -p  1
 -pd random_slice
--sl 5 0
--ts 0.2
+-sl 3 0
+-ts 0.02
 -t  303 297
--td constant_cold
--rl main
--rf forAnimation
--rp energy
+-tt 290
+-td linear
+-rl d:/LEMTA/Code/Results/
+-rf test
+-en fixed

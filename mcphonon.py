@@ -1,6 +1,7 @@
 from classes.Geometry import Geometry
 from classes.Phonon import Phonon
 from classes.Population import Population
+from classes.Visualisation import Visualisation
 
 import os
 import argparse
@@ -21,19 +22,21 @@ def initialise_parser():
     parser.add_argument('--rotation'    , '-r' , default = [0, 0, 0]          , type = float, nargs = 3  , help='Euler angles in degrees to be applied to given geometry (see scipy.rotation.from_euler).')
     parser.add_argument('--rot_order'   , '-ro', default = ['xyz']            , type = str  , nargs = 1  , help='Order of rotation to be applied to given geometry (see scipy.rotation.from_euler).')
     parser.add_argument('--particles'   , '-p' , default = [1]                , type = float, nargs = 1  , help='Number of particles per mode, per slice.')
-    parser.add_argument('--part_dist'   , '-pd', default = ['random_domain']  , type = str  , nargs = 1  , help='How to distribute particles. random/center _ domain/slice')
+    parser.add_argument('--part_dist'   , '-pd', default = ['random_slice']   , type = str  , nargs = 1  , help='How to distribute particles. random/center _ domain/slice')
     parser.add_argument('--empty_slices', '-es', default = []                 , type = int  , nargs = '*', help='Slices indexesto keep empty at initialisation.')
 
-    parser.add_argument('--timestep'    , '-ts', default = [1]                , type = float, nargs = 1  , help='Timestep size in picoseconds')
-    parser.add_argument('--iterations'  , '-i' , default = [10000]            , type = int  , nargs = 1  , help='Number of timesteps (iterations) to be run')
-    parser.add_argument('--slices'      , '-sl', default = [10, 0]            , type = int  , nargs = 2  , help='Number of slices and slicing axis (x = 0, y = 1, z = 2)')
-    parser.add_argument('--temperatures', '-t' , default = [310, 290]         , type = float, nargs = 2  , help='Set first and reservoirs temperatures to be imposed.') 
-    parser.add_argument('--temp_dist'   ,'-td' , default = ['constant_cold']  , type = str  , nargs = '*', help='Set how to distribute initial temperatures.')
-    parser.add_argument('--bound_cond'  ,'-bc' , default = ['periodic']       , type = str  , nargs = 1  , help='Set behaviour of the other faces. It can be "periodic", ...')
+    parser.add_argument('--timestep'      , '-ts', default = [1]                , type = float, nargs = 1  , help='Timestep size in picoseconds')
+    parser.add_argument('--iterations'    , '-i' , default = [10000]            , type = int  , nargs = 1  , help='Number of timesteps (iterations) to be run')
+    parser.add_argument('--slices'        , '-sl', default = [10, 0]            , type = int  , nargs = 2  , help='Number of slices and slicing axis (x = 0, y = 1, z = 2)')
+    parser.add_argument('--temperatures'  , '-t' , default = [310, 290]         , type = float, nargs = 2  , help='Set first and reservoirs temperatures to be imposed.') 
+    parser.add_argument('--threshold_temp', '-tt', default = [0]                , type = float, nargs = 1  , help='Set minimum temperature to be considered in the system.') 
+    parser.add_argument('--temp_dist'     , '-td', default = ['constant_cold']  , type = str  , nargs = '*', help='Set how to distribute initial temperatures.')
+    parser.add_argument('--bound_cond'    , '-bc', default = ['periodic']       , type = str  , nargs = 1  , help='Set behaviour of the other faces. It can be "periodic", ...')
+    parser.add_argument('--energy_normal' , '-en', default = ['fixed']          , type = str  , nargs = 1  , help='Set the energy normalisation in slice. "fixed" is divided by "-p" (standard). "mean" is the aritmetic mean.')
 
-    parser.add_argument('--rt_plot'     ,'-rp' , default = []                 , type = str  , nargs = '*', help='Set which property you want to see in the real time plot during simulation. Choose between T, omega, e, n and None (random colors).')
-    parser.add_argument('--fig_plot'    ,'-fp' , default = ['T', 'omega', 'e'], type = str  , nargs = '*', help='Save figures with properties at the end. Standard is T, omega and energy.')
-    parser.add_argument('--colormap'    ,'-cm' , default = ['viridis']        , type = str  , nargs = 1  , help='Set matplotlib colormap to be used on all plots. Standard is viridis.')
+    parser.add_argument('--rt_plot'      , '-rp', default = []                 , type = str  , nargs = '*', help='Set which property you want to see in the real time plot during simulation. Choose between T, omega, e, n and None (random colors).')
+    parser.add_argument('--fig_plot'     , '-fp', default = ['T', 'omega', 'e'], type = str  , nargs = '*', help='Save figures with properties at the end. Standard is T, omega and energy.')
+    parser.add_argument('--colormap'     , '-cm', default = ['viridis']        , type = str  , nargs = 1  , help='Set matplotlib colormap to be used on all plots. Standard is viridis.')
 
     # THOUGHT ABOUT GIVING NUMBERS FOR IMPOSED TEMPERATURE, 'ISO' FOR ISOLATED AND 'PER' FOR PERIODIC. STUDY WICH TYPES OF BOUNDARY CONDITIONS TO USE. NEED TO INDICATE FACES. THIS COULD GIVE FLEXIBILITY IF LOADING A CUSTOM GEOMETRY.
     # parser.add_argument('--bound_cond' , '-bc', default = [(0,290),(5, 300)], type = int  , nargs = '*', help='Set boundary conditions') 

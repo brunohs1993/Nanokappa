@@ -1,4 +1,9 @@
 h5py
 trimesh
-phonopy
+networkx
+triangle
+rtree
 pyembree
+phonopy
+imageio
+
