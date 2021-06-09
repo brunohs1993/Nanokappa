@@ -1,7 +1,6 @@
 # calculations
 import numpy as np
-from scipy.interpolate import interp1d
-from functools import partial
+from scipy.interpolate import interp1d, RegularGridInterpolator
 
 # hdf5 files
 import h5py
@@ -156,8 +155,26 @@ class Phonon(Constants):
 
         self.lifetime = np.where( self.gamma>0, 1/( 2*2*np.pi*self.gamma), 0) # ps
 
-        self.lifetime_function = [[interp1d(self.temperature_array, self.lifetime[:, i, j], kind = 'linear') for j in range(self.number_of_branches)] for i in range(self.number_of_qpoints)]
+        margin = 10
+        T_min = np.floor(self.T_threshold)-margin
+        T_max = self.T_hot+margin
 
+        if len(np.where(self.temperature_array < T_min)[0]) > 0:
+            start_index = np.where(self.temperature_array < T_min)[0][-1]
+        else:
+            start_index = 0
+        
+        if len(np.where(self.temperature_array > T_max)[0])>0:
+            end_index   = np.where(self.temperature_array > T_max)[0][ 0]
+        else:
+            end_index = -1
+
+        q_array = np.arange(self.number_of_qpoints )
+        j_array = np.arange(self.number_of_branches)
+        T = self.temperature_array[start_index:end_index+1]
+        tau = self.lifetime[start_index:end_index+1, :, :]
+
+        self.lifetime_function = RegularGridInterpolator((T, q_array, j_array), tau)
 
     def calculate_occupation(self, T, omega, threshold = False):
         '''Calculate the Bose-Einstein occupation number of a given frequency at temperature T.'''
@@ -204,17 +221,20 @@ class Phonon(Constants):
     def initialise_temperature_function(self):
         '''Calculate an array of energy density levels and initialises the function to recalculate T = f(E)'''
 
+        # interval
+        margin = 10
+        T_min = np.floor(self.T_threshold)-margin
+        T_max = self.T_hot+margin
+
         # Temperature array
         dT = 0.1
-        T_boundary = np.array([0, 1000+dT])
-
-        T_array = np.arange(T_boundary.min(), T_boundary.max()+dT, dT)
+        T_array = np.arange(T_min, T_max+dT, dT)
 
         # Energy array
         self.energy_array = np.array( list( map(self.calculate_crystal_energy, T_array) ) ).reshape(-1)
 
         # Interpolating        
-        self.temperature_function = interp1d( self.energy_array, T_array, kind = 'linear' )
+        self.temperature_function = interp1d( self.energy_array, T_array, kind = 'linear', fill_value = '' )
 
     def normalise_to_density(self, x):
         '''Defines conversion from energy to energy density here so it is easy to change.'''

@@ -15,7 +15,7 @@ from functools import partial
 # simulation
 from classes.Constants import Constants
 
-matplotlib.use('Agg')
+# matplotlib.use('Agg')
 
 class Visualisation(Constants):
     def __init__(self, args, geometry, phonon):
@@ -41,112 +41,134 @@ class Visualisation(Constants):
     def preprocess(self):
         print('Generating preprocessing plots...')
         
+        print('Scattering probability...')
         self.scattering_probability()
+        print('Density of states...')
         self.density_of_states()
 
     def postprocess(self):
-        print('Generating postprocessing plots...')
-        
         # convergence data
-        
+
+        print('Reading convergence data')
         self.read_convergence()
+        print('Plotting temperature convergence...')
         self.convergence_temperature()
+        print('Plotting number of particles convergence...')
         self.convergence_particles()
+        print('Plotting heat flux convergence...')
         self.convergence_heat_flux()
+        print('Plotting energy density convergence...')
         self.convergence_energy()
+        print('Plotting energy balance convergence...')
+        self.convergence_energy_balance()
 
         # final particles states
 
+        print('Reading particle data...')
         self.read_particles()
         # self.mode_histogram()
+        print('Plotting group velocity histogram...')
         self.velocity_histogram()
+        print('Plotting energy above threshold histogram...')
         self.energy_histogram()
+        print('Plotting thermal conductivity with frequency...')
         self.flux_contribution()
+        print('Plotting energy dispersion...')
+        self.energy_dispersion()
 
-        
     def scattering_probability(self):
+        '''Plots the scattering probability of the maximum temperature (in which scattering mostly occurs)
+        and gives information about simulation instability due to de ratio dt/tau.'''
+
+        T = self.T_boundary.max()
         
-        T = [self.T_boundary.min(), self.T_boundary.mean(), self.T_boundary.max()]
-        
-        fig = plt.figure(figsize = (20,8), dpi = 120)
+        fig = plt.figure(figsize = (8,8), dpi = 120)
         
         x_data = self.phonon.omega[self.unique_modes[:, 0], self.unique_modes[:, 1]]
 
-        axes = []
-        y_data = []
+        # calculating y data
+        ax = fig.add_subplot(111)
 
-        criteria = 0.1
-
-        n_plots = 3
-
-        min_lt = np.zeros(3)
+        Tqj = np.hstack( ( ( np.ones(self.unique_modes.shape[0])*T).reshape(-1, 1), self.unique_modes ) )
         
-        # calculating y data for each temperature
-        for i in range(n_plots):
-            ax = fig.add_subplot(1, n_plots, i+1)
-            axes.append(ax)
+        lifetime = self.phonon.lifetime_function(Tqj)
 
-            function = partial(self.get_lifetime, T = T[i])
-            
-            lifetime = np.array(list(map(function, self.unique_modes)))
+        min_lt = lifetime[lifetime > 0].min()
 
-            min_lt[i] = lifetime[lifetime > 0].min()
+        with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
+            scat_prob = np.where(lifetime>0, 1-np.exp(-self.dt/lifetime), 0)
 
-            with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
-                scat_prob = np.where(lifetime>0, 1-np.exp(-self.dt/lifetime), 0)
+        y_data = scat_prob
 
-            y_data.append(scat_prob)
-
-            # colors = np.where(y_data[i] > criteria, 'orangered', 'royalblue')
+        # colors = np.where(y_data[i] > criteria, 'orangered', 'royalblue')
 
         # setting limits and colors based on y data
-        y_data = np.array(y_data)
-
         min_y = 0
 
-        max_y = y_data.max()
-        max_y = np.ceil(max_y*10)/10
+        # max_y = y_data.max()
+        # max_y = np.ceil(max_y*10)/10
+        max_y = 1
 
-        max_dt = -np.log(1-criteria)*min_lt
+        unstable_scat_prob    = 1-np.exp(-2)
+        oscillating_scat_prob = 1-np.exp(-1)
 
-        out_points = np.where(y_data > criteria, 1, 0).sum(axis = 1)/y_data.shape[1]
-        out_points *= 100
+        # P = 1-e^(-dt/tau)
+        # max P = 1-e^(-max_dt/min_tau)
+        # ln(1-max P) = -max_dt/min_tau
+        # max_dt = -min_tau*ln(1-max P)
 
-        colors = ['royalblue', 'blue', 'gold', 'crimson', 'crimson']
-        nodes  = np.array([0.0, criteria-0.01, criteria, criteria+0.01, max([criteria+0.05, max_y])])/max([criteria+0.05, max_y])
+        max_dt = -min_lt*np.log(1-unstable_scat_prob)
+        max_non_oscil_dt = -min_lt*np.log(1-oscillating_scat_prob)
+
+        unstable_modes = np.where(y_data > unstable_scat_prob, 1, 0).sum()/y_data.shape[0]
+        unstable_modes *= 100
+
+        colors = ['royalblue', 'royalblue', 'gold', 'gold', 'crimson', 'crimson']
+        nodes  = np.array([0.0, oscillating_scat_prob-0.01, oscillating_scat_prob+0.01, unstable_scat_prob-0.01, unstable_scat_prob+0.01, 1])
         cmap = LinearSegmentedColormap.from_list('byr', list(zip(nodes, colors)))
 
-        for i in range(n_plots):
-            ax = axes[i]
+        ax.scatter(x_data, y_data, s = 1,
+                    c = y_data, cmap = cmap,
+                    vmin = 0,
+                    vmax = 1)
+        ax.plot([0, self.phonon.omega.max()], [   unstable_scat_prob,    unstable_scat_prob], color = 'gray', linestyle='--', alpha = 0.5)
+        ax.text(x = 0, y = unstable_scat_prob - 0.01,
+                s = r'Instability limit - $dt/\tau = 2$',
+                va = 'top',
+                ha = 'left',
+                fontsize = 'large',
+                color = 'gray')
+        ax.plot([0, self.phonon.omega.max()], [oscillating_scat_prob, oscillating_scat_prob], color = 'gray', linestyle='--', alpha = 0.5)
+        ax.text(x = 0, y = oscillating_scat_prob - 0.01,
+                s = r'Oscillations limit - $dt/\tau = 1$',
+                va = 'top',
+                ha = 'left',
+                fontsize = 'large',
+                color = 'gray')
+        
+        ax.set_xlabel(r'Angular frequency $\omega$ [rad THz]',
+                        fontsize = 'large')
+        ax.set_ylabel(r'Scattering probability $P = 1-\exp(-dt/\tau)$',
+                        fontsize = 'large')
 
-            ax.scatter(x_data, y_data[i, :], s = 1,
-                       c = y_data[i, :], cmap = cmap,
-                       vmin = min(nodes)*max([criteria+0.05, max_y]),
-                       vmax = max(nodes)*max([criteria+0.05, max_y]))
+        ax.set_ylim(min_y, max_y)
 
-            ax.set_xlabel(r'Angular frequency $\omega$ [rad THz]',
-                          fontsize = 'large')
-            ax.set_ylabel(r'Scattering probability $P = 1-\exp(-dt/\tau)$',
-                          fontsize = 'large')
+        ax.text(x = 0, y = max_y*0.97,
+                s = 'T = {:.1f} K\nUnstable modes = {:.2f} %\nMax stable dt = {:.3f} ps\nMax non-oscillatory dt = {:.3f} ps'.format(T, unstable_modes, max_dt, max_non_oscil_dt),
+                va = 'top',
+                ha = 'left',
+                fontsize = 'large',
+                linespacing = 1.1)
 
-            ax.set_ylim(min_y, max_y)
-
-            ax.text(x = 0, y = max_y*0.97,
-                    s = 'T = {:.1f} K\nOut points = {:.2f} %\nMax allowed dt = {:.3f} ps'.format(T[i], out_points[i], max_dt[i]),
-                    va = 'top',
-                    ha = 'left',
-                    fontsize = 'x-large',
-                    linespacing = 1.1)
-
-        fig.suptitle(r'Scattering probability for $T_{{cold}}$, $T_{{mean}}$ and $T_{{hot}}$. Criteria: $P < {:.2f}$'.format(criteria),
+        fig.suptitle(r'Scattering probability for $T_{{hot}}$ with $dt = ${:.2f} ps'.format(self.dt),
                      fontsize = 'xx-large')
 
         plt.tight_layout()
         plt.savefig(self.folder+'scattering_prob.png')
 
-        if (y_data > criteria).sum() > 0:
+        if np.any(y_data > unstable_scat_prob):
             print('MCPhonon Warning: Timestep is too large! Check scattering probability plot for details.')
-    
+        
     def get_lifetime(self, mode, T):
         return self.phonon.lifetime_function[mode[0]][mode[1]](T)
 
@@ -201,29 +223,37 @@ class Visualisation(Constants):
 
         self.number_of_slices = self.args.slices[0]
 
-        self.datetime = data[:, 0].astype('datetime64[us]')
-        self.timestep = data[:, 1].astype(int)
-        self.sim_time = data[:, 2].astype(float)
-        self.avg_en   = data[:, 3].astype(float)
-        self.N_p      = data[:, 4].astype(int)
-        self.T        = data[:, 5:self.number_of_slices+5].astype(float)
-        self.slice_en = data[:,   self.number_of_slices+5:2*self.number_of_slices+5].astype(float)
-        self.phi      = data[:, 2*self.number_of_slices+5:3*self.number_of_slices+5].astype(float)
-        self.slice_Np = data[:, 3*self.number_of_slices+5:4*self.number_of_slices+5].astype(float)
+        self.datetime    = data[:, 0].astype('datetime64[us]')
+        self.timestep    = data[:, 1].astype(int)
+        self.sim_time    = data[:, 2].astype(float)
+        self.avg_en      = data[:, 3].astype(float)
+        self.en_balance  = data[:, 4:6].astype(float)
+        self.phi_balance = data[:, 6:8].astype(float)
+        self.N_p         = data[:, 8].astype(int)
+        self.T           = data[:, 9:self.number_of_slices+9].astype(float)
+        self.slice_en    = data[:,   self.number_of_slices+9:2*self.number_of_slices+9].astype(float)
+        self.phi         = data[:, 2*self.number_of_slices+9:3*self.number_of_slices+9].astype(float)
+        self.slice_Np    = data[:, 3*self.number_of_slices+9:4*self.number_of_slices+9].astype(float) 
 
     def read_particles(self):
         filename = self.folder+'particle_data.txt'
 
-        f = open(filename, 'r')
+        print('Start reading particle data')
 
-        lines = f.readlines()
+        data = np.loadtxt(filename, delimiter = ',')
 
-        f.close()
+        print('Finished reading particle data')
 
-        data = [ i.strip().split(',') for i in lines]
-        data = data[4:]
-        data = [ list(filter(None, i)) for i in data]
-        data = np.array(data)
+        # f = open(filename, 'r')
+
+        # lines = f.readlines()
+
+        # f.close()
+
+        # data = [ i.strip().split(',') for i in lines]
+        # data = data[4:]
+        # data = [ list(filter(None, i)) for i in data]
+        # data = np.array(data)
 
         self.q_point    = data[:, 0].astype(int)
         self.branch     = data[:, 1].astype(int)
@@ -242,15 +272,14 @@ class Visualisation(Constants):
         for i in range(self.number_of_slices):
             y_axis = self.T[:, i]
             ax1.plot(x_axis, y_axis)
-
-        ax1.legend(np.arange(self.number_of_slices)+1)
-
+        
         ax1.set_xlabel('Simulation time [ps]', fontsize = 12)
         ax1.set_ylabel('Temperature [K]', fontsize = 12)
         
         labels = ['Slice {:d}'.format(i) for i in slice_axis]
-        
-        ax1.legend(labels)
+
+        if self.number_of_slices <=10:
+            ax1.legend(labels)
 
         # Temperature profile
         ax2 = fig.add_subplot(122, sharey = ax1)
@@ -261,7 +290,7 @@ class Visualisation(Constants):
         n = 5
         color = 'royalblue'
 
-        alphas = np.linspace(0.1, 1.0, n)
+        alphas = np.linspace(0.2, 1.0, n)
         rgba_colors = np.zeros((n, 4))
         rgba_colors[:, :3] = matplotlib.colors.to_rgb(color)
         rgba_colors[:,  3] = alphas
@@ -317,7 +346,8 @@ class Visualisation(Constants):
         labels = ['Slice {:d}'.format(i) for i in slice_axis]
         labels.append('Mean')
         labels.append(r'$\pm \sigma$')
-        ax1.legend(labels)
+        if self.number_of_slices <=10:
+            ax1.legend(labels)
 
         ax1.set_xlabel('Simulation time [ps]', fontsize = 12)
         ax1.set_ylabel('Number of Particles in Slice', fontsize = 12)
@@ -386,7 +416,8 @@ class Visualisation(Constants):
         labels = ['Slice {:d}'.format(i) for i in slice_axis]
         labels.append('Mean')
         labels.append(r'$\pm \sigma$')
-        ax1.legend(labels)
+        if self.number_of_slices <=10:
+            ax1.legend(labels)
 
         ax1.set_xlabel('Simulation time [ps]', fontsize = 12)
         ax1.set_ylabel('Heat Flux for Slice [W/m²]', fontsize = 12)
@@ -658,29 +689,39 @@ class Visualisation(Constants):
         # getting data
 
         n_of_slices = self.args.slices[0] 
-        slice_axis = self.args.slices[1]
+        slice_axis  = self.args.slices[1]
         
-        omega    = self.phonon.omega[    self.q_point, self.branch]
+        omega    = self.phonon.omega[self.q_point, self.branch]
         velocity = self.phonon.group_vel[self.q_point, self.branch, slice_axis]
-        volumes = self.geometry.slice_volume[self.slice_id]
 
+        n_dt_to_conv = np.floor( np.log10( self.args.iterations[0] ) ) - 2    # number of timesteps for each convergence datapoints
+        n_dt_to_conv = int(10**n_dt_to_conv)
+        n_dt_to_conv = max([10, n_dt_to_conv])
+
+        n = int(200/(n_dt_to_conv*self.args.timestep[0]))
         slice_res_T       = np.zeros(n_of_slices+2)
         slice_res_T[ 0]   = self.args.temperatures[0]
-        slice_res_T[1:-1] = self.T[-1, :]
+        slice_res_T[1:-1] = self.T[-n:, :].mean(axis = 0)
         slice_res_T[-1]   = self.args.temperatures[1]
-
-        dX = 2*self.geometry.slice_length*self.a_in_m     # m
 
         # calculating contributions
 
-        particle_flux = self.phonon.hbar*self.occupation*omega*velocity/volumes # eV/ps a²
+        particle_flux = self.phonon.normalise_to_density(self.phonon.hbar*self.occupation*omega*velocity) # eV/ps a²
 
         particle_flux = particle_flux*self.eVpsa2_in_Wm2    # W/m²
+
+        dX = 2*self.geometry.slice_length*self.a_in_m     # m
 
         dT = slice_res_T[self.slice_id+2] - slice_res_T[self.slice_id]  # K
         
         particle_k = particle_flux*(-dX/dT)     # (W/m²) * (m/K) = W/m K ; Central difference --> [T(+1) - T(-1)]/[x(1) - x(-1)]
 
+        # flux considering all the domain
+        dX_total = self.geometry.slice_length*(n_of_slices-1)*self.a_in_m   # m
+        dT_total = slice_res_T[-2] - slice_res_T[1]                         # K
+
+        particle_k_total = particle_flux*(-dX_total/dT_total)    # W/m²
+        
         # defining bins
 
         n_bins = 100
@@ -692,39 +733,70 @@ class Visualisation(Constants):
 
         # generating figure
 
-        fig = plt.figure(figsize = (15, 10), dpi = 100)
-        ax = fig.add_subplot(111)
+        fig = plt.figure(figsize = (15, 20), dpi = 100)
+        ax1 = fig.add_subplot(211)
+        ax2 = fig.add_subplot(212)
 
         k_omega = np.zeros((n_of_slices, n_bins))
+        k_omega_total = np.zeros(n_bins)
 
-        for slc in range(n_of_slices):
+        for b in range(n_bins):
+        
+            bin_indexes = (omega >= omega_bins[b]) & (omega < omega_bins[b+1])    # identifying omega bin
+
+            k_omega_total[b] = particle_k_total[bin_indexes].sum()/(self.args.particles[0]*n_of_slices)
             
-            slice_indexes = (self.slice_id == slc)  # getting which particles are in slice
-            
-            for b in range(n_bins):
-                bin_indexes = (omega >= omega_bins[b]) & (omega < omega_bins[b+1])    # identifying omega bin
+            for slc in range(n_of_slices):    
+                slice_indexes = (self.slice_id == slc)  # getting which particles are in slice
                 
                 indexes = slice_indexes & bin_indexes   # getting particles of that bin in that slice
             
-                k_omega[slc, b] = particle_k[indexes].sum()
-            
+                k_omega[slc, b] = particle_k[indexes].sum()/(self.args.particles[0])
+                
         for slc in range(n_of_slices):
             
-            ax.plot(omega_center, k_omega[slc, :], alpha = 0.5, linewidth = 3)
+            ax1.plot(omega_center, k_omega[slc, :], alpha = 0.5, linewidth = 3)
             # ax.fill_between(omega_center, 0, k_omega[slc, :], alpha = 0.5)
             # ax.bar(omega_center, k_omega[slc, :], alpha = 0.5, width = 0.8*step)
+
+            ax2.plot(omega_center, np.cumsum(k_omega[slc, :]), alpha = 0.5, linewidth = 3)
+        
+        ax1.plot(omega_center, k_omega_total           , color = 'k', linestyle = '--')
+        ax2.plot(omega_center, np.cumsum(k_omega_total), color = 'k', linestyle = '--')
         
         labels = ['Slice {:d}'.format(i+1) for i in range(n_of_slices)]
+        labels += ['Domain']
+        
+        ax1.legend(labels, fontsize = 'x-large')
+        ax1.set_xlabel(r'Angular Frequency $\omega$ [rad THz]', fontsize = 'x-large')
+        ax1.set_ylabel(r'Thermal conductivity in band $k(\omega)$ [W/mK]', fontsize = 'x-large')
 
-        ax.legend(labels, fontsize = 'x-large')
-        ax.set_xlabel(r'Angular Frequency $\omega$ [rad THz]', fontsize = 'x-large')
-        ax.set_ylabel(r'Thermal conductivity in band $k(\omega)$ [W/mK]', fontsize = 'x-large')
+        ax1.ticklabel_format(axis = 'y', style = 'sci', scilimits=(0,0), useOffset = False)
+        ax1.ticklabel_format(axis = 'x', useOffset = False)
 
-        ax.ticklabel_format(axis = 'y', style = 'sci', scilimits=(0,0), useOffset = False)
-        ax.ticklabel_format(axis = 'x', useOffset = False)
+        ax2.legend(labels, fontsize = 'x-large')
+        ax2.set_xlabel(r'Angular Frequency $\omega$ [rad THz]', fontsize = 'x-large')
+        ax2.set_ylabel(r'Cumulated Thermal conductivity in band $k(\omega)$ [W/mK]', fontsize = 'x-large')
 
+        ax2.ticklabel_format(axis = 'y', style = 'sci', scilimits=(0,0), useOffset = False)
+        ax2.ticklabel_format(axis = 'x', useOffset = False)
+
+        text_x = ax2.get_xlim()[1]-np.array(ax2.get_xlim()).ptp()*0.05
+        text_y = ax2.get_ylim()[0]+np.array(ax2.get_ylim()).ptp()*0.05
+
+        ax2.text(text_x, text_y, r'$\kappa$ = {:.3e} W/mK'.format(k_omega_total.sum()),
+                 verticalalignment   = 'bottom',
+                 horizontalalignment = 'right',
+                 fontsize = 'xx-large')
+        
+        plt.sca(ax1)
         plt.yticks(fontsize = 'x-large')
         plt.xticks(fontsize = 'x-large')
+        plt.grid(True)
+        plt.sca(ax2)
+        plt.yticks(fontsize = 'x-large')
+        plt.xticks(fontsize = 'x-large')
+        plt.grid(True)
 
         plt.suptitle('Contribution of each frequency band to thermal conductivity. {:d} bands.'.format(n_bins), fontsize = 'xx-large')
 
@@ -772,8 +844,8 @@ class Visualisation(Constants):
         data = np.zeros(0)
 
         for i in range(n_of_slices):
-            indexes = (exp_energy[i, :, :] > 0)
-            data = np.append(data, exp_energy[i, :, :][indexes].reshape(-1))
+            # indexes = (exp_energy[i, :, :] > 0)
+            data = np.append(data, exp_energy[i, :, :].reshape(-1))
         
         ax.hist(data, bins = bins, density = True, # stacked = True,
                 histtype  = 'step',
@@ -796,9 +868,108 @@ class Visualisation(Constants):
         plt.tight_layout()
         plt.savefig(self.folder + 'energy_histogram.png')
             
+    def energy_dispersion(self):
+
+        omega       = self.phonon.omega[self.q_point, self.branch]  # particles omegas
+        energies    = self.hbar*omega*self.occupation               # particles energies
+        temperature = self.T[-1, :][self.slice_id]                  # particles temperatures
+
+        exp_energy  = self.phonon.calculate_energy(temperature, omega, threshold = True)    # particle expected energy at T
+
+        # plotting
+        fig = plt.figure(figsize = (10, 10), dpi = 100)
+        ax = fig.add_subplot(111)
+
+        omega_order = np.ceil(np.log10(omega.max()))
+
+        vmin = 0
+        vmax = np.ceil(omega.max()/10**omega_order)*10**omega_order
+
+        scat = ax.scatter(exp_energy, energies, marker='.', s = 1, c = omega, cmap = 'viridis', vmin = vmin, vmax = vmax)
+        fig.colorbar(scat, label = r'$\omega$ [THz]', location = 'right', fraction = 0.1, aspect = 50)
         
+        line = ax.get_xlim()
 
+        ax.plot(line, line, linestyle = '--', linewidth = 1, color = 'k')
+
+        ax.set_xlabel('Expected energy above threshold [eV]')
+        ax.set_ylabel('Real energy above threshold [eV]')
+
+        ax.ticklabel_format(axis = 'x', style = 'sci', scilimits=(0,0))
+        ax.ticklabel_format(axis = 'y', style = 'sci', scilimits=(0,0))
+
+       
+
+        plt.suptitle('Expected and actual energy above threshold in final state')
+
+        plt.tight_layout()
+
+        plt.savefig(self.folder + 'energy_distribution.png')
         
+    def final_temperature_profile(self):
+        '''Mean of the last 20 data points.'''
 
+        n = 20
 
+        mean_T  = self.T[-n:, :].mean(axis = 0)
+        stdev_T = self.T[-n:, :].std( axis = 0)
 
+        n_of_slices = self.geometry.n_of_slices
+        slice_length = self.geometry.slice_length
+
+        space_axis = np.arange(n_of_slices)*slice_length+slice_length/2
+
+        fig = plt.figure(figsize = (8, 8), dpi = 120)
+        ax = fig.add_subplot(111)
+        
+        ax.errorbar(space_axis, mean_T, xerr = stdev_T)
+
+    def convergence_energy_balance(self):
+        fig = plt.figure( figsize = (15, 5) )
+        x_axis = self.sim_time
+
+        ax1 = fig.add_subplot(121)
+
+        # Energy balance
+        y_axis = self.en_balance
+        ax1.plot(x_axis, y_axis)
+        ax1.plot(x_axis, y_axis.sum(axis = 1), linestyle = '--', color = 'k')
+        
+        ax1.set_xlabel('Simulation time [ps]', fontsize = 12)
+        ax1.set_ylabel('Energy balance on surface [eV]', fontsize = 12)
+        
+        labels = ['Surface {}'.format(i+1) for i in range(self.en_balance.shape[1])]
+        labels.append('Balance')
+
+        if self.en_balance.shape[1] <=10:
+            ax1.legend(labels)
+
+        ax1.grid(True, ls = '--', lw = 1, color = 'slategray')
+
+        ax1.ticklabel_format(axis = 'y', style = 'sci', scilimits=(0,0), useOffset = False)
+
+        ax2 = fig.add_subplot(122)
+
+        # Flux balance
+        y_axis = self.phi_balance
+        for i in range(y_axis.shape[1]):
+            ax2.plot(x_axis, y_axis[:, i])
+        ax2.plot(x_axis, y_axis[:, 0]-y_axis[:, 1], linestyle = '--', color = 'k')
+        
+        ax2.set_xlabel('Simulation time [ps]', fontsize = 12)
+        ax2.set_ylabel('Heat flux balance on surface [W/m²]', fontsize = 12)
+        
+        labels = ['Surface {}'.format(i+1) for i in range(self.en_balance.shape[1])]
+        labels.append('Balance')
+
+        if self.en_balance.shape[1] <=10:
+            ax2.legend(labels)
+
+        ax2.grid(True, ls = '--', lw = 1, color = 'slategray')
+
+        ax2.ticklabel_format(axis = 'y', style = 'sci', scilimits=(0,0), useOffset = False)
+
+        plt.suptitle('Energy and Heat Flux balance over time.', fontsize = 'xx-large')
+
+        plt.tight_layout()
+        plt.savefig(self.folder+'convergence_en_balance.png')

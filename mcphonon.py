@@ -14,21 +14,23 @@ import sys
 def initialise_parser():
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--from_file'   , '-ff', default  = ''                , type = str, help='Import arguments from file.'     ) # arguments file name to be imported
+    parser.add_argument('--from_file'     , '-ff', default  = ''                , type = str, help='Import arguments from file.'     ) # arguments file name to be imported
 
-    parser.add_argument('--geometry'    , '-g' , default = ['cuboid']         , type = str  , nargs = 1  , help='Geometry of the domain. Standard shapes are cuboid, cylinder, cone and capsule')
-    parser.add_argument('--dimensions'  , '-d' , default = [20e3, 1e3, 1e3]   , type = float, nargs = 3  , help='Dimensions in angstroms as asked by trimesh.creation primitives. 3 for box, 2 for others. Radius first.')
-    parser.add_argument('--scale'       , '-s' , default = [1, 1, 1]          , type = float, nargs = 3  , help='Scaling factors (x, y, z) to be applied to given geometry.')
-    parser.add_argument('--rotation'    , '-r' , default = [0, 0, 0]          , type = float, nargs = 3  , help='Euler angles in degrees to be applied to given geometry (see scipy.rotation.from_euler).')
-    parser.add_argument('--rot_order'   , '-ro', default = ['xyz']            , type = str  , nargs = 1  , help='Order of rotation to be applied to given geometry (see scipy.rotation.from_euler).')
-    parser.add_argument('--particles'   , '-p' , default = [1]                , type = float, nargs = 1  , help='Number of particles per mode, per slice.')
-    parser.add_argument('--part_dist'   , '-pd', default = ['random_slice']   , type = str  , nargs = 1  , help='How to distribute particles. random/center _ domain/slice')
-    parser.add_argument('--empty_slices', '-es', default = []                 , type = int  , nargs = '*', help='Slices indexesto keep empty at initialisation.')
+    parser.add_argument('--geometry'      , '-g' , default = ['cuboid']         , type = str  , nargs = 1  , help='Geometry of the domain. Standard shapes are cuboid, cylinder, cone and capsule')
+    parser.add_argument('--dimensions'    , '-d' , default = [20e3, 1e3, 1e3]   , type = float, nargs = 3  , help='Dimensions in angstroms as asked by trimesh.creation primitives. 3 for box, 2 for others. Radius first.')
+    parser.add_argument('--scale'         , '-s' , default = [1, 1, 1]          , type = float, nargs = 3  , help='Scaling factors (x, y, z) to be applied to given geometry.')
+    parser.add_argument('--rotation'      , '-r' , default = [0, 0, 0]          , type = float, nargs = 3  , help='Euler angles in degrees to be applied to given geometry (see scipy.rotation.from_euler).')
+    parser.add_argument('--rot_order'     , '-ro', default = ['xyz']            , type = str  , nargs = 1  , help='Order of rotation to be applied to given geometry (see scipy.rotation.from_euler).')
+    parser.add_argument('--particles'     , '-p' , default = [1]                , type = float, nargs = 1  , help='Number of particles per mode, per slice.')
+    parser.add_argument('--part_dist'     , '-pd', default = ['random_slice']   , type = str  , nargs = 1  , help='How to distribute particles. random/center _ domain/slice')
+    parser.add_argument('--empty_slices'  , '-es', default = []                 , type = int  , nargs = '*', help='Slices indexesto keep empty at initialisation.')
+    parser.add_argument('--slice_material', '-sm', default = []                 , type = int  , nargs = '*', help='Material index of each slice, according to the order given at -pf and -hf.')
 
     parser.add_argument('--timestep'      , '-ts', default = [1]                , type = float, nargs = 1  , help='Timestep size in picoseconds')
     parser.add_argument('--iterations'    , '-i' , default = [10000]            , type = int  , nargs = 1  , help='Number of timesteps (iterations) to be run')
     parser.add_argument('--slices'        , '-sl', default = [10, 0]            , type = int  , nargs = 2  , help='Number of slices and slicing axis (x = 0, y = 1, z = 2)')
-    parser.add_argument('--temperatures'  , '-t' , default = [310, 290]         , type = float, nargs = 2  , help='Set first and reservoirs temperatures to be imposed.') 
+    parser.add_argument('--temperatures'  , '-t' , default = [310, 290]         , type = float, nargs = 2  , help='Set first and reservoirs temperatures to be imposed.')
+    parser.add_argument('--slice_temp'    , '-st', default = []                 , type = float, nargs = '*', help='Set slice temperatures when custom profile is selected.') 
     parser.add_argument('--threshold_temp', '-tt', default = [0]                , type = float, nargs = 1  , help='Set minimum temperature to be considered in the system.') 
     parser.add_argument('--temp_dist'     , '-td', default = ['constant_cold']  , type = str  , nargs = '*', help='Set how to distribute initial temperatures.')
     parser.add_argument('--bound_cond'    , '-bc', default = ['periodic']       , type = str  , nargs = 1  , help='Set behaviour of the other faces. It can be "periodic", ...')

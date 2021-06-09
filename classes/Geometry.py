@@ -85,6 +85,7 @@ class Geometry:
 
         self.bounds          = self.mesh.bounds
         self.domain_centroid = self.mesh.center_mass
+        self.volume          = self.mesh.volume
     
     def slice_domain(self):
         print('Slicing domain...')
