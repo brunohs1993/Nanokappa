@@ -800,7 +800,7 @@ class Visualisation(Constants):
 
         plt.suptitle('Contribution of each frequency band to thermal conductivity. {:d} bands.'.format(n_bins), fontsize = 'xx-large')
 
-        plt.tight_layout()
+        plt.tight_layout(pad = 3)
         plt.savefig(self.folder + 'k_contribution.png')
 
     def energy_histogram(self):
@@ -876,33 +876,46 @@ class Visualisation(Constants):
 
         exp_energy  = self.phonon.calculate_energy(temperature, omega, threshold = True)    # particle expected energy at T
 
-        # plotting
-        fig = plt.figure(figsize = (10, 10), dpi = 100)
-        ax = fig.add_subplot(111)
-
         omega_order = np.ceil(np.log10(omega.max()))
 
         vmin = 0
         vmax = np.ceil(omega.max()/10**omega_order)*10**omega_order
 
-        scat = ax.scatter(exp_energy, energies, marker='.', s = 1, c = omega, cmap = 'viridis', vmin = vmin, vmax = vmax)
-        fig.colorbar(scat, label = r'$\omega$ [THz]', location = 'right', fraction = 0.1, aspect = 50)
+        # plotting
+        rows = 1 # int(np.ceil(self.number_of_slices**0.5))
+        columns = self.number_of_slices #int(np.ceil(self.number_of_slices/rows))
+
+        width_ratios = np.ones(columns)
+        height_ratios = np.ones(rows+1)
+        height_ratios[0] = 0.1
+
+        fig = plt.figure(figsize = (columns*4, rows*4), dpi = 100)
+        gs = gridspec.GridSpec(rows+1, columns, width_ratios = width_ratios, height_ratios = height_ratios)
+
+        for i in range(self.number_of_slices):
+
+            indexes = self.slice_id == i
+
+            ax = plt.subplot(gs[columns+i])
+
+            scat = ax.scatter(exp_energy[indexes], energies[indexes], marker='.', s = 1, c = omega[indexes], cmap = 'viridis', vmin = vmin, vmax = vmax)
+            
+            line = ax.get_xlim()
+
+            ax.plot(line, line, linestyle = '--', linewidth = 1, color = 'k')
+
+            ax.set_xlabel(r'$\hbar \omega [n^0(T) - n^0(T_{th})]$ [eV]')
+            ax.set_ylabel(r'$\hbar \omega [n - n^0(T_{th})]$ [eV]')
+            ax.set_title(r'$T = {}$ K'.format(self.T[-1, :][i]))
+
+            ax.ticklabel_format(axis = 'x', style = 'sci', scilimits=(0,0))
+            ax.ticklabel_format(axis = 'y', style = 'sci', scilimits=(0,0))
         
-        line = ax.get_xlim()
-
-        ax.plot(line, line, linestyle = '--', linewidth = 1, color = 'k')
-
-        ax.set_xlabel('Expected energy above threshold [eV]')
-        ax.set_ylabel('Real energy above threshold [eV]')
-
-        ax.ticklabel_format(axis = 'x', style = 'sci', scilimits=(0,0))
-        ax.ticklabel_format(axis = 'y', style = 'sci', scilimits=(0,0))
-
+        fig.colorbar(scat, label = r'$\omega$ [THz]', fraction = 1, cax = plt.subplot(gs[0, :]), orientation = 'horizontal')
        
+        plt.suptitle('Energy difference from threshold in final state', fontsize = 'large')
 
-        plt.suptitle('Expected and actual energy above threshold in final state')
-
-        plt.tight_layout()
+        plt.tight_layout(pad = 2)
 
         plt.savefig(self.folder + 'energy_distribution.png')
         

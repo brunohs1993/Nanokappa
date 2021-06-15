@@ -1,13 +1,13 @@
 -hf ../Materials/Si/kappa-m313131.hdf5
 -pf ../Materials/Si/POSCAR
--d  20e3 1e3 1e3
--i  1000
+-d  2e3 1e3 1e3
+-i  500
 -p  1
 -pd random_slice
--sl 30 0
+-sl 2 0
 -ts 1
 -t  303 297
 -tt 300
 -td linear
 -rl d:/LEMTA/Code/Results/
--rf 2microm_lin_phase1
+-rf update_test

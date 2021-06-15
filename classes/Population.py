@@ -574,10 +574,7 @@ class Population(Constants):
             vmax = np.ceil(self.T_boundary.max()+5)
         elif self.rt_plot[0] in ['e', 'energy']:
             colors = self.energies
-            if self.energies.shape[0]>0:
-                vmin = self.energies[self.energies>0].min()
-            else:
-                vmin = 0
+            vmin = phonon.calculate_energy(self.T_boundary.min(), phonon.omega, threshold = True).min()
             vmax = phonon.calculate_energy(self.T_boundary.max(), phonon.omega, threshold = True).max()
         elif self.rt_plot[0] in ['omega', 'angular_frequency']:
             colors = self.omega
@@ -585,9 +582,9 @@ class Population(Constants):
             vmax = self.omega.max()
         elif self.rt_plot[0] in ['n', 'occupation']:
             colors = self.occupation
-            vmin = 0
-            order = np.floor( np.log10( self.occupation.max()) )
-            vmax = (10**order)*np.ceil(self.occupation.max()/(10**order))
+            order = [np.floor( np.log10( self.occupation.min()) ), np.floor( np.log10( self.occupation.max()) )]
+            vmin = (10**order[0])*np.ceil(self.occupation.min()/(10**order[0]))
+            vmax = (10**order[1])*np.ceil(self.occupation.max()/(10**order[1]))
         elif self.rt_plot[0] in ['qpoint']:
             colors = self.modes[:, 0]
             vmin = 0
@@ -624,7 +621,7 @@ class Population(Constants):
         ax.set_zlim(geometry.bounds[:, 2])
 
         graph = ax.scatter(self.positions[:, 0], self.positions[:, 1], self.positions[:, 2], s = 1, vmin = vmin, vmax = vmax, c = colors, cmap = self.colormap)
-        fig.colorbar(graph)
+        # fig.colorbar(graph)
 
         plt.tight_layout()
 
