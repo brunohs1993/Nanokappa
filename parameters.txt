@@ -1,13 +1,13 @@
--hf ../Materials/Si/kappa-m313131.hdf5
--pf ../Materials/Si/POSCAR
--d  2e3 1e3 1e3
--i  500
--p  1
+-hf ../Materials/Pb2_I4/kappa-m20206.hdf5
+-pf ../Materials/Pb2_I4/POSCAR-unitcell
+-d  0.5e3 1e3 1e3
+-i  10000
+-p  10
 -pd random_slice
--sl 2 0
--ts 1
+-sl 10 0
+-ts 0.2
 -t  303 297
 -tt 300
--td linear
--rl d:/LEMTA/Code/Results/
--rf update_test
+-td constant_cold
+-rl /home/brunohartmann/Doctorat/Code/Results/
+-rf test

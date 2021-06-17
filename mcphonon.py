@@ -89,7 +89,7 @@ def generate_results_folder(args):
     loc = args.results_location
 
     if loc == 'local':
-        pass                                    # stay in the same folder
+        args.results_location = os.getcwd()     # stay in the same folder
     elif loc == 'main':
         file_path = os.path.realpath(__file__)  # get main_program.py path
         file_dir = os.path.dirname(file_path)   # get main_program.py folder
