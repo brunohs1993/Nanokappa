@@ -28,16 +28,23 @@ print('---------- o ----------- o ------------- o ------------')
 geo = Geometry(args)
 
 # opening file
-phonons = Phonon(args)
-phonons.load_properties()
+if len(args.mat_names) == 1:
+    phonons = Phonon(args, 0)
+    phonons.load_properties()
+else:
+    phonons = [Phonon(args, i) for i in range(len(args.mat_names))]
+    for phn in phonons:
+        phn.load_properties()
+# THIS IMPLEMENTATION OF PHONONS AS A LIST NEEDS TO BE INCLUDED IN THE POPULATION CLASS.
+# FOR NOW ONLY ONE MATERIAL WORKS
 
 pop = Population(args, geo, phonons)
 
 # pop.plot_figures(geo, property_plot = ['T', 'n', 'omega', 'e'])
 
-visuals = Visualisation(args, geo, phonons)
+# visuals = Visualisation(args, geo, phonons)
 
-visuals.preprocess()
+# visuals.preprocess()
 
 print('Simulating...')
 
@@ -51,7 +58,7 @@ pop.f.close()
 
 pop.save_plot_real_time()
 
-visuals.postprocess()
+# visuals.postprocess()
 
 end_time = datetime.now()
 

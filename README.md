@@ -47,21 +47,30 @@ It is recommended to run MC Phonon through Conda. This is set by following the s
 
 | Parameter                | Command            | Reduced | Description                                                            | Types      | Default         |
 | ------------------------ | ------------------ | --------| ---------------------------------------------------------------------- | ---------- | --------------- |
+| Parameters file    | `--from_file`      | `-ff`   | Full file name with path and extension of a file containing all input parameters. Used to avoid inputing lots of parameters directly on terminal.        | String     |                 | 
 | hdf5 file                | `--hdf_file`       | `-hf`   | Full file name with path and extension                                 | String     |                 | 
 | POSCAR file              | `--poscar_file`    | `-pf`   | Full file name with path and extension                                 | String     |                 |
-| Results folder           | `--results_folder` | `-rf`   | Folder to be created containing all result files.                      | String     | `''`            |
+| Results folder           | `--results_folder` | `-rf`   | The name of the folder to be created containing all result files. If none is informed, no folder is created.                      | String     | `''`            |
+| Results location           | `--results_location` | `-rl`   | The path where the result folder will be created. It accepts `local` if the results should be saved in the current directory, `main` if they should be saved in the same directory as `main_program.py`, or a custom path.               | String     | `local`            |
 | Geometry                 | `--geometry`       | `-g`    | Standard geometry name or file name. Geometry coordinates in angstroms | String     | `cuboid`        |
 | Dimensions               | `--dimensions`     | `-d`    | Dimensions for standard base geometries as asked by [trimesh.creation](https://trimsh.org/trimesh.creation.html) primitives | Floats | `20e3 1e3 1e3` |
 | Scale                    | `--scale`          | `-s`    | Scale factors for the base geometry (x, y, z)                          | Float   x3 | `1 1 1`         |
 | Rotation angles          | `--rotation`       | `-r`    | Euler angles to rotate the base geometry (see [scipy.rotation.from_euler](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.from_euler.html)) | Float x3 | `0 0 0`         |
 | Rotation order           | `--rot_order`      | `-ro`   | Order of the Euler angles informed in `--rotation` (see [scipy.rotation.from_euler](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.from_euler.html)) | String | `xyz`         |
-| Boundary conditions      | `--bound_cond`     | `-bc`   | Type of surface boundary condition                                     | String     | `periodic`      |
-| Temperatures             | `--temperatures`   | `-t`    | Boundary conditions for temperature in Kelvin                          | Float x2   | `310 290`       |
-| Temperature distribution | `--temp_dist`      | `-td`   | Shape of the initial temperature profile                               | String     | `constant_cold` |
-| N° of particles          | `--particles`      | `-p`    | Number of particles per mode, per slice                                | Integer    | `1`             |
-| Timestep                 | `--timestep`       | `-ts`   | Timestep of each iteration in seconds                                  | Float      | `1e-12`         |
+| Boundary conditions      | `--bound_cond`     | `-bc`   | Type of boundary condition for each facet declared in `--bound_facets`. If one condition more is given, it is considered to be the same for all non informed facets. Accepts `T` for temperature, `P` for periodic, `R` for roughness/reflection, `F` for heat flux. | String     | `T T P`      |
+| Facets with imposed BC   | `--bound_facets`   | `-bf`   | The facets to imposed the boundary conditions on. | Integer | `0 3` | 
+| Boundary condition values | `--bound_values`   | `-bv`    | Values for each imposed boundary conditions. Temperatures in Kelvin, heat fluxes in W/m$^2$, Roughness in angstroms.                 | Float   | `303 297`       |
+| Connected faces | `--connect_facets` | `-cf` | Indexes of the connected facets to apply the periodic boundary condition. They are grouped in pairs (first with second, third with fourth, and so on). They must: 1. Have vertices with the same coordinates in relation to their centroids; 2. Have the same area; 3. Have their normals parallel to each other and in opposite directions. | Integer | `1 5 2 4` |
+| Temperature distribution | `--temp_dist`      | `-td`   | Shape of the initial temperature profile. Accepts `constant_cold`, `constant_hot`, `mean`, `random`, `custom`.    | String     | `constant_cold` |
+|Subvolume temperature | `--subvol_temp` | `-st` | Initial temperature of each subvolume when `custom` is informed in `--temp_dist`, in Kelvin. | Float | |
+| Reference temperature | `--reference_temp` | `-rt` | The temperature at which the occupation number for every mode will be considered zero, in Kelvin. | Float | `0` |
+| N° of particles          | `--particles`      | `-p`    | Number of particles given as `keyword number`. Can be given as the total number (keyworld `total`), the number per-mode-per-subvolume (keyworld `pmps`) and the number per cubic angstom (keyworld `pv`).                               | String, Integer    | `pmps 1`             |
+| Particle distribution    | `--part_dist`  | `-pd`    | How to distribute particles at the beginning of the simulation. Composed of two keywords: `random/center_subvol/domain`. | String | `random_subvol`
+| Timestep                 | `--timestep`       | `-ts`   | Timestep of each iteration in picoseconds                                  | Float      | `1`         |
 | Iterations               | `--iterations`     | `-i`    | Number of iterations to be performed                                   | Integer    | `10000`         |
-| Slices                   | `--slices`         | `-sl`   | Number of slices and axis along to cut them (0, 1 or 2)                | Integer x2 | `10 0`          |
+| Subvolumes               | `--subvols`         | `-sv`   | Type and number of subvolumes to measure local energy density. Accepts `slice`, `box` and `sphere`. When type is `slice`, it is needed to provide the axis of slicing (`0` for x, `1` for y, `2` for z).                | String Integer (Integer) | `slice 10 0`          |
+| Empty subvols | `--empty_subvols` | `-es` | Index of subvolumes that are to be initialised as empty (no particles). | Integer |   |
+| Energy normalisation | `--energy_normal` | `-en` | The way to normalise energy to energy density. Choose between `fixed` (according to the expected number of particles in the subvolume) and `mean` (arithmetic mean of the particles inside). | String | `fixed`
 | Real time plot           | `--rt_plot`        | `-rp`   | Property to plot particles in real time (frequency, occupation, etc.)  | String     | `random`        |
 | Figure plot              | `--fig_plot`       | `-fp`   | Property to plot particles at end of run (frequency, occupation, etc.) | Strings    | `T omega e`     |
 | Colormap                 | `--colormap`       | `-cm`   | Colormap to use in every plot                                          | String     | `viridis`       |
@@ -69,9 +78,38 @@ It is recommended to run MC Phonon through Conda. This is set by following the s
 
 <p>&nbsp</p>
 
+### `--from_file` parameter
+
+The user can input all parameters sequentially directly on terminal, which is easy when there are a few parameters that differ from the standard values. When there is a highly customised simulation to be ran, it is better to use an external input file and use the `--from_file` or `-ff` argument.
+
+All inputs (besides `-ff`, of course) can be given in form of a text file. The following shows an example that we are calling `parameters.txt`:
+
+    --hdf_file         D:\Materials\Si\kappa-m313131.hdf5
+    --poscar_file      D:\Materials\Si\POSCAR
+    --geometry         D:\Geometries\film_oblique_45.obj
+    --subvolumes       slice 10 0
+    --bound_facets     0 5
+    --bound_cond       T T P
+    --bound_values     303 297
+    --connect_facets   1 4 2 3
+    --reference_temp   300
+    --energy_normal    fixed
+    --temp_dist        constant_cold
+    --particles        pmps 1
+    --part_dist        random_subvol
+    --timestep         1
+    --iterations       1000
+    --results_folder   sim_results
+    --results_location D:\Results
+
+This file defines a simulation of Silicon, with the material being defined by the hdf and poscar files being informed. The geometry is imported from an external file (`film_oblique_45.obj`), and consequently the indexes of the facets are changed. Temperatures (303 K and 297 K) are imposed on facets 0 and 5, and a periodic boundary condition connects facets 1 to 4 and 2 to 3. A reference temperature of 300 K is used.
+The program could then be executed on terminal by calling:
+
+    $ python main_program.py -ff parameters.txt
+
 ### Material properties
 
-The properties describing the material are derived from hdf5 and POSCAR files. These files needed to be informed in full (with extensions) from the `materials` folder. For example the command:
+The properties describing the material are derived from hdf5 and POSCAR files. These files needed to be informed in full (with path and extensions). For example the command:
 
     $ python main_program.py -hf <hdf5-file>.hdf5 -pf <poscar-file>
 

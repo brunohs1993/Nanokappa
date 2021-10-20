@@ -1,6 +1,7 @@
 # calculations
 import numpy as np
 from scipy.interpolate import interp1d, RegularGridInterpolator
+from scipy.spatial.transform import Rotation as rot
 
 # hdf5 files
 import h5py
@@ -30,15 +31,17 @@ np.set_printoptions(precision=3, threshold=sys.maxsize, linewidth=np.nan)
 
 class Phonon(Constants):    
     ''' Class to get phonon properties and manipulate them. '''
-    def __init__(self, arguments):
+    def __init__(self, arguments, mat_index):
         super(Phonon, self).__init__()
         self.args = arguments
+        self.mat_index = mat_index
+        self.name = self.args.mat_names[mat_index]
         
     def load_properties(self):
         '''Initialise all phonon properties from input files.'''
 
         #### we have to discuss for the following ####
-        unitcell, _ = read_crystal_structure(self.args.poscar_file, interface_mode='vasp')
+        unitcell, _ = read_crystal_structure(self.args.poscar_file[self.mat_index], interface_mode='vasp')
         lattice = unitcell.get_cell()   # vectors as lines
         reciprocal_lattice = np.linalg.inv(lattice)*2*np.pi # vectors as columns
 
@@ -56,7 +59,7 @@ class Phonon(Constants):
         
         print('Reading hdf file...')
 
-        self.load_hdf_data(self.args.hdf_file)
+        self.load_hdf_data(self.args.hdf_file[self.mat_index])
 
         self.load_q_points()
         self.load_weights()
@@ -73,9 +76,7 @@ class Phonon(Constants):
         self.group_vel=group_vel
 
         self.load_temperature()
-        self.T_cold      = min(self.args.temperatures)
-        self.T_hot       = max(self.args.temperatures)
-        self.T_threshold = self.args.threshold_temp[0]
+        self.T_reference = self.args.reference_temp[0]
 
         # print('Expanding heat capacity to FBZ...')  # Do we need heat capacity? For now it is not used anywhere...  
         # self.load_heat_cap()
@@ -89,11 +90,20 @@ class Phonon(Constants):
 
         self.q_points=qpoints_FBZ
         self.weights = np.ones((len(self.q_points[:,0]),))
+        
         self.number_of_qpoints = self.q_points.shape[0]
         self.number_of_branches = self.frequency.shape[1]
         self.number_of_modes = self.number_of_qpoints*self.number_of_branches
 
+        self.reciprocal_lattice = reciprocal_lattice    # [[a*1, a*2, a*3], [b*1, b*2, b*3], [c*1, c*2, c*3]]
+        self.direct_lattice     = lattice               # [[a 1, a 2, a 3], [b 1, b 2, b 3], [c 1, c 2, c 3]]
+
         self.unique_modes = np.stack(np.meshgrid( np.arange(self.number_of_qpoints), np.arange(self.number_of_branches) ), axis = -1 ).reshape(-1, 2).astype(int)
+
+        # self.get_wavevectors_all_directions()
+        self.get_wavevectors()
+
+        self.rotate_crystal()
 
         print('To describe phonons:')
         print(' nq=',self.number_of_qpoints)
@@ -105,7 +115,7 @@ class Phonon(Constants):
 
         print('Generating T = f(E)...')
         self.zero_point = self.calculate_zeropoint()
-        self.calculate_threshold(self.T_threshold)
+        self.calculate_reference(self.T_reference)
         self.initialise_temperature_function()
 
         print('Material initialisation done!')
@@ -145,6 +155,62 @@ class Phonon(Constants):
     #     '''heat_cap shape = temperatures X q-points X p-branches '''
     #     self.heat_cap = np.array(self.data_hdf['heat_capacity'])    # eV/K
     
+    def get_wavevectors(self):
+
+        corr_qpoints = np.arctan(np.tan(self.q_points*np.pi))/np.pi
+        # Obs: this correction is done to keep the q_points inside the first Brillouin zone around the origin (-0.5<q<0.5).
+        # To visualise this, plot y = arctan(tan(x pi))/pi . Inside that interval, y = x. But, for instance, for x = 0.6, y = -0.4,
+        # making X periodic.
+        # These are the wavevectors to be normalised and used to calculate specularity.
+
+        self.wavevectors = corr_qpoints*np.transpose(self.reciprocal_lattice).reshape(3, 1, 3)
+        self.wavevectors = self.wavevectors.sum(axis = 0)
+
+        self.norm_wavevectors = np.linalg.norm(self.wavevectors, axis = 1)
+
+    def k_to_q(self, k):
+        # convert wave vectors to q-points in the first brillouin zone
+
+        a = np.linalg.inv(self.reciprocal_lattice)  # transformation vector
+        
+        q = k*np.transpose(a).reshape(3, 1, 3) # transform wavevectors to q-points
+        q = q.sum(axis = 0)
+
+        # bring all points to the first brillouin zone
+        q = np.where(q >= 1, q-1, q)
+        q = np.where(q < 0, q+1, q)
+
+        return q
+    
+    def rotate_crystal(self):
+        '''Rotates the orientation of the crystal in relation to the geometry axis.'''
+        print('Rotating crystal...')        
+        
+        # initialize angles and order
+        self.rotation_angles = None
+        self.rotation_order  = None
+
+        n_mats = len(self.args.mat_names) # how many materials are listed
+
+        for i in range(n_mats): # for each material
+            if int(self.args.mat_rotation[i*5]) == self.mat_index: # if it is the material of this object
+
+                self.rotation_angles = np.array(self.args.mat_rotation[i*5+1:i*5+4]).astype(float) # get rotation angles
+
+                self.rotation_order  = self.args.mat_rotation[i*4+4]                 # get rotation order
+        
+        if self.rotation_angles is not None: # if the rotation was defined for this material
+            
+            # generate rotation object
+            R = rot.from_euler(self.rotation_order, self.rotation_angles, degrees = True)
+
+            self.wavevectors = R.apply(self.wavevectors) # rotate k
+
+            for i in range(self.number_of_branches): # for each branch
+                self.group_vel[:, i, :] = R.apply(self.group_vel[:, i, :]) # rotate v_g
+        
+        self.group_vel = np.around(self.group_vel, decimals = 6)
+
     def load_gamma(self):
         '''gamma = temperatures X q-pointsX p-branches'''
         self.gamma = np.array(self.data_hdf['gamma'])   # THz
@@ -155,42 +221,28 @@ class Phonon(Constants):
 
         self.lifetime = np.where( self.gamma>0, 1/( 2*2*np.pi*self.gamma), 0) # ps
 
-        margin = 10
-        T_min = np.floor(self.T_threshold)-margin
-        T_max = self.T_hot+margin
-
-        if len(np.where(self.temperature_array < T_min)[0]) > 0:
-            start_index = np.where(self.temperature_array < T_min)[0][-1]
-        else:
-            start_index = 0
-        
-        if len(np.where(self.temperature_array > T_max)[0])>0:
-            end_index   = np.where(self.temperature_array > T_max)[0][ 0]
-        else:
-            end_index = -1
-
         q_array = np.arange(self.number_of_qpoints )
         j_array = np.arange(self.number_of_branches)
-        T = self.temperature_array[start_index:end_index+1]
-        tau = self.lifetime[start_index:end_index+1, :, :]
+        T = self.temperature_array
+        tau = self.lifetime
 
         self.lifetime_function = RegularGridInterpolator((T, q_array, j_array), tau)
 
-    def calculate_occupation(self, T, omega, threshold = False):
+    def calculate_occupation(self, T, omega, reference = False):
         '''Calculate the Bose-Einstein occupation number of a given frequency at temperature T.'''
 
         flag = (T>0) & (omega>0)
         with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
-            if threshold:
-                occupation = np.where(~flag, 0, 1/( np.exp( omega*self.hbar/ (T*self.kb) ) - 1) - 1/( np.exp( omega*self.hbar/ (self.T_threshold*self.kb) ) - 1) )
-            elif not threshold:
+            if reference:
+                occupation = np.where(~flag, 0, 1/( np.exp( omega*self.hbar/ (T*self.kb) ) - 1) - 1/( np.exp( omega*self.hbar/ (self.T_reference*self.kb) ) - 1) )
+            elif not reference:
                 occupation = np.where(~flag, 0, 1/( np.exp( omega*self.hbar/ (T*self.kb) ) - 1) )
         
         return occupation
 
-    def calculate_energy(self, T, omega, threshold = False):
+    def calculate_energy(self, T, omega, reference = False):
         '''Energy of a mode given T and omega due to its occupation (ignoring zero-point energy).'''
-        n = self.calculate_occupation(T, omega, threshold = threshold)
+        n = self.calculate_occupation(T, omega, reference = reference)
         return self.hbar*omega*n    # eV
     
     def calculate_crystal_energy(self, T):
@@ -213,18 +265,17 @@ class Phonon(Constants):
 
         return zero
     
-    def calculate_threshold(self, T):
+    def calculate_reference(self, T):
         '''Calculate minimum occupation for each modes'''
-        self.threshold_occupation = self.calculate_occupation(T, self.omega)        # shape = q_points x branches
-        self.threshold_energy = self.calculate_crystal_energy(self.T_threshold)     # float, eV/a³
+        self.reference_occupation = self.calculate_occupation(T, self.omega)        # shape = q_points x branches
+        self.reference_energy = self.calculate_crystal_energy(self.T_reference)     # float, eV/a³
 
     def initialise_temperature_function(self):
         '''Calculate an array of energy density levels and initialises the function to recalculate T = f(E)'''
 
         # interval
-        margin = 10
-        T_min = np.floor(self.T_threshold)-margin
-        T_max = self.T_hot+margin
+        T_min = self.temperature_array.min()
+        T_max = self.temperature_array.max()
 
         # Temperature array
         dT = 0.1
@@ -233,7 +284,7 @@ class Phonon(Constants):
         # Energy array
         self.energy_array = np.array( list( map(self.calculate_crystal_energy, T_array) ) ).reshape(-1)
 
-        # Interpolating        
+        # Interpolating
         self.temperature_function = interp1d( self.energy_array, T_array, kind = 'linear', fill_value = '' )
 
     def normalise_to_density(self, x):
@@ -270,7 +321,7 @@ def expand_FBZ(axis,weight,qpoints,tensor,rank,rotations,reciprocal_lattice):
                   rot_t=np.dot(r_cart, tq.T).T
                   l_t.append(rot_t)
                else:
-                  sys.exit("error in exapand_FBZ: not coded")
+                  sys.exit("error in expand_FBZ: not coded")
 
            star_mul=np.array(l_q, dtype='double', order='C')
            star_mulv=np.array(l_t, dtype='double', order='C')
@@ -283,7 +334,7 @@ def expand_FBZ(axis,weight,qpoints,tensor,rank,rotations,reciprocal_lattice):
                                                                return_counts=True,
                                                                axis=0)
            if weight[i] != len(return_index) :
-               sys.exit("error in exapand_FBZ")
+               sys.exit("error in expand_FBZ")
 
            star_t=star_mulv[return_index]
            #print(star_q.shape,star_t.shape)
@@ -297,3 +348,32 @@ def expand_FBZ(axis,weight,qpoints,tensor,rank,rotations,reciprocal_lattice):
 
        tensor_out=np.swapaxes(tensor_out,0,axis)
        return qpoints_out,tensor_out
+
+    # def get_wavevectors_all_directions(self):
+    #     '''Adds the full brillouin zones for the other 7 quadrants in order to
+    #     calculate k conservation in boundary scattering.'''
+
+    #     print('Expanding wavevectors in all directions...')
+
+    #     self.full_wavevectors  = self.q_points                      # get FBZ qpoints
+    #     self.full_qpoint_index = np.arange(self.number_of_qpoints)  # get their indexes
+                
+    #     for dim in range(3):    # for each dimension
+
+    #         lattice_vector = np.zeros(3)
+    #         lattice_vector[dim] = -1                        # set lattice vector
+
+    #         indexes = self.full_wavevectors[:, dim] != 0    # see which modes are not on the axis of that dimension
+
+    #         new_wv      = self.full_wavevectors[indexes, :]+lattice_vector    # translate all non-zero modes in that dimension by that lattice vector
+    #         new_q_index = self.full_qpoint_index[indexes]                         # select correspondent modes
+
+    #         # stack translated modes
+    #         self.full_wavevectors  = np.vstack((self.full_wavevectors, new_wv))
+
+    #         self.full_qpoint_index = np.concatenate((self.full_qpoint_index, new_q_index))
+
+    #     # transform to absolute coordinates
+
+    #     self.full_wavevectors = self.full_wavevectors*np.transpose(self.reciprocal_lattice).reshape(3,1,3)
+    #     self.full_wavevectors = self.full_wavevectors.sum(axis = 0)

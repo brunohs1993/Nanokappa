@@ -4,7 +4,7 @@
 -i  10000
 -p  10
 -pd random_slice
--sl 10 0
+-sv slice 10 0
 -ts 0.2
 -t  303 297
 -tt 300

@@ -1,0 +1,17 @@
+--hdf_file         D:\LEMTA\Code\Materials\Si\kappa-m313131.hdf5
+--poscar_file      D:\LEMTA\Code\Materials\Si\POSCAR
+--mat_names        silicon
+--geometry         cuboid
+--dimensions       2e3 1e3 1e3
+--mat_rotation     0 0 0 45 xyz
+--subvolumes       slice 10 0
+--bound_values     303 297
+--reference_temp   300
+--energy_normal    fixed
+--temp_dist        constant_cold
+--particles        pmps 1
+--part_dist        random_subvol
+--timestep         1
+--iterations       500
+--results_folder   z_Si_test_n100_rotmat
+--results_location D:/LEMTA/Code/Results
