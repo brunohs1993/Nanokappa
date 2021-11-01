@@ -103,7 +103,8 @@ class Phonon(Constants):
         # self.get_wavevectors_all_directions()
         self.get_wavevectors()
 
-        self.rotate_crystal()
+        if len(self.args.mat_rotation) > 0:
+            self.rotate_crystal()
 
         print('To describe phonons:')
         print(' nq=',self.number_of_qpoints)
@@ -125,6 +126,7 @@ class Phonon(Constants):
             Module documentation: https://docs.h5py.org/en/stable/'''
 
         self.data_hdf = h5py.File(hdf_file,'r')
+        self.data_mesh = np.array(self.data_hdf['mesh']) # mesh discretisation points in each dimension
     
     def load_frequency(self):
         '''frequency shape = q-points X p-branches '''
@@ -157,15 +159,8 @@ class Phonon(Constants):
     
     def get_wavevectors(self):
 
-        corr_qpoints = np.arctan(np.tan(self.q_points*np.pi))/np.pi
-        # Obs: this correction is done to keep the q_points inside the first Brillouin zone around the origin (-0.5<q<0.5).
-        # To visualise this, plot y = arctan(tan(x pi))/pi . Inside that interval, y = x. But, for instance, for x = 0.6, y = -0.4,
-        # making X periodic.
-        # These are the wavevectors to be normalised and used to calculate specularity.
-
-        self.wavevectors = corr_qpoints*np.transpose(self.reciprocal_lattice).reshape(3, 1, 3)
-        self.wavevectors = self.wavevectors.sum(axis = 0)
-
+        self.wavevectors = self.q_to_k(self.q_points)
+        
         self.norm_wavevectors = np.linalg.norm(self.wavevectors, axis = 1)
 
     def k_to_q(self, k):
@@ -182,6 +177,19 @@ class Phonon(Constants):
 
         return q
     
+    def q_to_k(self, q):
+        # convert q-points to wave vectors in the first brillouin zone
+
+        q = np.arctan(np.tan(q*np.pi))/np.pi
+        # Obs: this correction is done to keep the q_points inside the first Brillouin zone around the origin (-0.5<q<0.5).
+        # To visualise this, plot y = arctan(tan(x pi))/pi . Inside that interval, y = x. But, for instance, for x = 0.6, y = -0.4,
+        # making X periodic.
+        # These are the wavevectors to be normalised and used to calculate specularity.
+
+        k = (q*np.transpose(self.reciprocal_lattice).reshape(3, 1, 3)).sum(axis = 0)
+        
+        return k
+
     def rotate_crystal(self):
         '''Rotates the orientation of the crystal in relation to the geometry axis.'''
         print('Rotating crystal...')        

@@ -3,15 +3,15 @@
 --mat_names        silicon
 --geometry         cuboid
 --dimensions       2e3 1e3 1e3
---mat_rotation     0 0 0 45 xyz
 --subvolumes       slice 10 0
---bound_values     303 297
---reference_temp   300
+--bound_cond       T T R
+--bound_values     303 297 1e-10
+--reference_temp   290
 --energy_normal    fixed
---temp_dist        constant_cold
+--temp_dist        constant_hot
 --particles        pmps 1
 --part_dist        random_subvol
 --timestep         1
---iterations       500
---results_folder   z_Si_test_n100_rotmat
+--iterations       100000
+--results_folder   z_Si_R-BC
 --results_location D:/LEMTA/Code/Results

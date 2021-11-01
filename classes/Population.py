@@ -19,10 +19,12 @@ from trimesh.triangles import closest_point, points_to_barycentric
 
 # other
 import sys
+import os
 import copy
 from functools import partial
 from itertools import repeat
 import time
+import gc
 
 from classes.Constants import Constants
 
@@ -62,7 +64,7 @@ class Population(Constants):
         if self.particle_type == 'pmps':
             self.particles_pmps   = float(self.args.particles[1])
             self.N_p              = int(self.particles_pmps*phonon.number_of_modes*(self.n_of_subvols-self.n_of_empty_subvols))
-            self.particle_density = self.N_p/geometry.volume
+            self.particle_density = self.particles_pmps*phonon.number_of_modes*self.n_of_subvols/geometry.volume
         elif self.particle_type == 'total':
             self.N_p              = int(float(self.args.particles[1]))
             self.particles_pmps   = self.N_p/(phonon.number_of_modes*(self.n_of_subvols - self.n_of_empty_subvols))
@@ -274,31 +276,37 @@ class Population(Constants):
         self.res_facet_id    = np.zeros(0)
 
         for i in range(self.n_of_reservoirs):                         # for each reservoir
-            facet  = self.res_facet[i]                                # get its facet index
-            mesh   = geometry.res_meshes[i]                           # select boundary
-            normal = -np.array(geometry.mesh.facets_normal)[facet, :] # get boundary normal
             n      = N_p_facet[i]                                     # the number of particles on that facet
+            if n > 0:
+                facet  = self.res_facet[i]                                # get its facet index
+                mesh   = geometry.res_meshes[i]                           # select boundary
+                normal = -np.array(geometry.mesh.facets_normal)[facet, :] # get boundary normal
+                
 
-            new_modes = np.vstack(np.where(in_modes_mask[i, :, :])).T # gets which modes entered that facet
+                new_modes = np.vstack(np.where(in_modes_mask[i, :, :])).T # gets which modes entered that facet
 
-            # generate positions on boundary and add a the drift to the domain
-            new_positions, _ = tm.sample.sample_surface(mesh, n)
-            new_positions    = new_positions + normal*((self.enter_prob[i, new_modes[:, 0], new_modes[:, 1]] - dice[i, new_modes[:, 0], new_modes[:, 1]] )*self.bound_thickness[i]).reshape(-1, 1)
+                # generate positions on boundary and add a the drift to the domain
+                new_positions, _ = tm.sample.sample_surface(mesh, n)
+                new_positions    = new_positions + normal*((self.enter_prob[i, new_modes[:, 0], new_modes[:, 1]] - dice[i, new_modes[:, 0], new_modes[:, 1]] )*self.bound_thickness[i]).reshape(-1, 1)
+                
+                try:
+                    outside = tm.proximity.signed_distance(geometry.mesh, new_positions) <= 0
+                        #~geometry.mesh.contains(new_positions) # see if any new particles are generated outside
+                except:
+                    print(new_positions)
+                    quit()
 
-            outside = tm.proximity.signed_distance(geometry.mesh, new_positions) <= 0
-                      #~geometry.mesh.contains(new_positions) # see if any new particles are generated outside
+                while np.any(outside):
+                    # print('Res', i, outside.sum())
+                    new_positions[outside, :], _ = tm.sample.sample_surface(mesh, int(outside.sum()))
+                    new_positions[outside, :]    = new_positions[outside, :] + normal*((self.enter_prob[i, new_modes[outside, 0], new_modes[outside, 1]] - dice[i, new_modes[outside, 0], new_modes[outside, 1]])*self.bound_thickness[i]).reshape(-1, 1)
+                    outside[outside] = tm.proximity.signed_distance(geometry.mesh, new_positions[outside, :]) <= 0
+                                    #~geometry.mesh.contains(new_positions[outside, :]) # see if any new particles are generated outside
 
-            while np.any(outside):
-                # print('Res', i, outside.sum())
-                new_positions[outside, :], _ = tm.sample.sample_surface(mesh, int(outside.sum()))
-                new_positions[outside, :]    = new_positions[outside, :] + normal*((self.enter_prob[i, new_modes[outside, 0], new_modes[outside, 1]] - dice[i, new_modes[outside, 0], new_modes[outside, 1]])*self.bound_thickness[i]).reshape(-1, 1)
-                outside[outside] = tm.proximity.signed_distance(geometry.mesh, new_positions[outside, :]) <= 0
-                                   #~geometry.mesh.contains(new_positions[outside, :]) # see if any new particles are generated outside
-
-            # adding to the new population
-            self.res_positions = np.vstack((self.res_positions , new_positions ))                  # add to the positions
-            self.res_modes     = np.vstack((self.res_modes     , new_modes     )).astype(int)      # add to the modes
-            self.res_facet_id  = np.concatenate((self.res_facet_id, np.ones(n)*facet)).astype(int) # add to the reservoir id
+                # adding to the new population
+                self.res_positions = np.vstack((self.res_positions , new_positions ))                  # add to the positions
+                self.res_modes     = np.vstack((self.res_modes     , new_modes     )).astype(int)      # add to the modes
+                self.res_facet_id  = np.concatenate((self.res_facet_id, np.ones(n)*facet)).astype(int) # add to the reservoir id
 
         self.res_group_vel  = phonon.group_vel[self.res_modes[:, 0], self.res_modes[:, 1], :]        # retrieve velocities
         self.res_omega      = phonon.omega[self.res_modes[:, 0], self.res_modes[:, 1]]               # retrieve frequencies
@@ -727,12 +735,18 @@ class Population(Constants):
 
         return specularity
 
-    def select_reflected_modes(self, incident_modes, facet_normals, phonon):
+    def select_reflected_modes(self, incident_modes, collision_facets, geometry, phonon):
 
         branches = incident_modes[:, 1]
 
         k = phonon.wavevectors[incident_modes[:, 0], :]  # get wavevectors
-        n = -facet_normals                               # make it point inwards
+        n = -geometry.mesh.facets_normal[collision_facets.astype(int), :] # get inward normals
+
+        unique_facets, i_facets = np.unique(collision_facets.astype(int), return_inverse = True)
+
+        unique_n = -geometry.mesh.facets_normal[unique_facets, :] # get unique inward normals
+        unique_branches, i_branches = np.unique(branches, return_inverse = True) # get unique branches. Since the scattering is asusmed to happen in the same branch
+                                              # there is no need to calculate the same branch several times
 
         n_p     = incident_modes.shape[0] # number of particles being reflected
 
@@ -742,34 +756,38 @@ class Population(Constants):
         k_spec  = k - 2*n*k_dot_n.reshape(-1, 1)           # specularly reflected wavevector
 
         # standard deviations
-        sigma_theta = 1
-        sigma_phi   = 1
-        sigma_r     = 1
+        roughness = self.bound_values[collision_facets.astype(int)]
 
-        dtheta = np.random.normal(loc = 0, scale = sigma_theta, size = n_p).reshape(-1, 1)
-        dphi   = np.random.normal(loc = 0, scale = sigma_phi  , size = n_p).reshape(-1, 1)
-        dr     = np.random.normal(loc = 0, scale = sigma_r    , size = n_p)
+        dtheta = np.random.normal(loc = 0, scale = roughness, size = n_p).reshape(-1, 1)
+        dphi   = np.random.normal(loc = 0, scale = roughness, size = n_p).reshape(-1, 1)
+        dr     = np.random.normal(loc = 0, scale = roughness, size = n_p)
 
-        # First rotation - Theta
+        # First rotation - Theta (vertical)
 
         k_vec_n = np.cross(k_spec, n, axis = 1)  # cross products
-        indexes = np.all(k_vec_n == 0, axis = 1) # k parallel to n produce 0 cross products
 
-        k_vec_n[indexes, :] = n[indexes, :] # in this case the axis is the normal
+        k_vec_n_norm = np.linalg.norm(k_vec_n, axis = 1) # and their norm
+        indexes = (k_vec_n_norm == 0) # perpendicularly incident waves
+        
+        if np.any(indexes):
+            r = np.random.rand(indexes.sum(), 3)-0.5
+            k_vec_n[indexes, :] = r-r*(n[indexes, :])
+            k_vec_n_norm[indexes] = np.linalg.norm(r, axis = 1)
 
-        # k_vec_n_norm = np.linalg.norm(k_vec_n, axis = 1).reshape(-1, 1) # and their norm
-
-        a1 = k_vec_n/np.linalg.norm(k_vec_n, axis = 1).reshape(-1, 1)# k_vec_n_norm # rotation axis = k x n, normalised
+        a1 = k_vec_n/k_vec_n_norm.reshape(-1, 1) # rotation axis = k x n, normalised
         a1 = a1*np.tan(dtheta/4) # adjusting rodrigues parameters
 
         R1 = rot.from_mrp(a1)    # creating first rotation object
 
         k_try = R1.apply(k_spec) # applying rotation in theta
 
-        # Second rotation - Phi
+        # Second rotation - Phi (horizontal)
         
-        a1_cross_k = np.cross(a1, k_try, axis = 1)                          # second axis of rotation - a1 x k
-        a2 = a1_cross_k/np.linalg.norm(a1_cross_k, axis = 1).reshape(-1, 1) # normalising
+        a1_vec_k = np.cross(a1, k_try, axis = 1)                          # second axis of rotation - a1 x k
+        
+        a1_vec_k_norm = np.linalg.norm(a1_vec_k, axis = 1).reshape(-1, 1) # absolute value
+
+        a2 = a1_vec_k/a1_vec_k_norm
         a2 = a2*np.tan(dphi/4)                                              # adjusting rodrigues parameters
 
         R2 = rot.from_mrp(a2)   # creating second rotation object
@@ -777,23 +795,133 @@ class Population(Constants):
         k_try = R2.apply(k_try) # applying rotation in phi
 
         # applying scale in R
-
         k_try = k_try*((k_size+dr)/k_size).reshape(-1, 1) 
-        
-        q_try = phonon.k_to_q(k_try)
+
+        q_try = phonon.k_to_q(k_try) # converting to q_point
+        q_try = np.where(q_try > 1-1/(2*phonon.data_mesh), q_try - 1, q_try) # correcting overshoot to get the nearest
+        q_try = np.where(q_try <  -1/(2*phonon.data_mesh), q_try + 1, q_try) # correcting undershoot to get the nearest
+
+        k_try = phonon.q_to_k(q_try) # back to k
 
         # sign of reflected waves
-        v_dot_n = phonon.group_vel[:, branches, :]*n.reshape(1, n_p, 3) # dot product V x n
-        v_dot_n = v_dot_n.sum(axis = 2)
+        v = phonon.group_vel[:, unique_branches, :] # (Q, J_u, 3)
+        v_dot_n = v.reshape(v.shape[0], v.shape[1], 1, v.shape[2])*unique_n # dot product V x n (Q, J_u, F_u, 3)
 
-        sign = np.around(v_dot_n, decimals = 3) > 0    # where V agrees with normal
+        v_dot_n = v_dot_n.sum(axis = -1) # (Q, J_u, F_u)
+        
+        sign = np.around(v_dot_n, decimals = 3) > 0    # where V agrees with normal (Q, J_u, F_u)
 
-        # starting functions
+        # unique combinations of branch and facet referenced by their index in unique_branches and unique_facets
+        unique_bf_indexes, i_u_bf = np.unique(np.hstack((i_branches.reshape(-1, 1), i_facets.reshape(-1, 1))), axis = 0, return_inverse = True)
 
-        # output              Interpolator           datapoints                    values                 input            looping
-        new_modes = np.array([NearestNDInterpolator(phonon.q_points[sign[:, i]], np.where(sign[:, i])[0])(q_try[i, :]) for i in range(n_p)])
+        new_modes = np.zeros(n_p) # initialise new modes
 
-        new_modes = np.hstack((new_modes.reshape(-1, 1), branches.reshape(-1, 1)))
+        for bf in range(unique_bf_indexes.shape[0]): # for each combination of branch and facet
+            i = i_u_bf == bf                                                # get indexes of concerned particles
+            s = sign[:, unique_bf_indexes[bf, 0], unique_bf_indexes[bf, 1]] # get the mask of possible modes
+            k_psbl = phonon.wavevectors[s, :]                               # get possible wavevectors
+            y = np.where(s)[0]                                              # get their numbers
+            f = NearestNDInterpolator(k_psbl, y)                            # generate the interpolator
+            new_modes[i] = f(k_try[i, :])
+            
+            #### PLOT #######
+            # v_new = phonon.group_vel[new_modes[i].astype(int), unique_bf_indexes[bf, 0], :]
+            
+            # fig = plt.figure(figsize = (10, 10), dpi = 100)
+            # ax = fig.add_subplot(111, projection = '3d')
+            # ax.scatter(v_new[:, 0]    , v_new[:, 1]    , v_new[:, 2]    , c = 'b', s = 5)
+            # ax.scatter(unique_n[unique_bf_indexes[bf, 1], 0],
+            #            unique_n[unique_bf_indexes[bf, 1], 1],
+            #            unique_n[unique_bf_indexes[bf, 1], 2], c = 'r', s = 5)
+            # ax.plot([unique_n[unique_bf_indexes[bf, 1], 0], 0],
+            #         [unique_n[unique_bf_indexes[bf, 1], 1], 0],
+            #         [unique_n[unique_bf_indexes[bf, 1], 2], 0], color = 'k')
+
+            # ax.scatter(k_try[i, 0], k_try[i, 1], k_try[i, 2], c = 'r', s = 5)
+
+            # for i in range(k.shape[0]):
+            #     ax.plot([k[i, 0], k_try[i, 0], k_new[i, 0]],
+            #             [k[i, 1], k_try[i, 1], k_new[i, 1]],
+            #             [k[i, 2], k_try[i, 2], k_new[i, 2]], color = 'k', linewidth = 1)
+            
+            # plt.tight_layout()
+            # plt.show()
+            # plt.close('all')
+
+            ######################
+            
+        new_modes = np.hstack((new_modes.reshape(-1, 1), branches.reshape(-1, 1))).astype(int)
+
+        ####### DEBUG ###########
+        # for i in range(k.shape[0]):
+        #     print(k[i, :], n[i, :], k_spec[i, :], k_try[i, :], phonon.wavevectors[new_modes[i, 0], :], phonon.group_vel[incident_modes[i, 0], incident_modes[i, 1], :], phonon.group_vel[new_modes[i, 0], new_modes[i, 1], :])
+
+        if k.shape[0] == 1:
+            v_in = phonon.group_vel[incident_modes[:, 0], incident_modes[:, 1], :]
+            v_out = phonon.group_vel[new_modes[:, 0], new_modes[:, 1], :]
+            k_out = phonon.wavevectors[new_modes[:, 0], :].reshape(-1)
+            k = k.reshape(-1)
+            k_try = k_try.reshape(-1)
+            print(k, n, k_spec, k_try, k_out, v_in, v_out, (v_in*k).sum(), (v_out*k_out).sum())
+            # print(phonon.k_to_q(k), n, phonon.k_to_q(k_spec), phonon.k_to_q(k_try), phonon.k_to_q(phonon.wavevectors[new_modes[:, 0], :]), phonon.group_vel[incident_modes[:, 0], incident_modes[:, 1], :], phonon.group_vel[new_modes[:, 0], new_modes[:, 1], :])
+
+            fig = plt.figure(figsize = (10, 10), dpi = 100)
+            ax = fig.add_subplot(111, projection = '3d')
+            ax.scatter(phonon.wavevectors[s, 0],
+                       phonon.wavevectors[s, 1],
+                       phonon.wavevectors[s, 2], c = 'b', s = 5)
+
+            ax.plot([k[0], k_try[0], k_out[0]],
+                    [k[1], k_try[1], k_out[1]],
+                    [k[2], k_try[2], k_out[2]], color = 'k', linewidth = 1)
+            
+            plt.tight_layout()
+            plt.show()
+            plt.close('all')
+
+        # fpath = self.results_folder_name + 'scattering.txt'
+        
+        # if os.path.exists(fpath):
+        #     file_size = os.path.getsize(fpath) 
+                
+        #     if file_size < 0.5e9:
+        
+        #         to_save = np.hstack((collision_facets.reshape(-1, 1),
+        #                             incident_modes                 ,
+        #                             new_modes                      )).astype(int)
+                
+        #         f = open(fpath, 'a')
+        #         np.savetxt(f, to_save, fmt = '%d', delimiter = ',')
+        #         f.close()
+        # else:
+        #     to_save = np.hstack((collision_facets.reshape(-1, 1),
+        #                             incident_modes                 ,
+        #                             new_modes                      )).astype(int)
+                
+        #     f = open(fpath, 'a')
+        #     np.savetxt(f, to_save, fmt = '%d', delimiter = ',')
+        #     f.close()
+
+        #### PLOT #######
+
+        # k_new = phonon.wavevectors[new_modes[:, 0], :]
+
+        # fig = plt.figure(figsize = (10, 10), dpi = 100)
+        # ax = fig.add_subplot(111, projection = '3d')
+        # ax.scatter(k[:, 0]    , k[:, 1]    , k[:, 2]    , c = 'b', s = 5)
+        # ax.scatter(k_try[:, 0], k_try[:, 1], k_try[:, 2], c = 'g', s = 5)
+        # ax.scatter(k_new[:, 0], k_new[:, 1], k_new[:, 2], c = 'r', s = 5)
+
+        # for i in range(k.shape[0]):
+        #     ax.plot([k[i, 0], k_try[i, 0], k_new[i, 0]],
+        #             [k[i, 1], k_try[i, 1], k_new[i, 1]],
+        #             [k[i, 2], k_try[i, 2], k_new[i, 2]], color = 'k', linewidth = 1)
+        
+        # plt.tight_layout()
+        # plt.show()
+        # plt.close('all')
+
+        ######################
 
         return new_modes
 
@@ -899,32 +1027,41 @@ class Population(Constants):
 
         return collision_points, collision_facets
 
-    def roughness_boundary_condition(self, positions, group_velocities, incident_modes, collision_facets, collision_positions, calculated_ts, geometry, phonon):
-
-        print('In roughness!!!!')
-        # get the normal of the collision facet
-        facet_normals = geometry.mesh.facets_normal[collision_facets.astype(int), :]
+    def roughness_boundary_condition(self, positions, group_velocities, incident_modes, occupation, collision_facets, collision_positions, calculated_ts, geometry, phonon):
 
         # particles already scattered this timestep are calculated from their current position (at a boundary)
-        previous_positions = positions
+        previous_positions = copy.deepcopy(positions)
 
         # first scattering particles start from their position at the beginning of the timestep
         first = calculated_ts == 0
         previous_positions[first, :] -= group_velocities[first, :]*self.dt
 
         # the calculated timestep is up to the next scattering event
-        new_calculated_ts = calculated_ts + np.linalg.norm(collision_positions - previous_positions, axis = 1)/(np.linalg.norm(group_velocities, axis = 1)*self.dt)
-        # print('calc ts', calculated_ts)
-        # print('delta calc ts', np.linalg.norm(collision_positions - previous_positions, axis = 1)/(np.linalg.norm(group_velocities, axis = 1)*self.dt))
+        dist = np.linalg.norm(collision_positions - previous_positions, axis = 1)
+        vel = np.linalg.norm(group_velocities, axis = 1)
+        
+        new_calculated_ts = calculated_ts + dist/(vel*self.dt)
 
         # update particle positions to the collision posiiton
         new_positions = collision_positions
-
+        
+        # start = time.time()
         # select new modes and get their properties
-        new_modes = self.select_reflected_modes(incident_modes, facet_normals, phonon)
+        new_modes = self.select_reflected_modes(incident_modes, collision_facets, geometry, phonon)
+        # print('    Select modes:', time.time() - start)
 
-        new_group_vel = phonon.group_vel[new_modes[:, 0], new_modes[:, 1], :]
-        new_omega     = phonon.omega[new_modes[:, 0], new_modes[:, 1]]
+        # update v
+        new_group_vel  = phonon.group_vel[new_modes[:, 0], new_modes[:, 1], :]
+        
+        # update omega
+        in_omega       = phonon.omega[incident_modes[:, 0], incident_modes[:, 1]]
+        new_omega      = phonon.omega[     new_modes[:, 0],      new_modes[:, 1]]
+                
+        # update occupation
+        in_ref_occup   = phonon.reference_occupation[incident_modes[:, 0], incident_modes[:, 1]]
+        out_ref_occup  = phonon.reference_occupation[     new_modes[:, 0],      new_modes[:, 1]]
+
+        new_occupation = (occupation + in_ref_occup)*(in_omega/new_omega) - out_ref_occup
 
         # extra step to avoid the particle to be slightly out of the domain
         extra_ts = np.where(1-calculated_ts > 1e-3, 1e-3, 0)
@@ -971,15 +1108,16 @@ class Population(Constants):
         # for i in range(new_omega.shape[0]):
         #     ax.plot([start_points[i, 0], end_points[i, 0]],
         #             [start_points[i, 1], end_points[i, 1]],
-        #             [start_points[i, 2], end_points[i, 2]], color = 'k', linewidth = 1)
+        #             [start_points[i, 2], end_points[i, 2]], color = 'k', linewidth = 1, linestyle = '--')
         
         # ax.set_title('Scattered particles')
 
         # plt.show()
+        # plt.close('all')
 
         ###########################################################################
         
-        return new_modes, new_positions, new_group_vel, new_omega, new_ts_to_boundary, new_calculated_ts, new_collision_positions, new_collision_facets, new_collision_cond
+        return new_modes, new_positions, new_group_vel, new_omega, new_occupation, new_ts_to_boundary, new_calculated_ts, new_collision_positions, new_collision_facets, new_collision_cond
 
     def boundary_scattering(self, geometry, phonon):
         '''Applies boundary scattering or other conditions to the particles where it happened, given their indexes.'''
@@ -992,6 +1130,8 @@ class Population(Constants):
         new_n_timesteps = copy.copy(self.n_timesteps) # (N_p,)
 
         while np.any(calculated_ts < 1): # while there are any particles with the timestep not completely calculated
+
+            
 
             # I. Deleting particles entering reservoirs
 
@@ -1010,7 +1150,7 @@ class Population(Constants):
             # identifying particles hitting facets with periodic boundary condition
             indexes_per = np.logical_and(calculated_ts       <   1 ,
                                         self.collision_cond == 'P')
-
+            
             if np.any(indexes_per):
 
                 # enforcing periodic boundary condition
@@ -1031,24 +1171,28 @@ class Population(Constants):
             # identifying particles hitting rough facets
             indexes_ref = np.logical_and(calculated_ts       <   1 ,
                                          self.collision_cond == 'R')
-            
+
+            print('Reflected particles:', indexes_ref.sum())
             if np.any(indexes_ref):
                 (self.modes[indexes_ref, :]              ,
                  self.positions[indexes_ref, :]          ,
                  self.group_vel[indexes_ref, :]          ,
                  self.omega[indexes_ref]                 ,
-                 self.n_timesteps[indexes_ref]           ,
+                 self.occupation[indexes_ref]            ,
+                 new_n_timesteps[indexes_ref]            ,
                  calculated_ts[indexes_ref]              ,
                  self.collision_positions[indexes_ref, :],
                  self.collision_facets[indexes_ref]      ,
-                 self.collision_cond[indexes_ref]        ) = self.roughness_boundary_condition(self.positions[indexes_ref, :]       ,
-                                                                                               self.group_vel[indexes_ref, :]       ,
-                                                                                               self.modes[indexes_ref, :]           ,
-                                                                                               self.collision_facets[indexes_ref]   ,
-                                                                                               self.collision_positions[indexes_ref],
-                                                                                               calculated_ts[indexes_ref]           ,
-                                                                                               geometry                             ,
-                                                                                               phonon                               )
+                 self.collision_cond[indexes_ref]        ) = self.roughness_boundary_condition(self.positions[indexes_ref, :]          ,
+                                                                                               self.group_vel[indexes_ref, :]          ,
+                                                                                               self.modes[indexes_ref, :]              ,
+                                                                                               self.occupation[indexes_ref]            ,
+                                                                                               self.collision_facets[indexes_ref]      ,
+                                                                                               self.collision_positions[indexes_ref, :],
+                                                                                               calculated_ts[indexes_ref]              ,
+                                                                                               geometry                                ,
+                                                                                               phonon                                  )
+            # print('After', calculated_ts[calculated_ts>1], self.positions[calculated_ts>1, :])
 
             # IV. Drifting those who will not be scattered again in this timestep
 
@@ -1085,32 +1229,32 @@ class Population(Constants):
 
         self.drift()                                    # drift particles
 
-        # print('Drift: {:.2f} s'.format(time.time()-start))
+        # print('Drift: {:.2f} s, {:d} part'.format(time.time()-start, self.positions.shape[0]))
         # start = time.time()
         
         self.fill_reservoirs(geometry, phonon)          # refill reservoirs
 
-        # print('Fill reservoirs: {:.2f} s'.format(time.time()-start))
+        # print('Fill reservoirs: {:.2f} s, {:d} part'.format(time.time()-start, self.positions.shape[0]))
         # start = time.time()
         
         self.add_reservoir_particles(geometry, phonon)  # add reservoir particles that come in the domain
         
-        # print('Add reservoirs particles: {:.2f} s'.format(time.time()-start))
+        # print('Add reservoirs particles: {:.2f} s, {:d} part'.format(time.time()-start, self.positions.shape[0]))
         # start = time.time()
 
         self.boundary_scattering(geometry, phonon)      # perform boundary scattering/periodicity and particle deletion
 
-        # print('Boundary scattering: {:.2f} s'.format(time.time()-start))
+        # print('Boundary scattering: {:.2f} s, {:d} part'.format(time.time()-start, self.positions.shape[0]))
         # start = time.time()
 
         self.refresh_temperatures(geometry, phonon)     # refresh cell temperatures
         
-        # print('Refresh T: {:.2f} s'.format(time.time()-start))
+        # print('Refresh T: {:.2f} s, {:d} part'.format(time.time()-start, self.positions.shape[0]))
         # start = time.time()
 
         self.lifetime_scattering(phonon)                # perform lifetime scattering
 
-        # print('Lifetime scattering: {:.2f} s'.format(time.time()-start))
+        # print('Lifetime scattering: {:.2f} s, {:d} part'.format(time.time()-start, self.positions.shape[0]))
         # start = time.time()
 
         self.current_timestep += 1                      # +1 timestep index
@@ -1126,8 +1270,10 @@ class Population(Constants):
 
         if (len(self.rt_plot) > 0) and (self.current_timestep % self.n_dt_to_plot == 0):
             self.plot_real_time(geometry)
+        
+        gc.collect() # garbage collector
 
-        # print('The rest: {:.2f} s'.format(time.time()-start))
+        # print('The rest: {:.2f} s, {:d} part'.format(time.time()-start, self.positions.shape[0]))
 
         # saving particle data to analyse
         # if self.current_timestep % 100 == 0 or self.current_timestep == 1:
@@ -1315,7 +1461,7 @@ class Population(Constants):
         n_dt_to_conv = int(10**n_dt_to_conv)
         n_dt_to_conv = max([10, n_dt_to_conv])
 
-        self.n_dt_to_conv = n_dt_to_conv
+        self.n_dt_to_conv = 10#n_dt_to_conv
 
 
         filename = self.results_folder_name+'convergence.txt'
