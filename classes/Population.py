@@ -225,7 +225,7 @@ class Population(Constants):
 
         # initialising subvol arrays
         self.subvol_energy    = phonon.calculate_crystal_energy(self.subvol_temperature)
-        self.subvol_heat_flux = np.zeros(self.n_of_subvols)
+        self.subvol_heat_flux = np.zeros((self.n_of_subvols, 3))
         self.subvol_N_p       = (np.ones(self.n_of_subvols)*self.N_p/self.n_of_subvols).astype(int)
 
     def initialise_reservoirs(self, geometry, phonon):
@@ -308,8 +308,10 @@ class Population(Constants):
                 self.res_modes     = np.vstack((self.res_modes     , new_modes     )).astype(int)      # add to the modes
                 self.res_facet_id  = np.concatenate((self.res_facet_id, np.ones(n)*facet)).astype(int) # add to the reservoir id
 
-        self.res_group_vel  = phonon.group_vel[self.res_modes[:, 0], self.res_modes[:, 1], :]        # retrieve velocities
-        self.res_omega      = phonon.omega[self.res_modes[:, 0], self.res_modes[:, 1]]               # retrieve frequencies
+        if self.res_modes.shape[0]>0:
+            self.res_group_vel  = phonon.group_vel[self.res_modes[:, 0], self.res_modes[:, 1], :]        # retrieve velocities
+
+            self.res_omega      = phonon.omega[self.res_modes[:, 0], self.res_modes[:, 1]]               # retrieve frequencies
 
         facets_flux = np.where(self.bound_cond == 'F')[0] # which FACETS have imposed heat flux  , indexes
         mask_flux = np.isin(self.res_facet, facets_flux)  # which RESERVOIRS (res1, res2, res3...) have imposed heat flux  , boolean
@@ -323,8 +325,9 @@ class Population(Constants):
 
         self.res_temperatures = self.res_facet_temperature[indexes] # impose temperature values to the right particles
 
-        self.res_occupation = phonon.calculate_occupation(self.res_temperatures, self.res_omega, reference = True)
-        self.res_energies   = self.hbar*self.res_omega*self.res_occupation
+        if self.res_modes.shape[0]>0:
+            self.res_occupation = phonon.calculate_occupation(self.res_temperatures, self.res_omega, reference = True)
+            self.res_energies   = self.hbar*self.res_omega*self.res_occupation
 
     def calculate_temperature_for_flux(self, reservoir, geometry, phonon):
         facet  = self.res_facet[reservoir]
@@ -386,25 +389,26 @@ class Population(Constants):
     def add_reservoir_particles(self, geometry, phonon):
         '''Add the particles that came from the reservoir to the main population. Calculates flux balance for each reservoir.'''
 
-        self.res_n_timesteps, self.res_collision_facets, self.res_collision_positions, self.res_positions = self.timesteps_to_boundary(self.res_positions, self.res_group_vel, geometry)
+        if self.res_modes.shape[0]>0:
+            self.res_n_timesteps, self.res_collision_facets, self.res_collision_positions, self.res_positions = self.timesteps_to_boundary(self.res_positions, self.res_group_vel, geometry)
 
-        self.res_collision_cond = self.get_collision_condition(self.res_collision_facets)
-        # self.res_collision_cond                                       = np.empty(self.res_collision_facets.shape, dtype = str)
-        # self.res_collision_cond[ np.isnan(self.res_collision_facets)] = 'N'
-        # non_nan_facets = self.res_collision_facets[~np.isnan(self.res_collision_facets)].astype(int)
-        # self.res_collision_cond[~np.isnan(self.res_collision_facets)] = self.bound_cond[non_nan_facets]
+            self.res_collision_cond = self.get_collision_condition(self.res_collision_facets)
+            # self.res_collision_cond                                       = np.empty(self.res_collision_facets.shape, dtype = str)
+            # self.res_collision_cond[ np.isnan(self.res_collision_facets)] = 'N'
+            # non_nan_facets = self.res_collision_facets[~np.isnan(self.res_collision_facets)].astype(int)
+            # self.res_collision_cond[~np.isnan(self.res_collision_facets)] = self.bound_cond[non_nan_facets]
 
-        self.positions           = np.vstack((self.positions, self.res_positions))
-        self.modes               = np.vstack((self.modes    , self.res_modes    ))
-        self.group_vel           = np.vstack((self.group_vel, self.res_group_vel))
+            self.positions           = np.vstack((self.positions, self.res_positions))
+            self.modes               = np.vstack((self.modes    , self.res_modes    ))
+            self.group_vel           = np.vstack((self.group_vel, self.res_group_vel))
 
-        self.n_timesteps         = np.concatenate((self.n_timesteps        , self.res_n_timesteps        ))
-        self.collision_facets    = np.concatenate((self.collision_facets   , self.res_collision_facets   ))
-        self.collision_positions = np.concatenate((self.collision_positions, self.res_collision_positions))
-        self.collision_cond      = np.concatenate((self.collision_cond     , self.res_collision_cond     ))
-        self.temperatures        = np.concatenate((self.temperatures       , self.res_temperatures       ))
-        self.omega               = np.concatenate((self.omega              , self.res_omega              ))
-        self.occupation          = np.concatenate((self.occupation         , self.res_occupation         ))
+            self.n_timesteps         = np.concatenate((self.n_timesteps        , self.res_n_timesteps        ))
+            self.collision_facets    = np.concatenate((self.collision_facets   , self.res_collision_facets   ))
+            self.collision_positions = np.concatenate((self.collision_positions, self.res_collision_positions))
+            self.collision_cond      = np.concatenate((self.collision_cond     , self.res_collision_cond     ))
+            self.temperatures        = np.concatenate((self.temperatures       , self.res_temperatures       ))
+            self.omega               = np.concatenate((self.omega              , self.res_omega              ))
+            self.occupation          = np.concatenate((self.occupation         , self.res_occupation         ))
 
     def assign_properties(self, modes, phonon):
         '''Get properties from the indexes.'''
@@ -798,10 +802,10 @@ class Population(Constants):
         k_try = k_try*((k_size+dr)/k_size).reshape(-1, 1) 
 
         q_try = phonon.k_to_q(k_try) # converting to q_point
-        q_try = np.where(q_try > 1-1/(2*phonon.data_mesh), q_try - 1, q_try) # correcting overshoot to get the nearest
-        q_try = np.where(q_try <  -1/(2*phonon.data_mesh), q_try + 1, q_try) # correcting undershoot to get the nearest
+        # q_try = np.where(q_try > 1-1/(2*phonon.data_mesh), q_try - 1, q_try) # correcting overshoot to get the nearest
+        # q_try = np.where(q_try <  -1/(2*phonon.data_mesh), q_try + 1, q_try) # correcting undershoot to get the nearest
 
-        k_try = phonon.q_to_k(q_try) # back to k
+        # k_try = phonon.q_to_k(q_try) # back to k
 
         # sign of reflected waves
         v = phonon.group_vel[:, unique_branches, :] # (Q, J_u, 3)
@@ -819,109 +823,64 @@ class Population(Constants):
         for bf in range(unique_bf_indexes.shape[0]): # for each combination of branch and facet
             i = i_u_bf == bf                                                # get indexes of concerned particles
             s = sign[:, unique_bf_indexes[bf, 0], unique_bf_indexes[bf, 1]] # get the mask of possible modes
-            k_psbl = phonon.wavevectors[s, :]                               # get possible wavevectors
-            y = np.where(s)[0]                                              # get their numbers
-            f = NearestNDInterpolator(k_psbl, y)                            # generate the interpolator
-            new_modes[i] = f(k_try[i, :])
             
-            #### PLOT #######
-            # v_new = phonon.group_vel[new_modes[i].astype(int), unique_bf_indexes[bf, 0], :]
+            # NEAREST APPROACH --> WASN'T WORKING
+            # k_psbl = phonon.wavevectors[s, :]                               # get possible wavevectors
+            # y = np.where(s)[0]                                              # get their numbers
+            # f = NearestNDInterpolator(k_psbl, y)                            # generate the interpolator
+            # new_modes[i] = f(k_try[i, :])
+
+            # ROULETTE APPROACH - CHECKING
+
+            q_psbl = phonon.q_points[s, :]                               # get possible q-points
+
+            diff = np.arctan( np.tan((q_try[i, :] - q_psbl.reshape(-1, 1, 3))*np.pi))/np.pi
+
+            dist = np.linalg.norm((diff*phonon.data_mesh), axis = 2)
+
+            del(diff)
+            gc.collect()
+
+            # FOR DEBUG, USING RADIAL GAUSSIAN PROBABILITY DISTRIBUTION WITH SIGMA = DISCRETISATION LENGTH OF THE BRILLOUIN ZONE
+            prob = np.exp(-dist**2)
+
+            roulette = (prob/prob.sum(axis = 0)).cumsum(axis = 0) # generate roulette
             
-            # fig = plt.figure(figsize = (10, 10), dpi = 100)
-            # ax = fig.add_subplot(111, projection = '3d')
-            # ax.scatter(v_new[:, 0]    , v_new[:, 1]    , v_new[:, 2]    , c = 'b', s = 5)
-            # ax.scatter(unique_n[unique_bf_indexes[bf, 1], 0],
-            #            unique_n[unique_bf_indexes[bf, 1], 1],
-            #            unique_n[unique_bf_indexes[bf, 1], 2], c = 'r', s = 5)
-            # ax.plot([unique_n[unique_bf_indexes[bf, 1], 0], 0],
-            #         [unique_n[unique_bf_indexes[bf, 1], 1], 0],
-            #         [unique_n[unique_bf_indexes[bf, 1], 2], 0], color = 'k')
+            dice = np.random.rand(q_try[i, :].shape[0])                 # throw dice
 
-            # ax.scatter(k_try[i, 0], k_try[i, 1], k_try[i, 2], c = 'r', s = 5)
+            #                   flips the boolean result         to get the first
+            flipped_indexes = np.flip((roulette < dice), axis = 0).argmax(axis = 0)
 
-            # for i in range(k.shape[0]):
-            #     ax.plot([k[i, 0], k_try[i, 0], k_new[i, 0]],
-            #             [k[i, 1], k_try[i, 1], k_new[i, 1]],
-            #             [k[i, 2], k_try[i, 2], k_new[i, 2]], color = 'k', linewidth = 1)
-            
-            # plt.tight_layout()
-            # plt.show()
-            # plt.close('all')
-
-            ######################
+            #             flips      the indexes of q points   (possible) 
+            new_modes[i] = np.flip(np.arange(phonon.number_of_qpoints)[s])[flipped_indexes]
             
         new_modes = np.hstack((new_modes.reshape(-1, 1), branches.reshape(-1, 1))).astype(int)
 
         ####### DEBUG ###########
-        # for i in range(k.shape[0]):
-        #     print(k[i, :], n[i, :], k_spec[i, :], k_try[i, :], phonon.wavevectors[new_modes[i, 0], :], phonon.group_vel[incident_modes[i, 0], incident_modes[i, 1], :], phonon.group_vel[new_modes[i, 0], new_modes[i, 1], :])
-
-        if k.shape[0] == 1:
-            v_in = phonon.group_vel[incident_modes[:, 0], incident_modes[:, 1], :]
-            v_out = phonon.group_vel[new_modes[:, 0], new_modes[:, 1], :]
-            k_out = phonon.wavevectors[new_modes[:, 0], :].reshape(-1)
-            k = k.reshape(-1)
-            k_try = k_try.reshape(-1)
-            print(k, n, k_spec, k_try, k_out, v_in, v_out, (v_in*k).sum(), (v_out*k_out).sum())
-            # print(phonon.k_to_q(k), n, phonon.k_to_q(k_spec), phonon.k_to_q(k_try), phonon.k_to_q(phonon.wavevectors[new_modes[:, 0], :]), phonon.group_vel[incident_modes[:, 0], incident_modes[:, 1], :], phonon.group_vel[new_modes[:, 0], new_modes[:, 1], :])
-
-            fig = plt.figure(figsize = (10, 10), dpi = 100)
-            ax = fig.add_subplot(111, projection = '3d')
-            ax.scatter(phonon.wavevectors[s, 0],
-                       phonon.wavevectors[s, 1],
-                       phonon.wavevectors[s, 2], c = 'b', s = 5)
-
-            ax.plot([k[0], k_try[0], k_out[0]],
-                    [k[1], k_try[1], k_out[1]],
-                    [k[2], k_try[2], k_out[2]], color = 'k', linewidth = 1)
-            
-            plt.tight_layout()
-            plt.show()
-            plt.close('all')
-
-        # fpath = self.results_folder_name + 'scattering.txt'
-        
-        # if os.path.exists(fpath):
-        #     file_size = os.path.getsize(fpath) 
+        fpath = self.results_folder_name + 'scattering.txt'
+    
+        if os.path.exists(fpath):
+            file_size = os.path.getsize(fpath) 
                 
-        #     if file_size < 0.5e9:
+            if file_size < 0.5e9:
         
-        #         to_save = np.hstack((collision_facets.reshape(-1, 1),
-        #                             incident_modes                 ,
-        #                             new_modes                      )).astype(int)
+                to_save = np.hstack((collision_facets.reshape(-1, 1),
+                                    incident_modes                 ,
+                                    new_modes                      )).astype(int)
                 
-        #         f = open(fpath, 'a')
-        #         np.savetxt(f, to_save, fmt = '%d', delimiter = ',')
-        #         f.close()
-        # else:
-        #     to_save = np.hstack((collision_facets.reshape(-1, 1),
-        #                             incident_modes                 ,
-        #                             new_modes                      )).astype(int)
+                f = open(fpath, 'a')
+                np.savetxt(f, to_save, fmt = '%d', delimiter = ',')
+                f.close()
+        else:
+            to_save = np.hstack((collision_facets.reshape(-1, 1),
+                                    incident_modes                 ,
+                                    new_modes                      )).astype(int)
                 
-        #     f = open(fpath, 'a')
-        #     np.savetxt(f, to_save, fmt = '%d', delimiter = ',')
-        #     f.close()
+            f = open(fpath, 'a')
+            np.savetxt(f, to_save, fmt = '%d', delimiter = ',')
+            f.close()
 
-        #### PLOT #######
-
-        # k_new = phonon.wavevectors[new_modes[:, 0], :]
-
-        # fig = plt.figure(figsize = (10, 10), dpi = 100)
-        # ax = fig.add_subplot(111, projection = '3d')
-        # ax.scatter(k[:, 0]    , k[:, 1]    , k[:, 2]    , c = 'b', s = 5)
-        # ax.scatter(k_try[:, 0], k_try[:, 1], k_try[:, 2], c = 'g', s = 5)
-        # ax.scatter(k_new[:, 0], k_new[:, 1], k_new[:, 2], c = 'r', s = 5)
-
-        # for i in range(k.shape[0]):
-        #     ax.plot([k[i, 0], k_try[i, 0], k_new[i, 0]],
-        #             [k[i, 1], k_try[i, 1], k_new[i, 1]],
-        #             [k[i, 2], k_try[i, 2], k_new[i, 2]], color = 'k', linewidth = 1)
-        
-        # plt.tight_layout()
-        # plt.show()
-        # plt.close('all')
-
-        ######################
+        #############################################################
 
         return new_modes
 
@@ -1052,7 +1011,7 @@ class Population(Constants):
 
         # update v
         new_group_vel  = phonon.group_vel[new_modes[:, 0], new_modes[:, 1], :]
-        
+
         # update omega
         in_omega       = phonon.omega[incident_modes[:, 0], incident_modes[:, 1]]
         new_omega      = phonon.omega[     new_modes[:, 0],      new_modes[:, 1]]
@@ -1072,50 +1031,7 @@ class Population(Constants):
         # find next scattering event
         new_ts_to_boundary, new_collision_facets, new_collision_positions, new_positions = self.timesteps_to_boundary(new_positions, new_group_vel, geometry)
 
-        # plt.plot(collision_facets, new_collision_facets, 'x')
-
         new_collision_cond = self.bound_cond[new_collision_facets.astype(int)]
-
-        ################## DEBUGGING ###############
-        # plotting
-        # fig = plt.figure()
-        # ax = fig.add_subplot(111, projection = '3d')
-        # ax.scatter(previous_positions[:, 0] ,
-        #            previous_positions[:, 1] ,
-        #            previous_positions[:, 2] , c = 'b')
-        # ax.scatter(collision_positions[:, 0],
-        #            collision_positions[:, 1],
-        #            collision_positions[:, 2], c = 'r')
-        # ax.scatter(new_positions[:, 0]      ,
-        #            new_positions[:, 1]      ,
-        #            new_positions[:, 2]      , c = 'g')
-
-        # # first drift
-        # t = self.dt
-        # start_points = previous_positions
-        # end_points = start_points + t * group_velocities
-
-        # for i in range(new_omega.shape[0]):
-        #     ax.plot([start_points[i, 0], end_points[i, 0]],
-        #             [start_points[i, 1], end_points[i, 1]],
-        #             [start_points[i, 2], end_points[i, 2]], color = 'k', linewidth = 1)
-        
-        # # second drift
-        # t = self.dt
-        # start_points = collision_positions
-        # end_points = start_points + t * new_group_vel
-
-        # for i in range(new_omega.shape[0]):
-        #     ax.plot([start_points[i, 0], end_points[i, 0]],
-        #             [start_points[i, 1], end_points[i, 1]],
-        #             [start_points[i, 2], end_points[i, 2]], color = 'k', linewidth = 1, linestyle = '--')
-        
-        # ax.set_title('Scattered particles')
-
-        # plt.show()
-        # plt.close('all')
-
-        ###########################################################################
         
         return new_modes, new_positions, new_group_vel, new_omega, new_occupation, new_ts_to_boundary, new_calculated_ts, new_collision_positions, new_collision_facets, new_collision_cond
 
@@ -1130,7 +1046,6 @@ class Population(Constants):
         new_n_timesteps = copy.copy(self.n_timesteps) # (N_p,)
 
         while np.any(calculated_ts < 1): # while there are any particles with the timestep not completely calculated
-
             
 
             # I. Deleting particles entering reservoirs
@@ -1172,7 +1087,6 @@ class Population(Constants):
             indexes_ref = np.logical_and(calculated_ts       <   1 ,
                                          self.collision_cond == 'R')
 
-            print('Reflected particles:', indexes_ref.sum())
             if np.any(indexes_ref):
                 (self.modes[indexes_ref, :]              ,
                  self.positions[indexes_ref, :]          ,
@@ -1192,7 +1106,6 @@ class Population(Constants):
                                                                                                calculated_ts[indexes_ref]              ,
                                                                                                geometry                                ,
                                                                                                phonon                                  )
-            # print('After', calculated_ts[calculated_ts>1], self.positions[calculated_ts>1, :])
 
             # IV. Drifting those who will not be scattered again in this timestep
 
@@ -1243,7 +1156,6 @@ class Population(Constants):
         # start = time.time()
 
         self.boundary_scattering(geometry, phonon)      # perform boundary scattering/periodicity and particle deletion
-
         # print('Boundary scattering: {:.2f} s, {:d} part'.format(time.time()-start, self.positions.shape[0]))
         # start = time.time()
 
@@ -1479,9 +1391,11 @@ class Population(Constants):
         for i in range(self.n_of_subvols):
             line += 'T Slc {:>3d} '.format(i)
         for i in range(self.n_of_subvols):
-            line += 'Energ Sl {:>2d} '.format(i) # temperature per subvol
+            line += 'Energ Sv {:>2d} '.format(i) # temperature per subvol
         for i in range(self.n_of_subvols):
-            line += 'Hflux Sl {:>2d} '.format(i)
+            line += 'Hflux x Sv {:>2d} '.format(i)
+            line += 'Hflux y Sv {:>2d} '.format(i)
+            line += 'Hflux z Sv {:>2d} '.format(i)
         for i in range(self.n_of_subvols):
             line += 'Np Sl  {:>2d} '.format(i)
         
@@ -1504,7 +1418,8 @@ class Population(Constants):
         line += '{:>10d} '.format( self.energies.shape[0] )  # number of particles
         line += np.array2string(self.subvol_temperature, formatter = {'float_kind':'{:>9.3f}'.format} ).strip('[]') + ' '
         line += np.array2string(self.subvol_energy     , formatter = {'float_kind':'{:>11.5e}'.format}).strip('[]') + ' '
-        # line += np.array2string(self.subvol_heat_flux  , formatter = {'float_kind':'{:>12.5e}'.format}).strip('[]') + ' '
+        for i in range(self.n_of_subvols):
+            line += np.array2string(self.subvol_heat_flux[i, :]  , formatter = {'float_kind':'{:>12.5e}'.format}).strip('[]') + ' '
         line += np.array2string(self.subvol_N_p        , formatter = {'int'       :'{:>10d}'.format}  ).strip('[]') + ' '
         
         line += '\n'

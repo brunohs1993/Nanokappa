@@ -1,6 +1,6 @@
---hdf_file         D:\LEMTA\Code\Materials\Si\kappa-m313131.hdf5
---poscar_file      D:\LEMTA\Code\Materials\Si\POSCAR
---mat_names        silicon
+--hdf_file         D:\LEMTA\Code\Materials\Pb2_I4\kappa-m20206.hdf5
+--poscar_file      D:\LEMTA\Code\Materials\Pb2_I4\POSCAR-unitcell
+--mat_names        lead_iodide
 --geometry         cuboid
 --dimensions       2e3 1e3 1e3
 --subvolumes       slice 10 0
@@ -8,10 +8,10 @@
 --bound_values     303 297 1e-10
 --reference_temp   290
 --energy_normal    fixed
---temp_dist        constant_hot
+--temp_dist        constant_cold
 --particles        pmps 1
 --part_dist        random_subvol
---timestep         1
---iterations       100000
---results_folder   z_Si_R-BC
+--timestep         0.1
+--iterations       10000
+--results_folder   z_Pb_R-BC
 --results_location D:/LEMTA/Code/Results
