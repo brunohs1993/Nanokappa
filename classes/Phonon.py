@@ -73,7 +73,7 @@ class Phonon(Constants):
         print('Expanding group velocity to FBZ...')
         self.load_group_vel()
         qpoints_FBZ,group_vel=expand_FBZ(0,self.weights,self.q_points,self.group_vel,1,rotations,reciprocal_lattice)
-        self.group_vel=group_vel
+        self.group_vel=np.around(group_vel, decimals = 8)
 
         self.load_temperature()
         self.T_reference = self.args.reference_temp[0]
@@ -89,14 +89,21 @@ class Phonon(Constants):
         self.gamma=gamma
 
         self.q_points=qpoints_FBZ
-        self.weights = np.ones((len(self.q_points[:,0]),))
+        # self.weights = np.ones((len(self.q_points[:,0]),))
+        self.weights = np.ones(self.q_points.shape[0])
         
         self.number_of_qpoints = self.q_points.shape[0]
         self.number_of_branches = self.frequency.shape[1]
-        self.number_of_modes = self.number_of_qpoints*self.number_of_branches
 
-        self.reciprocal_lattice = reciprocal_lattice    # [[a*1, a*2, a*3], [b*1, b*2, b*3], [c*1, c*2, c*3]]
-        self.direct_lattice     = lattice               # [[a 1, a 2, a 3], [b 1, b 2, b 3], [c 1, c 2, c 3]]
+        self.number_of_modes = self.number_of_qpoints*self.number_of_branches
+        
+        self.inactive_modes_mask  = np.all(self.group_vel == 0, axis = 2)
+        self.number_of_inactive_modes = self.inactive_modes_mask.sum()
+
+        self.number_of_active_modes = self.number_of_modes - self.number_of_inactive_modes
+
+        # [[a*1, b*1, c*1], [a*2, b*2, c*2], [a*3, b*3, c*3]]
+        self.reciprocal_lattice = np.around(reciprocal_lattice, decimals = 6)
 
         self.unique_modes = np.stack(np.meshgrid( np.arange(self.number_of_qpoints), np.arange(self.number_of_branches) ), axis = -1 ).reshape(-1, 2).astype(int)
 
@@ -119,8 +126,33 @@ class Phonon(Constants):
         self.calculate_reference(self.T_reference)
         self.initialise_temperature_function()
 
+        print('Generating p_ref = f(T)...')
+        self.initialise_ref_momentum_function()
+
         print('Material initialisation done!')
         
+        #### DEBUG ####
+
+        # fig = plt.figure(figsize = (20, 10), dpi = 100)
+        
+        # q = self.q_points
+        # q = np.where(q>0.5, q-1, q)
+
+        # k = self.q_to_k(q)
+        # for j in range(self.number_of_branches):
+        #     for d in range(3):
+        #         i = d*self.number_of_branches+j
+        #         ax = fig.add_subplot( 3, self.number_of_branches, i+1, projection = '3d')
+
+        #         ax.scatter(k[:, 0], k[:, 1], k[:, 2], c = self.group_vel[:, j, d], s = 1)
+
+        # plt.tight_layout()
+        # plt.show()
+        # quit()
+
+        #######################
+        
+
     def load_hdf_data(self, hdf_file):
         ''' Get all data from hdf file.
             Module documentation: https://docs.h5py.org/en/stable/'''
@@ -165,30 +197,25 @@ class Phonon(Constants):
 
     def k_to_q(self, k):
         # convert wave vectors to q-points in the first brillouin zone
-
         a = np.linalg.inv(self.reciprocal_lattice)  # transformation vector
         
-        q = k*np.transpose(a).reshape(3, 1, 3) # transform wavevectors to q-points
-        q = q.sum(axis = 0)
+        q = np.dot(k, a.T)
 
         # bring all points to the first brillouin zone
-        q = np.where(q >= 1, q-1, q)
-        q = np.where(q < 0, q+1, q)
+        # q = q-np.floor(q)
+        q = q % 1
+
+        # adjust for nearest interpolation
+        q = np.where(q >=  1-1/(2*self.data_mesh), q-1, q)
+        q = np.where(q <    -1/(2*self.data_mesh), q+1, q)
 
         return q
     
     def q_to_k(self, q):
         # convert q-points to wave vectors in the first brillouin zone
+        k = np.dot(q, self.reciprocal_lattice.T)
 
-        q = np.arctan(np.tan(q*np.pi))/np.pi
-        # Obs: this correction is done to keep the q_points inside the first Brillouin zone around the origin (-0.5<q<0.5).
-        # To visualise this, plot y = arctan(tan(x pi))/pi . Inside that interval, y = x. But, for instance, for x = 0.6, y = -0.4,
-        # making X periodic.
-        # These are the wavevectors to be normalised and used to calculate specularity.
-
-        k = (q*np.transpose(self.reciprocal_lattice).reshape(3, 1, 3)).sum(axis = 0)
-        
-        return k
+        return k        
 
     def rotate_crystal(self):
         '''Rotates the orientation of the crystal in relation to the geometry axis.'''
@@ -259,7 +286,7 @@ class Phonon(Constants):
         T = np.array(T)             # ensuring right type
         T = T.reshape( (-1, 1, 1) ) # ensuring right dimensionality
 
-        crystal_energy = self.calculate_energy(T, self.omega).sum( axis = (1, 2) )  # eV - energy sum of all modes
+        crystal_energy = (self.calculate_energy(T, self.omega)*~self.inactive_modes_mask).sum( axis = (1, 2) )  # eV - energy sum of all modes
         crystal_energy = self.normalise_to_density(crystal_energy)                  # eV / a³ - normalising to density
         crystal_energy += self.zero_point                                           # eV / a³ - adding zero-point energy density
 
@@ -274,9 +301,39 @@ class Phonon(Constants):
         return zero
     
     def calculate_reference(self, T):
-        '''Calculate minimum occupation for each modes'''
+        '''Calculate occupation and energy at reference temperatures for each modes, as well as the 
+           equilibrium momentum function at different temperatures.'''
+
         self.reference_occupation = self.calculate_occupation(T, self.omega)        # shape = q_points x branches
         self.reference_energy = self.calculate_crystal_energy(self.T_reference)     # float, eV/a³
+
+    def calculate_crystal_momentum(self, T):
+        
+        T = np.array(T)             # ensuring right type
+        T = T.reshape( (-1, 1, 1) ) # ensuring right dimensionality
+
+        n = (self.calculate_occupation(T, self.omega)*~self.inactive_modes_mask).sum(axis = 2).T # (Q, T)
+
+        momentum = (self.hbar*self.wavevectors.reshape(3, -1, 1)*n).sum(axis = 1).T # (T, D)
+
+        return momentum
+    
+    def initialise_ref_momentum_function(self):
+
+        # interval
+        T_min = self.temperature_array.min()
+        T_max = self.temperature_array.max()
+
+        # Temperature array
+        dT = 0.1
+        T_array = np.arange(T_min, T_max+dT, dT)
+
+        # momentum array
+        momentum_array = np.array( list( map(self.calculate_crystal_momentum, T_array) ) ).squeeze()
+
+        self.reference_momentum_function_x = interp1d( T_array.reshape(-1), momentum_array[:, 0], kind = 'linear', fill_value = '' )
+        self.reference_momentum_function_y = interp1d( T_array.reshape(-1), momentum_array[:, 1], kind = 'linear', fill_value = '' )
+        self.reference_momentum_function_z = interp1d( T_array.reshape(-1), momentum_array[:, 2], kind = 'linear', fill_value = '' )
 
     def initialise_temperature_function(self):
         '''Calculate an array of energy density levels and initialises the function to recalculate T = f(E)'''

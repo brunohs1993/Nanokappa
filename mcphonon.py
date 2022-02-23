@@ -19,7 +19,7 @@ def initialise_parser():
 
     parser.add_argument('--geometry'       , '-g' , default = ['cuboid'],
                         type = str  , nargs = 1   , help    = 'Geometry of the domain. Standard shapes are cuboid, cylinder, cone and capsule')
-    parser.add_argument('--dimensions'     , '-d' , default = [20e3, 1e3, 1e3],
+    parser.add_argument('--dimensions'     , '-d' , default = [10e3, 1e3, 1e3],
                         type = float, nargs = 3   , help    = 'Dimensions in angstroms as asked by trimesh.creation primitives. 3 for box, 2 for others. Radius first.')
     parser.add_argument('--scale'          , '-s' , default = [1, 1, 1],
                         type = float, nargs = 3   , help    = 'Scaling factors (x, y, z) to be applied to given geometry.')
@@ -51,6 +51,9 @@ def initialise_parser():
     parser.add_argument('--bound_cond'     , '-bc', default = ['T', 'T', 'P'], choices = ['T', 'P', 'F', 'R'],
                         type = str  , nargs = '*' , help    = 'Set boundary conditions to each specific facet. Choose between "T" for temperature, "F" for flux, "R" for roughness or "P" for periodic.'+
                                                               ' The respective values need to be set in --bound_values (not for periodic boundary condition).')
+    parser.add_argument('--reflect_model'  , '-rm', default = ['wavevector', 'nearest'],
+                        type = str  , nargs = 2   , help    = "Reflection model to be used. The code uses Snell's law, allowing the user to choose between wavevector or velocity as the vector to be reflected, "+
+                                                              "nearest or roulette as the method for choosing the new modes.")
     parser.add_argument('--bound_facets'  , '-bf' , default = [0, 3],
                         type = int  , nargs = '*' , help    = 'Set the facets on which to apply the specific boundary conditions. Nargs depends on what was specified on --bound_cond. '+
                                                              'If nargs is less than the number of facets of the geometry, the last boundary condition will be applied to all non-specified facets.')

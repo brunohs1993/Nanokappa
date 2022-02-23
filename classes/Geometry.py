@@ -255,7 +255,7 @@ class Geometry:
                 
         elif self.subvol_type in ['sphere', 'box']:
             
-            self.subvol_meshes = subvolumes.distribute(self.mesh, self.n_of_subvols, self.subvol_type, view = False)
+            self.subvol_meshes = subvolumes.distribute(self.mesh, self.n_of_subvols, self.subvol_type, self.folder, view = False)
                 
         else:
             print('Invalid subvolume!')
@@ -268,43 +268,93 @@ class Geometry:
 
     def get_bound_facets(self, args):
 
-        if len(args.bound_facets)+1 == len(args.bound_cond): # if there is one more boundary condition imposed than the number of specified facets,
-                                                             # it means that there is one boundary condition imposed for all other faces
+        ### NEW WAY TO ORGANISE ###
 
-            bound_cond = [args.bound_cond[-1] for _ in range(self.number_of_facets)]    # set the last boundary condition to all facets
-            
-            # correct those that were specifically set
-            count = 0
-            for bound_facet in args.bound_facets:
-                bound_cond[bound_facet] = args.bound_cond[count]
-                count += 1
-            
-            if args.bound_cond[-1] == 'P':                                                      # periodic bound cond doesn't have values
-                bound_values = np.array([np.nan for _ in range(self.number_of_facets)])
-            else:                                                                                      # temperature, flux and roughness have
-                bound_values = np.array([args.bound_values[-1] for _ in range(self.number_of_facets)]) # set the last value to all facets
-            
-            bound_values[args.bound_facets] = np.array(args.bound_values)[np.arange(len(args.bound_facets), dtype = int)]                      # correct those that were specifically set
-            
-            # update the arguments
-            args.bound_values = bound_values
-            args.bound_cond   = bound_cond
-            args.bound_facets = np.arange(self.number_of_facets)  # considering all facets
+        # initialize boundary condition array with the last one
+        self.bound_cond = np.array([args.bound_cond[-1] for _ in range(self.number_of_facets)])
 
-        res_facets_indexes = [args.bound_facets[i] for i in range(len(args.bound_facets)) if args.bound_cond[i] in ['T', 'F']]
-        res_facets_indexes = np.array(res_facets_indexes).astype(int)
+        # correct for the specified facets
+        for i in range(len(args.bound_facets)):
+            bound_facet = args.bound_facets[i]
+            self.bound_cond[bound_facet] = args.bound_cond[i]
+        
+        self.res_facets     = np.arange(self.number_of_facets, dtype = int)[np.logical_or(self.bound_cond == 'T', self.bound_cond == 'F')]
+        self.res_bound_cond = self.bound_cond[np.logical_or(self.bound_cond == 'T', self.bound_cond == 'F')]
+        self.rough_facets   = np.arange(self.number_of_facets, dtype = int)[self.bound_cond == 'R']
 
-        facets   = [self.mesh.facets[i]      for i in range(self.number_of_facets)] # indexes of the faces that define each facet
-        faces    = [self.mesh.faces[i]       for i in facets                      ] # indexes of the vertices that ar contained by each facet
-        vertices = [self.mesh.vertices[i, :] for i in faces                       ] # vertices coordinates contained by the boundary facet
+        # getting how many facets of each
+        self.number_of_reservoirs   = self.res_facets.shape[0]
+        self.number_of_rough_facets = self.rough_facets.shape[0]
+
+        # getting how many 
+        self.res_values          = np.ones( self.number_of_reservoirs      )*np.nan
+        self.rough_facets_values = np.ones((self.number_of_rough_facets, 2))*np.nan
+        
+        # saving the generalised boundary condition, if there's any
+        if args.bound_cond[-1] in ['T', 'F']:
+            self.res_values[:] = args.bound_values[-1]
+        elif args.bound_cond[-1] == 'R':
+            self.rough_facets_values[:, 0] = args.bound_values[-2]
+            self.rough_facets_values[:, 1] = args.bound_values[-1]
+        
+        # saving values
+        counter = 0                                                           # initialize counter
+
+        for i in range(len(args.bound_facets)):                               # for each specified facet
+            
+            bound_facet = args.bound_facets[i]                                # get the facet location
+            
+            if bound_facet in self.res_facets:                                # if it is a reservoir
+                j = self.res_facets == bound_facet                            # get where it is
+                self.res_values[j] = args.bound_values[counter]               # save the value in res array
+                
+                counter += 1                                                  # update counter
+            
+            elif bound_facet in self.rough_facets:                            # if it is a rough facet
+                j = self.rough_facets == bound_facet                          # get the facet location
+                
+                self.rough_facets_values[j, 0] = args.bound_values[counter]   # save roughness (eta)
+                self.rough_facets_values[j, 1] = args.bound_values[counter+1] # save correlation length (lambda)
+
+                counter += 2                                                  # update counter
+
+
+        ### OLD WAY ###
+
+        # if len(args.bound_facets)+1 == len(args.bound_cond): # if there is one more boundary condition imposed than the number of specified facets,
+        #                                                      # it means that there is one boundary condition imposed for all other faces
+
+        #     bound_cond = [args.bound_cond[-1] for _ in range(self.number_of_facets)]    # set the last boundary condition to all facets
+            
+        #     # correct those that were specifically set
+        #     count = 0
+        #     for bound_facet in args.bound_facets:
+        #         bound_cond[bound_facet] = args.bound_cond[count]
+        #         count += 1
+            
+        #     if args.bound_cond[-1] in ['P', 'R']:                                                      # periodic bound cond doesn't have values, and roughness have them separately
+        #         bound_values = np.array([np.nan for _ in range(self.number_of_facets)])
+        #     else:                                                                                      # temperature and flux have
+        #         bound_values = np.array([args.bound_values[-1] for _ in range(self.number_of_facets)]) # set the last value to all facets
+            
+        #     bound_values[args.bound_facets] = np.array(args.bound_values)[np.arange(len(args.bound_facets), dtype = int)] # correct those that were specifically set
+            
+        #     # update the arguments
+        #     args.bound_values = bound_values
+        #     args.bound_cond   = bound_cond
+        #     args.bound_facets = np.arange(self.number_of_facets)  # considering all facets
+
+        faces    = [self.mesh.facets[i]      for i in range(self.number_of_facets)] # indexes of the faces that define each facet
+        vertices = [self.mesh.faces[i]       for i in faces                       ] # indexes of the vertices that ar contained by each facet
+        coords   = [self.mesh.vertices[i, :] for i in vertices                    ] # vertices coordinates contained by the boundary facet
 
         # facets of reservoirs
-        res_facets = [facets[i] for i in res_facets_indexes]
+        res_faces = [faces[i] for i in self.res_facets]
 
         # meshes of the boundary facets to be used for sampling
-        self.res_meshes = self.mesh.submesh(faces_sequence = res_facets, append = False)
+        self.res_meshes = self.mesh.submesh(faces_sequence = res_faces, append = False)
 
-        self.facet_vertices = [np.unique(np.vstack((v[0, :, :], v[1, :, :])), axis = 0) for v in vertices]
+        self.facet_vertices = [np.unique(np.vstack((v[0, :, :], v[1, :, :])), axis = 0) for v in coords]
 
         # calculation of the centroid of each facet as the mean of vertex coordinates, weighted by how many faces they are connected to.
         # this is equal to the mean of triangles centroids.
@@ -398,7 +448,16 @@ class Geometry:
     def faces_to_facets(self, index_faces):
         ''' get which facet those faces are part of '''
         
-        index_facets = np.array([np.where( face == np.array(self.mesh.facets))[0][0] for face in index_faces])
+        index_facets = np.zeros(index_faces.shape)
+        
+        for i in range(index_faces.shape[0]):
+            face = index_faces[i]
+            for j in range(len(self.mesh.facets)):
+                facet = self.mesh.facets[j]
+                if face in facet:
+                    index_facets[i] = j
+
+        # index_facets = np.array([np.where( face == np.array(self.mesh.facets))[0][0] for face in index_faces])
 
         return index_facets
 

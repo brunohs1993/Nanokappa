@@ -78,7 +78,7 @@ def generate_subvols(shape, n_subvols, radius, centers):
     
     return subvols
 
-def distribute(geo, n_subvols, shape, view = True):
+def distribute(geo, n_subvols, shape, folder, view = True):
 
     # geo = get_outer_hull(geo)   # ensure that geometry is watertight
 
@@ -154,7 +154,7 @@ def distribute(geo, n_subvols, shape, view = True):
 
     print('Generating final meshes...')
 
-    np.savetxt(fname = 'subvolumes.txt',
+    np.savetxt(fname = folder + 'subvolumes.txt',
                X = np.hstack((radius.reshape(-1, 1), centers)),
                fmt = '%.3f', delimiter = ',',
                header = 'Distribution of subvolumes. Type: '+shape+'\n Radius/Edge, Center x, Center y, Center z')

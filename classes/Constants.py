@@ -14,3 +14,4 @@ class Constants:
         self.ps_in_s       = 1e-12                                                              # s/ps
         self.eVpsa2_in_Wm2 = self.ev_in_J/(self.ps_in_s*(self.a_in_m)**2)                       # eV/ps a² ---> W/m²
         self.pi            = ct.pi
+        self.eVpsa_in_kgms = self.ev_in_J*self.ps_in_s/self.a_in_m
