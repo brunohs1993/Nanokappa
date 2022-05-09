@@ -1,8 +1,13 @@
+# from statistics import LinearRegression
 import trimesh as tm
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import copy
+
+# AI classifier models
+from sklearn.neural_network import MLPClassifier
+from sklearn.preprocessing import OneHotEncoder
 
 def generate_points(geo, n):
     points = tm.sample.volume_mesh(geo, n)
@@ -11,249 +16,192 @@ def generate_points(geo, n):
         points = np.concatenate((points, new_points), axis = 0)
     return points
 
-def get_which_spheres(samples, spheres):
+def get_regions(x_s, x_r):
     
-    n_samples = samples.shape[0]
-    n_subvols = len(spheres)
+    n_r = x_r.shape[0] # number of regions
 
-    in_subvol = np.ones((n_samples, n_subvols))
+    d = x_s - x_r.reshape(n_r, 1, 3)
+    d = np.sum(d**2, axis = 2)**0.5
 
-    for i in range(n_subvols):
-        in_subvol[:, i] = tm.proximity.signed_distance(spheres[i], samples) > 0
+    min_d = np.amin(d, axis = 0, keepdims = True)
 
-    return in_subvol
+    r = np.argmax(d == min_d, axis = 0)
 
-def get_cover(in_subvol):
+    return r
 
-    contained_any = np.any(in_subvol, axis = 1)
+def get_cover(r, n_r):
 
-    cover = contained_any.mean()
+    n_s = r.shape[0]
 
-    volumes = in_subvol.mean(axis = 0)
+    cvr = np.zeros(n_r)
+    for i in range(n_r):
+        ind = np.nonzero(r == i)[0]
+        cvr[i] = ind.shape[0]/n_s
+
+    return cvr
+
+def update_centers(x_s, r, x_r):
+
+    n_r = x_r.shape[0] # number of regions
+
+    x_r_new = np.zeros((n_r, 3))  # initialise new_centers
+
+    for i in range(n_r):                           # check for each region
+        ind = np.nonzero(r == i)[0]
+        x_r_new[i, :] = x_s[ind, :].mean(axis = 0) # to  calculate their centroid
+
+    return x_r_new
+
+def train_model(x_r, n_s, geo):
+
+    n_r = x_r.shape[0]
+    x_s = generate_points(geo, n_s)
     
-    volume_ratio = volumes/volumes.mean()
-    volume_ratio = np.nan_to_num(volume_ratio, nan=0)
-
-    return cover, volume_ratio
-
-def update_centers(samples, in_subvols, centers):
-
-    n_subvols = in_subvols.shape[1]
-
-    how_many_spheres = in_subvols.astype(int).sum(axis = 1)
-
-    new_centers = np.zeros((n_subvols, 3))  # initialise new_centers
-
-    for i in range(n_subvols):                                  # check for each sphere
-        indexes = in_subvols[:, i].astype(bool)
-        unique_indexes = how_many_spheres[indexes] == 1
-
-        in_points = samples[indexes, :]
-
-        if in_points[unique_indexes].shape[0]>0:    # if there are points inside
-            new_centers[i, :] = in_points[unique_indexes].mean(axis = 0) # to  calculate their centroid
-        else:
-            new_centers[i, :] = centers[i, :]
-
-    return new_centers
-
-def update_radius(radius, cover, volume_ratio):
-
-    beta = (volume_ratio**2+cover**2)**0.5
-    alpha = 1-np.exp(-(2**0.5))+np.exp(-beta)
+    r = get_regions(x_s, x_r)
     
-    alpha = alpha**2    
-    radius *= np.where(volume_ratio == 0, 1.1, alpha)
-
-    return radius
-
-def generate_subvols(shape, n_subvols, radius, centers):
-    if shape == 'sphere':
-        # generate spheres
-        subvols = [tm.creation.icosphere(subdivisions = 1, radius = radius[i]).apply_translation(centers[i, :])
-                    for i in range(n_subvols)]
-    elif shape == 'box':
-        subvols = [tm.creation.box(extents = np.ones(3)*radius[i]).apply_translation(centers[i, :])
-                    for i in range(n_subvols)]
+    print('Enconding...')
     
-    return subvols
+    ohe = OneHotEncoder(sparse = False)
+    y_train = ohe.fit_transform(r.reshape(-1, 1))
 
-def distribute(geo, n_subvols, shape, folder, view = True):
+    print('Training classifier...')
+
+    hl_size = int(5*n_r)
+
+    model = MLPClassifier(hidden_layer_sizes = (hl_size, hl_size, hl_size),
+                          activation         = 'logistic'   ,
+                          solver             = 'adam'       ,
+                          verbose            = 1            ,
+                          max_iter           = 1000         ,
+                          learning_rate      = 'adaptive'   )
+
+    x_train = (x_s - geo.bounds[0, :])/np.ptp(geo.bounds, axis = 0)
+
+    model.fit(x_train, y_train) # train model
+
+    x_test = generate_points(geo, n_s) # generate test samples
+    x_test = (x_test - geo.bounds[0, :])/np.ptp(geo.bounds, axis = 0) # normalise
+    
+    r_test = get_regions(x_test, x_r)  # get their regions
+    y_test = ohe.transform(r_test.reshape(-1, 1))
+
+    score = model.score(x_test, y_test) # calculate model score
+
+    print('Classifier trained! Estimated score: {:.3e}'.format(score)) # exhibit score
+
+    return model
+
+def distribute(geo, n_r, folder, view = True):
 
     # geo = get_outer_hull(geo)   # ensure that geometry is watertight
 
-    n_samples = int(1e3)        # initial number of points to test
-    n_samples_max = int(1e5)    # maximum number of points to test
-    iterations = 10            # number of iterations per try
+    n_s = int(1e3)     # initial number of points to test
+    n_s_max = int(1e6) # maximum number of points to test
+    it = 10            # number of iterations per try
+    criterion = 1e-8
 
     # initialising convergence lists
     centers_conv = []
-    radius_conv = []
-    volume_conv = []
     cover_conv = []
+    displacement_conv = []
+
 
     # initialising variables
     tries = 0
     counter = 0
     solution_found = False
-    best_intersection = 1
-    best_spec_intersect = 1
 
-    radius = np.ones(n_subvols)*geo.extents.max()/(2*n_subvols)
-    centers = generate_points(geo, n_subvols)
-
-    cover = 0
-    volume_ratio = np.ones(n_subvols)
+    x_r = generate_points(geo, n_r) # regions coordinates
+    x_s = generate_points(geo, n_s) # samples coordinates
 
     # main loop
     while not solution_found:
         tries +=1
-        while counter < tries*iterations:
-
-            subvols = generate_subvols(shape, n_subvols, radius, centers)
-
-            sample_points       = generate_points(geo, n_samples)           # sample geometry volume
-            in_subvol           = get_which_spheres(sample_points, subvols) # get which spheres contain the samples
-            cover, volume_ratio = get_cover(in_subvol)                      # get what percentage of the volume each sphere contains
-
-            empty_subvols = np.any(~np.any(in_subvol, axis = 0)) # check if there is any empty subvol
-            intersection = (in_subvol.sum(axis = 1)>1).mean()
-
-            centers_conv.append(copy.copy(centers))
-            radius_conv.append(copy.copy(radius))
-            volume_conv.append(in_subvol.mean(axis = 0))
-            cover_conv.append(copy.copy(cover))
-
-            if (cover == 1) and (not empty_subvols):
+        while counter < tries*it:
             
-                spec_intersect = intersection/n_samples
+            r   = get_regions(x_s, x_r) # get which spheres contain the samples
+            cvr = get_cover(r, n_r)     # get what percentage of the volume each sphere contains
 
-                if spec_intersect < best_spec_intersect:
-                    best_intersection = intersection
-                    best_spec_intersect = spec_intersect
-                    solution_centers = copy.copy(centers)
-                    solution_radius  = copy.copy(radius)
-                    solution_iteration = counter
-                
-                radius = radius*(np.exp(-intersection/10))**(1/3)
+            x_r_new = update_centers(x_s, r, x_r)  # update centers
 
-            if cover == 1:
-                if n_samples < n_samples_max:
-                    n_samples = int(n_samples*2)
-                if n_samples > n_samples_max:
-                    n_samples = n_samples_max
-                    solution_found = True
-                    break
+            dx_r = x_r_new - x_r
+
+            centers_conv.append(copy.copy(x_r))
+            cover_conv.append(copy.copy(cvr))
+            displacement_conv.append(copy.copy(dx_r))
+
+            # comparison = np.absolute(dx_r).max()
+            comparison = np.linalg.norm(dx_r, axis = 1).max()
+
+            if n_s < n_s_max and comparison < criterion:
+                n_s = int(n_s*2)
+                x_s = generate_points(geo, n_s)
+            if n_s >= n_s_max:
+                n_s = n_s_max
+                solution_found = comparison < criterion
+                break
 
             counter += 1
             
-            centers = update_centers(sample_points, in_subvol, centers)  # update centers
-            radius  = update_radius(radius, cover, volume_ratio)   # update radius
-
-        print('{:4d} - Cover: {:6.2f}%, Int: {:>.3f}, Best Int: {:.3f}, Samples: {:.2e}'.format(counter, cover*100, intersection, best_intersection, n_samples))
-
-    print('Generating final meshes...')
+            x_r = x_r_new
+            
+        print('{:4d} - Samples: {:.2e}, Max dx_r = {:.3e}'.format(counter, n_s, np.max(dx_r)))
 
     np.savetxt(fname = folder + 'subvolumes.txt',
-               X = np.hstack((radius.reshape(-1, 1), centers)),
+               X = x_r,
                fmt = '%.3f', delimiter = ',',
-               header = 'Distribution of subvolumes. Type: '+shape+'\n Radius/Edge, Center x, Center y, Center z')
-    
-    # generating shapes
-    subvols = generate_subvols(shape, n_subvols, solution_radius, solution_centers)
+               header = 'Distribution of subvolumes. \n Center x, Center y, Center z')
 
-    # getting their intersection with the geometry
-    final_subvols = [geo.intersection(subvol) for subvol in subvols]
-
-    # check if all of them are watertight
-    watertight = np.array([subvol.is_watertight for subvol in final_subvols])
-
-    if np.any(~watertight):
-        print('Subvolumes {} are not watertight! Try another configuration.'.format(np.where(~watertight)[0]))
-        print('Interrupting simulation...')
-        quit()
-    else:
-        print('All subvolumes are watertight. Continuing simulation...')
-    
-    if view:
-        view_subvols(geo,
-                     subvols,
-                     final_subvols,
+    if view: # visualise results if requested
+        view_subvols(geo, folder,
                      centers_conv,
-                     radius_conv,
-                     volume_conv,
                      cover_conv,
-                     n_samples_max,
-                     solution_centers,
-                     solution_iteration)
+                     displacement_conv)
     
-    return final_subvols
+    model = train_model(x_r, n_s_max, geo)
 
-def view_subvols(geo,
-                 subvols,
-                 final_subvols,
+    cvr = get_cover(model.predict(x_s), n_r)
+
+    return model, cvr
+
+def view_subvols(geo, folder,
                  centers_conv,
-                 radius_conv,
-                 volume_conv,
                  cover_conv,
-                 n_samples_max,
-                 solution_centers,
-                 solution_iteration):
+                 displacement_conv):
 
-    n_subvols = len(final_subvols)
+    x_r = centers_conv[-1]
 
+    n_r = x_r.shape[0]
+    
     # visualising geometry
-    geo.show()
-
-    # visualising shapes
-    scene = tm.Scene(subvols)
-    scene.show()
-
-    # visualising subvols
-    scene = tm.Scene(final_subvols)
-    scene.show()
+    # geo.show()
 
     # plotting convergence
-    centers_conv = np.array(centers_conv)
-    radius_conv  = np.array( radius_conv)
-    volume_conv  = np.array( volume_conv)
-    cover_conv   = np.array(  cover_conv)
+    centers_conv      = np.array(centers_conv)
+    cover_conv        = np.array(  cover_conv)
+    displacement_conv = np.array(displacement_conv)
+    disp = np.linalg.norm(displacement_conv, axis = 2)
 
-    fig = plt.figure(figsize = (20, 20), dpi = 200)
-    ax1 = fig.add_subplot(221, projection='3d')
-    ax2 = fig.add_subplot(222)
-    ax3 = fig.add_subplot(223)
-    ax4 = fig.add_subplot(224)
+    fig = plt.figure(figsize = (20, 10), dpi = 200)
+    ax1 = fig.add_subplot(131, projection='3d')
+    ax2 = fig.add_subplot(132)
+    ax3 = fig.add_subplot(133)
 
-    sample_points = generate_points(geo, n_samples_max)
-    in_subvol = get_which_spheres(sample_points, final_subvols)
+    # x_s = generate_points(geo, n_s_max)
+    # r   = get_regions(x_s, x_r)
 
-    unique_indexes       = in_subvol.sum(axis = 1) == 1
-    out_indexes          = in_subvol.sum(axis = 1) == 0
-
-    print('Total points:', n_samples_max)
-    print('Out: {} -> {:.2f}%'.format(out_indexes.sum(), out_indexes.mean()*100))
-    print('Unique: {} -> {:.2f}%'.format(unique_indexes.sum(), unique_indexes.mean()*100))
-    print('Shape centers are in black. Out points in transparent red.')
-
-    ax1.scatter(sample_points[out_indexes, 0],
-                sample_points[out_indexes, 1],
-                sample_points[out_indexes, 2], c = 'r', alpha = 0.1)
-
-    for i in range(n_subvols):
-
+    for i in range(n_r):
         ax1.plot(centers_conv[:, i, 0], centers_conv[:, i, 1], centers_conv[:, i, 2])
-        ax1.scatter(solution_centers[i, 0], solution_centers[i, 1], solution_centers[i, 2], c='k')
-        ax2.plot(np.arange(radius_conv.shape[0]), radius_conv[:, i], '.')
-        ax3.plot(np.arange(volume_conv.shape[0]), volume_conv[:, i], '.')
+        ax1.scatter(x_r[i, 0], x_r[i, 1], x_r[i, 2], c='k')
+        ax2.plot(np.arange(cover_conv.shape[0]), cover_conv[:, i])
+        ax3.plot(np.arange(disp.shape[0]), disp[:, i])
+    
+    ax1.legend(np.arange(n_r))
+    ax2.legend(np.arange(n_r))
+    ax3.legend(np.arange(n_r))
 
-    ax4.semilogy(np.arange(cover_conv.shape[0]), cover_conv)
-    ax2.plot([solution_iteration, solution_iteration], ax2.get_ylim(), 'r')
-    ax3.plot([solution_iteration, solution_iteration], ax3.get_ylim(), 'r')
-    ax4.plot([solution_iteration, solution_iteration], ax4.get_ylim(), 'r')
+    ax1.set_title('Center coordinates')
+    ax2.set_title('Relative cover volume')
+    ax3.set_title('Center Displacement')
 
-    ax2.set_title('Radius or Edge size')
-    ax3.set_title('Relative Volume')
-    ax4.set_title('Cover')
-
-    plt.savefig('subvolumes.png')
+    plt.savefig(folder+'subvolumes.png')

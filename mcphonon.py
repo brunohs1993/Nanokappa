@@ -20,15 +20,18 @@ def initialise_parser():
     parser.add_argument('--geometry'       , '-g' , default = ['cuboid'],
                         type = str  , nargs = 1   , help    = 'Geometry of the domain. Standard shapes are cuboid, cylinder, cone and capsule')
     parser.add_argument('--dimensions'     , '-d' , default = [10e3, 1e3, 1e3],
-                        type = float, nargs = 3   , help    = 'Dimensions in angstroms as asked by trimesh.creation primitives. 3 for box, 2 for others. Radius first.')
+                        type = float, nargs = '*' , help    = 'Dimensions in angstroms as asked by trimesh.creation primitives. 3 for box, 2 for others. Radius first.')
     parser.add_argument('--scale'          , '-s' , default = [1, 1, 1],
                         type = float, nargs = 3   , help    = 'Scaling factors (x, y, z) to be applied to given geometry.')
     parser.add_argument('--geo_rotation'   , '-gr' , default = [0, 0, 0, 'xyz'],
-                                      nargs = 4   , help    = 'Euler angles in degrees to be applied to given geometry (see scipy.rotation.from_euler) and the order to be applied (see scipy.rotation.from_euler).')
+                                      nargs = 4   , help    = 'Euler angles in degrees to be applied to given geometry (see scipy.rotation.from_euler) and the order to ' +
+                                                              'be applied (see scipy.rotation.from_euler).')
     parser.add_argument('--mat_rotation'   , '-mr', default = [],
-                                      nargs = '*' , help    = ' Material index, Euler angles in degrees to be applied to given material (see scipy.rotation.from_euler) and the order to be applied (see scipy.rotation.from_euler).')
+                                      nargs = '*' , help    = 'Material index, Euler angles in degrees to be applied to given material (see scipy.rotation.from_euler) and ' +
+                                                              'the order to be applied (see scipy.rotation.from_euler).')
     parser.add_argument('--particles'      , '-p' , default = ['pmps', 1],
-                                      nargs = 2   , help    = 'Number of particles. First argument is a string: "total" for total number, "pmps" for number per mode, per subvolume, "pv" for particles per cubic angstrom. Second is the number.')
+                                      nargs = 2   , help    = 'Number of particles. First argument is a string: "total" for total number, "pmps" for number per mode, per ' +
+                                                              'subvolume, "pv" for particles per cubic angstrom. Second is the number.')
     parser.add_argument('--part_dist'      , '-pd', default = ['random_subvol'], choices = ['random_domain', 'random_subvol', 'center_domain', 'center_subvol'],
                         type = str  , nargs = 1   , help    = 'How to distribute particles. random/center _ domain/subvol')
     parser.add_argument('--empty_subvols'  , '-es', default = [],
@@ -41,7 +44,8 @@ def initialise_parser():
     parser.add_argument('--iterations'     , '-i' , default = [10000],
                         type = int  , nargs = 1   , help    = 'Number of timesteps (iterations) to be run')
     parser.add_argument('--subvolumes'     , '-sv', default = ['slice', 10, 0],
-                                      nargs = '*' , help    = 'Type of subvolumes, number of subvolumes and slicing axis when the case (x = 0, y = 1, z = 2). Accepts "slice", "box" and "sphere" as subvolume types')
+                                      nargs = '*' , help    = 'Type of subvolumes, number of subvolumes and slicing axis when the case (x = 0, y = 1, z = 2). ' +
+                                                              'Accepts "slice" and "voronoi" as subvolume types.')
     parser.add_argument('--reference_temp' , '-rt', default = [0],
                         type = float, nargs = 1   , help    = 'Set reference temperature to be considered in the system, in Kelvin.') 
     parser.add_argument('--temp_dist'      , '-td', default = ['constant_cold'], choices = ['constant_cold', 'constant_hot', 'linear', 'mean', 'random', 'custom'],
@@ -49,11 +53,9 @@ def initialise_parser():
     parser.add_argument('--subvol_temp'    , '-st', default = [],
                         type = float, nargs = '*' , help    = 'Set subvolumes temperatures when custom profile is selected.')
     parser.add_argument('--bound_cond'     , '-bc', default = ['T', 'T', 'P'], choices = ['T', 'P', 'F', 'R'],
-                        type = str  , nargs = '*' , help    = 'Set boundary conditions to each specific facet. Choose between "T" for temperature, "F" for flux, "R" for roughness or "P" for periodic.'+
-                                                              ' The respective values need to be set in --bound_values (not for periodic boundary condition).')
-    parser.add_argument('--reflect_model'  , '-rm', default = ['wavevector', 'nearest'],
-                        type = str  , nargs = 2   , help    = "Reflection model to be used. The code uses Snell's law, allowing the user to choose between wavevector or velocity as the vector to be reflected, "+
-                                                              "nearest or roulette as the method for choosing the new modes.")
+                        type = str  , nargs = '*' , help    = 'Set boundary conditions to each specific facet. Choose between "T" for temperature, "F" for flux, '+
+                                                              '"R" for roughness or "P" for periodic. The respective values need to be set in --bound_values '+
+                                                              '(not for periodic boundary condition).')
     parser.add_argument('--bound_facets'  , '-bf' , default = [0, 3],
                         type = int  , nargs = '*' , help    = 'Set the facets on which to apply the specific boundary conditions. Nargs depends on what was specified on --bound_cond. '+
                                                              'If nargs is less than the number of facets of the geometry, the last boundary condition will be applied to all non-specified facets.')
@@ -61,6 +63,8 @@ def initialise_parser():
                         type = float, nargs = '*' , help    = 'Set boundary conditions values to be imposed (temperature [K], flux [W/m^2] or roughness [angstrom]).')
     parser.add_argument('--connect_facets', '-cf' , default = [1, 5, 2, 4],
                         type = int  , nargs = '*' , help    = 'Set the facets that are connected to apply periodicity. Faces are connected in pairs, or 0-1, 2-3, and so on.')
+    parser.add_argument('--offset'        , '-os' , default = [2e-8],
+                        type = float, nargs = 1   , help    = 'The offset margin from facets to avoid problems with Trimesh collision detection. Default is 2*trimesh.tol.merge = 2e-8.')
 
     parser.add_argument('--energy_normal' , '-en' , default = ['fixed'],
                         type = str  , nargs = 1   , help    = 'Set the energy normalisation in subvolume. "fixed" is divided by the expected number of particles in the subvolume (standard).'+
@@ -73,11 +77,21 @@ def initialise_parser():
     parser.add_argument('--colormap'      , '-cm' , default = ['viridis'],
                         type = str  , nargs = 1   , help    = 'Set matplotlib colormap to be used on all plots. Standard is viridis.')
 
+    parser.add_argument('--lookup'        , '-lu' , default = [False, 0.5],
+                                      nargs = 2   , help    = 'Whether to use the occupation lookup table to calculate energy, temperature, heat flux and crystla momentum in each subvolume. \
+                                                               0 for False (no lookup) or any other value for True. Second argument is the damping factor, ignored if the first is 0.')
+    parser.add_argument('--conv_crit'     , '-cc' , default = [1e-6],
+                        type = float, nargs = 1   , help    = 'Value of convergence criteria, calculated as the norm of phonon number variation.')
+
+    parser.add_argument('--mat_folder'      , '-mf', required = True   , type = str, nargs = '*', help     = 'Set folder with material data.'  ) # lattice properties
     parser.add_argument('--poscar_file'     , '-pf', required = True   , type = str, nargs = '*', help     = 'Set the POSCAR file to be read.' ) # lattice properties
     parser.add_argument('--hdf_file'        , '-hf', required = True   , type = str, nargs = '*', help     = 'Set the hdf5 file to be read.'   ) # phonon properties of the material
+    parser.add_argument('--pickled_mat'     , '-pm', default  = []     , type = int, nargs = '*', help     = 'Inform if any material can be loaded from pickled object.')
     parser.add_argument('--mat_names'       , '-mn', required = True   , type = str, nargs = '*', help     = 'Set the names of each material.' ) #
+
     parser.add_argument('--results_folder'  , '-rf', default  = ''     , type = str, help     = 'Set the results folder name.'    ) # 
     parser.add_argument('--results_location', '-rl', default  = 'local', type = str, help     = 'Set the results folder location.') # 
+    
 
 
     return parser

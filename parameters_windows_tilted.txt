@@ -1,0 +1,25 @@
+--hdf_file         D:\LEMTA\Code\Materials\Si\kappa-m313131.hdf5
+--poscar_file      D:\LEMTA\Code\Materials\Si\POSCAR
+--mat_names        silicon
+--geometry         D:\LEMTA\Code\Geometries\arbitrary_tilted.stl
+--dimensions       
+--scale            1e3 1e3 1e3
+--geo_rotation     -90 0 0 xyz
+--subvolumes       slice 10 0
+--bound_facets     0 4
+--bound_cond       T T R
+--connect_facets   
+--offset           1e-3
+--reflect_model    wavevector nearest
+--bound_values     303 297 10 10
+--reference_temp   295
+--energy_normal    fixed
+--temp_dist        constant_cold
+--empty_subvols    
+--subvol_temp      
+--particles        pmps 1
+--part_dist        random_domain
+--timestep         1
+--iterations       500
+--results_folder   z_tilted_ip_nn
+--results_location D:\LEMTA\Code\Results

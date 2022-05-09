@@ -1,21 +1,28 @@
---hdf_file         D:\LEMTA\Code\Materials\Pb2_I4\kappa-m20206.hdf5
---poscar_file      D:\LEMTA\Code\Materials\Pb2_I4\POSCAR-unitcell
---mat_names        lead_iodide
+--mat_folder       D:\LEMTA\Code\Materials\Si\
+--hdf_file         kappa-m313131.hdf5
+--poscar_file      POSCAR
+--pickled_mat      0
+--mat_names        silicon
 --geometry         cuboid
---dimensions       1e3 1e3 1e3
---subvolumes       slice 1 0
---bound_facets     
---bound_cond       R
---connect_facets   
---reflect_model    wavevector nearest
---bound_values     100 1
---reference_temp   295
+--dimensions       6e3 1e3 1e3
+--scale            1 1 1
+--geo_rotation     0 0 0 xyz
+--subvolumes       slice 10 0
+--bound_facets     0 3
+--bound_cond       T T P
+--connect_facets   1 5 2 4
+--offset           1e-3
+--bound_values     302 298
+--reference_temp   298
 --energy_normal    fixed
---temp_dist        custom
---subvol_temp      300
+--temp_dist        linear
+--empty_subvols    
+--subvol_temp      
 --particles        pmps 1
 --part_dist        random_subvol
 --timestep         1
---iterations       2000
---results_folder   z_rough
---results_location D:/LEMTA/Code/Results
+--iterations       1000
+--results_folder   validation_6e3
+--results_location D:\LEMTA\Code\Results
+--conv_crit        0
+--lookup           0 0.5

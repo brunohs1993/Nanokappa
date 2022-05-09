@@ -1,4 +1,5 @@
 # calculations
+from errno import EBADMSG
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -12,6 +13,8 @@ import routines.subvolumes as subvolumes
 # other
 import sys
 import copy
+import pickle
+import os
 
 np.set_printoptions(precision=3, threshold=sys.maxsize, linewidth=np.nan)
 
@@ -35,18 +38,23 @@ class Geometry:
         self.subvol_type     = args.subvolumes[0]
         self.n_of_subvols    = int(args.subvolumes[1])
         self.folder          = args.results_folder
+        self.offset          = float(args.offset[0])
         
         if self.subvol_type == 'slice':
             self.slice_axis      = int(args.subvolumes[2])
 
         # Processing mesh
 
+        self.tol_decimals = 1
+
         self.load_geo_file(self.shape) # loading
         self.transform_mesh()          # transforming
         self.get_outer_hull(args)      # getting the outer hull, making it watertight and correcting bound_facets
         self.get_mesh_properties()     # defining useful properties
         self.get_bound_facets(args)    # get boundary conditions facets
-        self.check_connections(args)   # check if all connections are valid
+        self.check_connections(args)   # check if all connections are valid and adjust vertices
+        self.get_plane_k()
+        self.save_reservoir_meshes()   # save meshes of each reservoir after adjust vertices
         self.set_subvolumes()          # define subvolumes and save their meshes and properties
 
         print('Geometry processing done!')
@@ -85,6 +93,13 @@ class Geometry:
         rotation_matrix[0:3, 0:3] = rot.from_euler(self.rot_order, self.rotation, degrees = True).as_matrix() # building rotation terms
 
         self.mesh.apply_transform(rotation_matrix) # rotate mesh
+
+        self.mesh.rezero() # brings mesh to origin back again to avoid negative coordinates
+
+        # THIS IS TO TRY AVOID PROBLEMS WITH PERIODIC BOUNDARY CONDITION
+        # DUE TO ROUNDING ERRORS
+        self.mesh.vertices = np.around(self.mesh.vertices, decimals = self.tol_decimals)
+        self.mesh.vertices = np.where(self.mesh.vertices == -0., 0, self.mesh.vertices)
 
     def get_outer_hull(self, args, view = False):
         '''This ensures that the mesh does not have internal faces and gets only the external ones.
@@ -144,7 +159,6 @@ class Geometry:
                 submesh.fix_normals()
             except:
                 pass
-            # print(known_faces.shape[0], len(self.mesh.faces), submesh.is_watertight)
 
         # finalise submesh
         submesh.process(validate=True)
@@ -206,9 +220,62 @@ class Geometry:
         self.bounds           = self.mesh.bounds
         self.domain_centroid  = self.mesh.center_mass
         self.volume           = self.mesh.volume
-        self.number_of_facets = len(self.mesh.facets)
+        self.n_of_facets = len(self.mesh.facets)
     
     def set_subvolumes(self):
+        print('Defining subvolumes centers')
+
+        if self.subvol_type == 'slice':
+            
+            self.subvol_center = np.zeros((self.n_of_subvols, 3))
+            self.subvol_center += np.mean(self.bounds, axis = 0)
+
+            array  = (np.arange(self.n_of_subvols)+0.5)/self.n_of_subvols
+            array *= np.ptp(self.bounds[:, self.slice_axis])
+            array += self.bounds[0, self.slice_axis]
+
+            self.subvol_center[:, self.slice_axis] = array
+
+            # if pickled, get pickled. else, train model and pickle it.
+            # files = os.listdir('../MultiscaleThermalCond/subvol_classifiers')
+            # n_sv   = [1, 1, 1]
+            # n_sv[self.slice_axis] = self.n_of_subvols
+            # n_sv = [str(i) for i in n_sv]
+
+            # sv_class_name = 'slice_'+'_'.join(n_sv)+'.pickle'
+            
+            # if sv_class_name in files:
+            #     pickle_in = open('../MultiscaleThermalCond/subvol_classifiers/'+sv_class_name, 'rb')
+            #     self.subvol_classifier = pickle.load(pickle_in)
+            # else:
+            #     self.subvol_classifier = subvolumes.train_model(self.subvol_center, int(1e6), self.mesh)
+            #     pickle_out = open('../MultiscaleThermalCond/subvol_classifiers/'+sv_class_name, 'wb')
+            #     pickle.dump(self.subvol_classifier, pickle_out)
+
+            self.subvol_classifier = slice_classifier(self.n_of_subvols, self.slice_axis)
+
+            samples = subvolumes.generate_points(self.mesh, int(1e6))
+
+            samples = self.scale_positions(samples)
+
+            r = np.argmax(self.subvol_classifier.predict(samples), axis = 1)
+            cover = subvolumes.get_cover(r, self.n_of_subvols)
+
+            self.subvol_volume = cover*self.mesh.volume
+            
+            self.slice_length = np.ptp(self.bounds[:, self.slice_axis])/self.n_of_subvols
+
+        elif self.subvol_type == 'voronoi':
+            self.subvol_classifier, cover, self.subvol_center = subvolumes.distribute(self.mesh, self.n_of_subvols, self.folder, view = True)
+            
+            self.subvol_volume = cover*self.mesh.volume
+
+        else:
+            print('Invalid subvolume!')
+            print('Stopping simulation...')
+            quit()
+
+    def set_subvolumes_old(self):
         print('Generating subvolumes...')
 
         if self.subvol_type == 'slice':
@@ -255,7 +322,7 @@ class Geometry:
                 
         elif self.subvol_type in ['sphere', 'box']:
             
-            self.subvol_meshes = subvolumes.distribute(self.mesh, self.n_of_subvols, self.subvol_type, self.folder, view = False)
+            self.subvol_meshes = subvolumes.distribute(self.mesh, self.n_of_subvols, self.subvol_type, self.folder, view = True)
                 
         else:
             print('Invalid subvolume!')
@@ -268,27 +335,25 @@ class Geometry:
 
     def get_bound_facets(self, args):
 
-        ### NEW WAY TO ORGANISE ###
-
         # initialize boundary condition array with the last one
-        self.bound_cond = np.array([args.bound_cond[-1] for _ in range(self.number_of_facets)])
+        self.bound_cond = np.array([args.bound_cond[-1] for _ in range(self.n_of_facets)])
 
         # correct for the specified facets
         for i in range(len(args.bound_facets)):
             bound_facet = args.bound_facets[i]
             self.bound_cond[bound_facet] = args.bound_cond[i]
         
-        self.res_facets     = np.arange(self.number_of_facets, dtype = int)[np.logical_or(self.bound_cond == 'T', self.bound_cond == 'F')]
+        self.res_facets     = np.arange(self.n_of_facets, dtype = int)[np.logical_or(self.bound_cond == 'T', self.bound_cond == 'F')]
         self.res_bound_cond = self.bound_cond[np.logical_or(self.bound_cond == 'T', self.bound_cond == 'F')]
-        self.rough_facets   = np.arange(self.number_of_facets, dtype = int)[self.bound_cond == 'R']
+        self.rough_facets   = np.arange(self.n_of_facets, dtype = int)[self.bound_cond == 'R']
 
         # getting how many facets of each
-        self.number_of_reservoirs   = self.res_facets.shape[0]
-        self.number_of_rough_facets = self.rough_facets.shape[0]
+        self.n_of_reservoirs   = self.res_facets.shape[0]
+        self.n_of_rough_facets = self.rough_facets.shape[0]
 
         # getting how many 
-        self.res_values          = np.ones( self.number_of_reservoirs      )*np.nan
-        self.rough_facets_values = np.ones((self.number_of_rough_facets, 2))*np.nan
+        self.res_values          = np.ones( self.n_of_reservoirs      )*np.nan
+        self.rough_facets_values = np.ones((self.n_of_rough_facets, 2))*np.nan
         
         # saving the generalised boundary condition, if there's any
         if args.bound_cond[-1] in ['T', 'F']:
@@ -318,51 +383,17 @@ class Geometry:
 
                 counter += 2                                                  # update counter
 
-
-        ### OLD WAY ###
-
-        # if len(args.bound_facets)+1 == len(args.bound_cond): # if there is one more boundary condition imposed than the number of specified facets,
-        #                                                      # it means that there is one boundary condition imposed for all other faces
-
-        #     bound_cond = [args.bound_cond[-1] for _ in range(self.number_of_facets)]    # set the last boundary condition to all facets
-            
-        #     # correct those that were specifically set
-        #     count = 0
-        #     for bound_facet in args.bound_facets:
-        #         bound_cond[bound_facet] = args.bound_cond[count]
-        #         count += 1
-            
-        #     if args.bound_cond[-1] in ['P', 'R']:                                                      # periodic bound cond doesn't have values, and roughness have them separately
-        #         bound_values = np.array([np.nan for _ in range(self.number_of_facets)])
-        #     else:                                                                                      # temperature and flux have
-        #         bound_values = np.array([args.bound_values[-1] for _ in range(self.number_of_facets)]) # set the last value to all facets
-            
-        #     bound_values[args.bound_facets] = np.array(args.bound_values)[np.arange(len(args.bound_facets), dtype = int)] # correct those that were specifically set
-            
-        #     # update the arguments
-        #     args.bound_values = bound_values
-        #     args.bound_cond   = bound_cond
-        #     args.bound_facets = np.arange(self.number_of_facets)  # considering all facets
-
-        faces    = [self.mesh.facets[i]      for i in range(self.number_of_facets)] # indexes of the faces that define each facet
+        faces    = [self.mesh.facets[i]      for i in range(self.n_of_facets)] # indexes of the faces that define each facet
         vertices = [self.mesh.faces[i]       for i in faces                       ] # indexes of the vertices that ar contained by each facet
         coords   = [self.mesh.vertices[i, :] for i in vertices                    ] # vertices coordinates contained by the boundary facet
-
-        # facets of reservoirs
-        res_faces = [faces[i] for i in self.res_facets]
-
-        # meshes of the boundary facets to be used for sampling
-        self.res_meshes = self.mesh.submesh(faces_sequence = res_faces, append = False)
 
         self.facet_vertices = [np.unique(np.vstack((v[0, :, :], v[1, :, :])), axis = 0) for v in coords]
 
         # calculation of the centroid of each facet as the mean of vertex coordinates, weighted by how many faces they are connected to.
         # this is equal to the mean of triangles centroids.
         self.facet_centroid = np.array([vertices.mean(axis = 0) for vertices in self.facet_vertices])
-
-        # Surface area of the reservoirs' facets' meshes
-        self.res_areas = np.array([mesh.area for mesh in self.res_meshes])
-
+        
+    def facets_plot(self):
         # debug plot
         fig = plt.figure(figsize = (10, 10), dpi = 100)
         ax = fig.add_subplot(111, projection='3d')
@@ -406,7 +437,7 @@ class Geometry:
         plt.tight_layout()
         plt.savefig(self.folder + 'facets.png')
         plt.close(fig=fig)
-        # plt.show()
+        plt.show()
         
     def check_connections(self, args):
 
@@ -417,17 +448,18 @@ class Geometry:
         for i in range(connections.shape[0]):
             normal_1 = self.mesh.facets_normal[connections[i, 0], :]
             normal_2 = self.mesh.facets_normal[connections[i, 1], :]
-            normal_check = np.all(np.around(normal_1, decimals = 3) == -np.around(normal_2, decimals = 3))
+            normal_check = np.all(np.absolute(normal_1+normal_2) < 10**-self.tol_decimals)
 
-            vertices_1 = np.around(self.facet_vertices[connections[i, 0]] - self.facet_centroid[connections[i, 0], :], decimals = 2)
+            # vertices_1 = np.around(self.facet_vertices[connections[i, 0]] - self.facet_centroid[connections[i, 0], :], decimals = self.tol_decimals)
+            vertices_1 = self.facet_vertices[connections[i, 0]] - self.facet_centroid[connections[i, 0], :]
             index_1 = np.lexsort(vertices_1.T)
             vertices_1 = vertices_1[index_1, :]
 
-            vertices_2 = np.around(self.facet_vertices[connections[i, 1]] - self.facet_centroid[connections[i, 1], :], decimals = 2)
+            vertices_2 = self.facet_vertices[connections[i, 1]] - self.facet_centroid[connections[i, 1], :]
             index_2 = np.lexsort(vertices_2.T)
             vertices_2 = vertices_2[index_2, :]
 
-            vertex_check = np.all(vertices_1 == vertices_2)
+            vertex_check = np.all(np.absolute(vertices_1-vertices_2) < 10**-self.tol_decimals)
 
             check = np.all([vertex_check, normal_check])
 
@@ -444,6 +476,134 @@ class Geometry:
 
                 print('Stopping simulation...')
                 quit()
+        
+        print('Adjusting mesh.')
+        self.adjust_connections(connections)
+
+        #self.facets_plot()
+
+    def adjust_connections(self, connections):
+        
+        n_connections = connections.shape[0]
+
+        check_array = np.zeros((2, n_connections), dtype = bool)
+        check = np.all(check_array)
+        
+        count = 1
+        while not check:
+            print('Adjusting periodic vertices, iteration = ', count)
+            for i in range(n_connections):
+
+                facet_1 = connections[i, 0] # facets
+                facet_2 = connections[i, 1]
+
+                abs_vertices_1 = self.facet_vertices[facet_1] # absolute coordinates of vertices
+                abs_vertices_2 = self.facet_vertices[facet_2]
+
+                # the indices of each vertex in the mesh data
+                vertices_indices_1 = np.all(abs_vertices_1.reshape(-1, 1, 3) == self.mesh.vertices, axis = 2)
+                vertices_indices_1 = np.argmax(vertices_indices_1, axis = 0)
+
+                vertices_indices_2 = np.all(abs_vertices_2.reshape(-1, 1, 3) == self.mesh.vertices, axis = 2)
+                vertices_indices_2 = np.argmax(vertices_indices_2, axis = 0)
+
+                # centroids of each facet
+                centroid_1 = self.facet_centroid[facet_1, :]
+                centroid_2 = self.facet_centroid[facet_2, :]
+
+                rel_vertices_1 = abs_vertices_1 - centroid_1
+                index_1 = np.lexsort(rel_vertices_1.T)
+                rel_vertices_1 = rel_vertices_1[index_1, :]
+                vertices_indices_1 = vertices_indices_1[index_1]
+
+                rel_vertices_2 = abs_vertices_2 - centroid_2
+                index_2 = np.lexsort(rel_vertices_2.T)
+                rel_vertices_2 = rel_vertices_2[index_2, :]
+                vertices_indices_2 = vertices_indices_2[index_2]
+
+                new_vertices = (rel_vertices_1 + rel_vertices_2)/2
+
+                var_1 = new_vertices - rel_vertices_1
+                var_2 = new_vertices - rel_vertices_2
+
+                check_array[0, i] = np.all(var_1 < tm.tol.merge)
+                check_array[1, i] = np.all(var_2 < tm.tol.merge)
+
+                for j in range(new_vertices.shape[0]):
+                    
+                    step = 0.3
+                    # adjust vertices
+                    self.mesh.vertices[vertices_indices_1[j], :] += step*var_1[j, :]
+                    self.mesh.vertices[vertices_indices_2[j], :] += step*var_2[j, :]
+                
+                self.mesh.vertices = np.around(self.mesh.vertices, decimals = 8)
+                
+                # update centroids and facet_vertices
+                faces    = [self.mesh.facets[ii]      for ii in range(self.n_of_facets)] # indexes of the faces that define each facet
+                vertices = [self.mesh.faces[ii]       for ii in faces                       ] # indexes of the vertices that ar contained by each facet
+                coords   = [self.mesh.vertices[ii, :] for ii in vertices                    ] # vertices coordinates contained by the boundary facet
+
+                self.facet_vertices = [np.unique(np.vstack((v[0, :, :], v[1, :, :])), axis = 0) for v in coords]
+                
+                # calculation of the centroid of each facet as the mean of vertex coordinates, weighted by how many faces they are connected to.
+                # this is equal to the mean of triangles centroids.
+                self.facet_centroid = np.array([vertices.mean(axis = 0) for vertices in self.facet_vertices])
+
+            check = np.all(check_array)
+            count += 1
+
+            self.mesh.rezero() # brings mesh to origin back again to avoid negative coordinates
+            self.mesh.fix_normals()
+        
+    def save_reservoir_meshes(self):
+
+        faces    = [self.mesh.facets[i] for i in range(self.n_of_facets)] # indexes of the faces that define each facet
+
+        # facets of reservoirs
+        self.res_faces = [faces[i] for i in self.res_facets]
+
+        # meshes of the boundary facets to be used for sampling
+        self.res_meshes = self.mesh.submesh(faces_sequence = self.res_faces, append = False)
+
+        # Surface area of the reservoirs' facets' meshes. Saving before adjusting so that it does not change the probability of entering with the offset.
+        self.res_areas = np.array([mesh.area for mesh in self.res_meshes])
+
+        h = 2*self.offset # margin to adjust - a little more than offset just to be sure
+        for r in range(self.n_of_reservoirs): # for each reservoir
+            mesh = self.res_meshes[r]
+            edges = np.sort(mesh.edges, axis = 1)
+
+            edges, counts =  np.unique(edges, axis = 0, return_counts = True)
+            edges = edges[counts == 1, :] # unique external edges (indices of connected vertices)
+
+            new_v = copy.copy(mesh.vertices)
+            
+            for v in range(mesh.vertices.shape[0]):
+                edg_rows = np.where(edges == v)[0]
+                if np.any(edg_rows):
+                    edg_cols = np.argmax(edges[edg_rows, :] != v, axis = 1) 
+
+                    main_v = mesh.vertices[v                        , :] # main vertex
+                    con_v  = mesh.vertices[edges[edg_rows, edg_cols], :] # vertices connected to v
+
+                    L = np.linalg.norm(con_v - main_v, axis = 1, keepdims = True) # length of each edge
+                    n = (con_v - main_v)/L                                        # base vectors
+
+                    dot = np.sum(np.prod(n, axis = 0)) # dot product of the bases
+
+                    theta = 0.5*(np.pi - np.arccos(-dot)) # angle between the displacement of the main vertex and each bases (it's the same for both)
+
+                    dL = h/np.sin(theta) # dislocation length
+
+                    dLi = dL/np.sqrt(2*(1+dot))
+
+                    dx = dLi*np.sum(n, axis = 0)
+                    
+                    new_v[v, :] += dx
+            
+            new_v -= self.offset*self.res_meshes[r].facets_normal
+
+            self.res_meshes[r].vertices = new_v
 
     def faces_to_facets(self, index_faces):
         ''' get which facet those faces are part of '''
@@ -457,15 +617,51 @@ class Geometry:
                 if face in facet:
                     index_facets[i] = j
 
-        # index_facets = np.array([np.where( face == np.array(self.mesh.facets))[0][0] for face in index_faces])
-
         return index_facets
 
+    def scale_positions(self, x):
+        '''Method to scale positions x to the bounding box coordinates.
+            
+            x = positions to be scaled;
+            
+            Returns:
+            x_s = scaled positions.'''
 
+        x_s = (x - self.bounds[0, :])/np.ptp(self.bounds, axis = 0)
 
+        return x_s
+
+    def get_plane_k(self):
+        # finds and stores the constant in the plane equation:
+        # n . x + k = 0
+
+        n = -self.mesh.facets_normal # inward normals
+
+        # get the first vertex of each face as reference to calculate plane constant
+        ref_vert = np.zeros(n.shape)
+
+        for i in range(self.n_of_facets):
+            face = self.mesh.facets[i][0]
+            ref_vert[i, :] = self.mesh.vertices[self.mesh.faces[face, 0], :]
+
+        self.facet_k = -np.sum(n*ref_vert, axis = 1) # k for each facet
+
+        face_k = np.zeros(self.mesh.faces.shape[0])
+        for i in range(self.n_of_facets):
+            facet = self.mesh.facets[i]
+            face_k[facet] = self.facet_k[i]
         
-
-
+        self.face_k = copy.copy(face_k)
         
-
+class slice_classifier():
+    def __init__(self, n, a):
+        self.n  = n                                  # number of subvolumes
+        self.xc = np.linspace(0, 1-1/n, n) + 1/(2*n) # center positions
+        self.a  = a                                  # slicing axis
     
+    def predict(self, x):
+        diff = x[:, self.a].reshape(-1, 1) - self.xc
+        diff = np.abs(diff)
+        r = (diff == np.amin(diff, axis = 1, keepdims = True))
+
+        return r

@@ -12,6 +12,8 @@ from phonopy.interface.calculator import read_crystal_structure
 
 # other
 import sys
+import os
+import pickle
 
 from classes.Constants import Constants
 
@@ -37,19 +39,27 @@ class Phonon(Constants):
         self.mat_index = mat_index
         self.name = self.args.mat_names[mat_index]
         
+        self.mat_folder = self.args.mat_folder[mat_index]
+        if not self.mat_folder.endswith('\\'):
+            self.mat_folder += '\\'
+                    
     def load_properties(self):
         '''Initialise all phonon properties from input files.'''
+        
+        self.args.pickled_mat = [int(i) for i in self.args.pickled_mat]
+        self.T_reference = self.args.reference_temp[0]
 
         #### we have to discuss for the following ####
-        unitcell, _ = read_crystal_structure(self.args.poscar_file[self.mat_index], interface_mode='vasp')
+        poscar_file = self.mat_folder + self.args.poscar_file[self.mat_index]
+        unitcell, _ = read_crystal_structure(poscar_file, interface_mode='vasp')
         lattice = unitcell.get_cell()   # vectors as lines
         reciprocal_lattice = np.linalg.inv(lattice)*2*np.pi # vectors as columns
 
         phonon = Phonopy(unitcell,
                     [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
                     primitive_matrix=[[1, 0, 0], 
-                                      [0, 1, 0], 
-                                      [0, 0, 1]])
+                                    [0, 1, 0], 
+                                    [0, 0, 1]])
 
         symmetry_obj = phonon.primitive_symmetry
         rotations = symmetry_obj.get_reciprocal_operations()
@@ -58,8 +68,9 @@ class Phonon(Constants):
         self.volume_unitcell = unitcell.get_volume()   # angstrom³
         
         print('Reading hdf file...')
+        hdf_file = self.mat_folder + self.args.hdf_file[self.mat_index]
 
-        self.load_hdf_data(self.args.hdf_file[self.mat_index])
+        self.load_hdf_data(hdf_file)
 
         self.load_q_points()
         self.load_weights()
@@ -76,8 +87,6 @@ class Phonon(Constants):
         self.group_vel=np.around(group_vel, decimals = 8)
 
         self.load_temperature()
-        self.T_reference = self.args.reference_temp[0]
-
         # print('Expanding heat capacity to FBZ...')  # Do we need heat capacity? For now it is not used anywhere...  
         # self.load_heat_cap()
         # qpoints_FBZ,heat_cap=expand_FBZ(1,self.weights,self.q_points,self.heat_cap,0,rotations,reciprocal_lattice)
@@ -129,29 +138,12 @@ class Phonon(Constants):
         print('Generating p_ref = f(T)...')
         self.initialise_ref_momentum_function()
 
+        self.initialise_density_of_states()
+
+        print('Pickling...')
+        self.pickle_material()
+
         print('Material initialisation done!')
-        
-        #### DEBUG ####
-
-        # fig = plt.figure(figsize = (20, 10), dpi = 100)
-        
-        # q = self.q_points
-        # q = np.where(q>0.5, q-1, q)
-
-        # k = self.q_to_k(q)
-        # for j in range(self.number_of_branches):
-        #     for d in range(3):
-        #         i = d*self.number_of_branches+j
-        #         ax = fig.add_subplot( 3, self.number_of_branches, i+1, projection = '3d')
-
-        #         ax.scatter(k[:, 0], k[:, 1], k[:, 2], c = self.group_vel[:, j, d], s = 1)
-
-        # plt.tight_layout()
-        # plt.show()
-        # quit()
-
-        #######################
-        
 
     def load_hdf_data(self, hdf_file):
         ''' Get all data from hdf file.
@@ -202,7 +194,6 @@ class Phonon(Constants):
         q = np.dot(k, a.T)
 
         # bring all points to the first brillouin zone
-        # q = q-np.floor(q)
         q = q % 1
 
         # adjust for nearest interpolation
@@ -363,6 +354,49 @@ class Phonon(Constants):
 
         return x/(self.number_of_qpoints*self.volume_unitcell)  # unit / angstrom³
 
+    def initialise_density_of_states(self, bins = 100):
+        self.g_counts, self.g_bins = np.histogram(self.omega, bins = bins)
+    
+    def g(self, omega):
+        i = np.searchsorted(self.g_bins, omega, side = 'left')
+        return self.g_counts[i-1]
+
+    def pickle_material(self):
+        
+        del(self.data_hdf)
+        
+        files = os.listdir(self.mat_folder)
+        
+        short_fname = self.name + '_{:d}'.format(int(self.T_reference)) + '.pickle'
+
+        pickled_file = self.mat_folder + short_fname
+
+        if short_fname not in files: # if it is not already pickled
+            pickle_out = open(pickled_file, 'wb')
+            pickle.dump(self, pickle_out)
+            pickle_out.close()
+            print('Material ' + self.name + ' pickled!')
+        else:
+            print('Material already pickled! Check your files.')
+    
+    def open_pickled_material(self):
+        
+        self.T_reference = self.args.reference_temp[0]
+
+        short_fname = self.name + '_{:d}'.format(int(self.T_reference)) + '.pickle'
+
+        pickled_file = self.mat_folder + short_fname
+
+        files = os.listdir(self.mat_folder)
+
+        if short_fname in files:
+            pickle_in = open(pickled_file, 'rb')
+            return pickle.load(pickle_in)
+        else:
+            print('Material not yet pickled!')
+            self.load_properties()
+            self.open_pickled_material()
+
 def expand_FBZ(axis,weight,qpoints,tensor,rank,rotations,reciprocal_lattice):
         # expand tensor from IBZ to BZ
         # q is in the direction "axis" in tensor, and #rank cartesian coordinates the last
@@ -413,32 +447,5 @@ def expand_FBZ(axis,weight,qpoints,tensor,rank,rotations,reciprocal_lattice):
 
        tensor_out=np.swapaxes(tensor_out,0,axis)
        return qpoints_out,tensor_out
-
-    # def get_wavevectors_all_directions(self):
-    #     '''Adds the full brillouin zones for the other 7 quadrants in order to
-    #     calculate k conservation in boundary scattering.'''
-
-    #     print('Expanding wavevectors in all directions...')
-
-    #     self.full_wavevectors  = self.q_points                      # get FBZ qpoints
-    #     self.full_qpoint_index = np.arange(self.number_of_qpoints)  # get their indexes
-                
-    #     for dim in range(3):    # for each dimension
-
-    #         lattice_vector = np.zeros(3)
-    #         lattice_vector[dim] = -1                        # set lattice vector
-
-    #         indexes = self.full_wavevectors[:, dim] != 0    # see which modes are not on the axis of that dimension
-
-    #         new_wv      = self.full_wavevectors[indexes, :]+lattice_vector    # translate all non-zero modes in that dimension by that lattice vector
-    #         new_q_index = self.full_qpoint_index[indexes]                         # select correspondent modes
-
-    #         # stack translated modes
-    #         self.full_wavevectors  = np.vstack((self.full_wavevectors, new_wv))
-
-    #         self.full_qpoint_index = np.concatenate((self.full_qpoint_index, new_q_index))
-
-    #     # transform to absolute coordinates
-
-    #     self.full_wavevectors = self.full_wavevectors*np.transpose(self.reciprocal_lattice).reshape(3,1,3)
-    #     self.full_wavevectors = self.full_wavevectors.sum(axis = 0)
+    
+    

@@ -1,13 +1,28 @@
--hf ../Materials/Pb2_I4/kappa-m20206.hdf5
--pf ../Materials/Pb2_I4/POSCAR-unitcell
--d  0.5e3 1e3 1e3
--i  10000
--p  10
--pd random_slice
--sv slice 10 0
--ts 0.2
--t  303 297
--tt 300
--td constant_cold
--rl /home/brunohartmann/Doctorat/Code/Results/
--rf test
+--mat_folder       ../Materials/Si/
+--pickled_mat      0
+--hdf_file         kappa-m313131.hdf5
+--poscar_file      POSCAR
+--mat_names        silicon
+--geometry         cuboid
+--dimensions       5e3 1e3 1e3
+--scale            1 1 1
+--geo_rotation     0 0 0 xyz
+--subvolumes       slice 5 0
+--bound_facets     0 3
+--bound_cond       T T P
+--connect_facets   1 5 2 4
+--offset           1e-3
+--bound_values     302 298
+--reference_temp   295
+--energy_normal    fixed
+--temp_dist        constant_cold
+--empty_subvols    
+--subvol_temp      
+--particles        pmps 1
+--part_dist        random_domain
+--timestep         1
+--iterations       5000
+--results_folder   test_nan
+--results_location /home/brunohartmann/Doctorat/Code/Results/
+--conv_crit        1e-4
+--lookup           0 0.5
