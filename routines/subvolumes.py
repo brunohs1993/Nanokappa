@@ -5,16 +5,29 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import copy
 
-# AI classifier models
-from sklearn.neural_network import MLPClassifier
-from sklearn.preprocessing import OneHotEncoder
+from scipy.stats.qmc import Sobol
 
-def generate_points(geo, n):
-    points = tm.sample.volume_mesh(geo, n)
-    while points.shape[0]<n:
-        new_points = tm.sample.volume_mesh(geo, n-points.shape[0])
-        points = np.concatenate((points, new_points), axis = 0)
-    return points
+# AI classifier models
+# from sklearn.neural_network import MLPClassifier
+# from sklearn.preprocessing import OneHotEncoder
+
+def generate_points(geo, n, gen = None):
+
+    if gen is None:
+        points = tm.sample.volume_mesh(geo, n)
+        while points.shape[0]<n:
+            new_points = tm.sample.volume_mesh(geo, n-points.shape[0])
+            points = np.concatenate((points, new_points), axis = 0)
+        return points
+    else:
+        points = gen.random(n)*geo.bounds.ptp(axis = 0) + geo.bounds[0, :]
+        i = geo.contains(points)
+        points = points[i, :]
+        while points.shape[0]<n:
+            new_points = gen.random(n-points.shape[0])*geo.bounds.ptp(axis = 0) + geo.bounds[0, :]
+            i = geo.contains(new_points)
+            points = np.concatenate((points, new_points[i, :]), axis = 0)
+        return points
 
 def get_regions(x_s, x_r):
     
@@ -31,12 +44,12 @@ def get_regions(x_s, x_r):
 
 def get_cover(r, n_r):
 
-    n_s = r.shape[0]
+    n_s = r.shape[0] # number of samples
 
-    cvr = np.zeros(n_r)
-    for i in range(n_r):
-        ind = np.nonzero(r == i)[0]
-        cvr[i] = ind.shape[0]/n_s
+    cvr = np.zeros(n_r)             # initialise cover array
+    for i in range(n_r):            # for each region:
+        ind = np.nonzero(r == i)[0] # get samples in region
+        cvr[i] = ind.shape[0]/n_s   # save fraction of total
 
     return cvr
 
@@ -52,44 +65,50 @@ def update_centers(x_s, r, x_r):
 
     return x_r_new
 
-def train_model(x_r, n_s, geo):
+def normalise(x, geo):
+    return (x - geo.bounds[0, :])/np.ptp(geo.bounds, axis = 0)
 
-    n_r = x_r.shape[0]
-    x_s = generate_points(geo, n_s)
+
+# def train_model(x_r, n_s, geo):
+
+#     n_r = x_r.shape[0]
+#     x_s = generate_points(geo, n_s)
     
-    r = get_regions(x_s, x_r)
+#     r = get_regions(x_s, x_r)
     
-    print('Enconding...')
+#     print('Enconding...')
     
-    ohe = OneHotEncoder(sparse = False)
-    y_train = ohe.fit_transform(r.reshape(-1, 1))
+#     ohe = OneHotEncoder(sparse = False)
+#     y_train = ohe.fit_transform(r.reshape(-1, 1))
 
-    print('Training classifier...')
+#     print('Training classifier...')
 
-    hl_size = int(5*n_r)
+#     hl_size = int(5*n_r)
 
-    model = MLPClassifier(hidden_layer_sizes = (hl_size, hl_size, hl_size),
-                          activation         = 'logistic'   ,
-                          solver             = 'adam'       ,
-                          verbose            = 1            ,
-                          max_iter           = 1000         ,
-                          learning_rate      = 'adaptive'   )
+#     model = MLPClassifier(hidden_layer_sizes = (hl_size, hl_size, hl_size),
+#                           activation         = 'logistic'   ,
+#                           solver             = 'adam'       ,
+#                           verbose            = 1            ,
+#                           max_iter           = 1000         ,
+#                           learning_rate      = 'adaptive'   )
 
-    x_train = (x_s - geo.bounds[0, :])/np.ptp(geo.bounds, axis = 0)
+#     x_train = normalise(x_s, geo)
 
-    model.fit(x_train, y_train) # train model
+#     model.fit(x_train, y_train) # train model
 
-    x_test = generate_points(geo, n_s) # generate test samples
-    x_test = (x_test - geo.bounds[0, :])/np.ptp(geo.bounds, axis = 0) # normalise
+#     x_test = generate_points(geo, n_s) # generate test samples
+#     r_test = get_regions(x_test, x_r)  # get their regions
     
-    r_test = get_regions(x_test, x_r)  # get their regions
-    y_test = ohe.transform(r_test.reshape(-1, 1))
+#     x_test = normalise(x_test, geo)         # normalise
 
-    score = model.score(x_test, y_test) # calculate model score
+#     y_test = ohe.transform(r_test.reshape(-1, 1))
 
-    print('Classifier trained! Estimated score: {:.3e}'.format(score)) # exhibit score
+#     score = model.score(x_test, y_test) # calculate model score
 
-    return model
+#     print('Classifier trained! Estimated score: {:.3e}'.format(score)) # exhibit score
+
+#     return model
+
 
 def distribute(geo, n_r, folder, view = True):
 
@@ -105,14 +124,15 @@ def distribute(geo, n_r, folder, view = True):
     cover_conv = []
     displacement_conv = []
 
-
     # initialising variables
     tries = 0
     counter = 0
     solution_found = False
+    
+    gen = Sobol(3)
 
-    x_r = generate_points(geo, n_r) # regions coordinates
-    x_s = generate_points(geo, n_s) # samples coordinates
+    x_r = generate_points(geo, n_r, gen) # regions coordinates
+    x_s = generate_points(geo, n_s, gen) # samples coordinates
 
     # main loop
     while not solution_found:
@@ -135,7 +155,7 @@ def distribute(geo, n_r, folder, view = True):
 
             if n_s < n_s_max and comparison < criterion:
                 n_s = int(n_s*2)
-                x_s = generate_points(geo, n_s)
+                x_s = generate_points(geo, n_s, gen)
             if n_s >= n_s_max:
                 n_s = n_s_max
                 solution_found = comparison < criterion
@@ -145,24 +165,29 @@ def distribute(geo, n_r, folder, view = True):
             
             x_r = x_r_new
             
-        print('{:4d} - Samples: {:.2e}, Max dx_r = {:.3e}'.format(counter, n_s, np.max(dx_r)))
-
-    np.savetxt(fname = folder + 'subvolumes.txt',
-               X = x_r,
-               fmt = '%.3f', delimiter = ',',
-               header = 'Distribution of subvolumes. \n Center x, Center y, Center z')
-
+        print('{:4d} - Samples: {:.2e} - Max dx_r = {:.3e}'.format(counter, n_s, np.max(dx_r)))
+    
     if view: # visualise results if requested
         view_subvols(geo, folder,
                      centers_conv,
                      cover_conv,
                      displacement_conv)
     
-    model = train_model(x_r, n_s_max, geo)
+    # model = train_model(x_r, n_s_max, geo)
 
-    cvr = get_cover(model.predict(x_s), n_r)
+    # x_s = normalise(x_s, geo)
 
-    return model, cvr
+    # r = np.argmax(model.predict(x_s), axis = 1)
+
+    # cvr = get_cover(r, n_r)
+
+    # np.savetxt(fname = folder + 'subvolumes.txt',
+    #            X = np.hstack((x_r, cvr.reshape(-1, 1))),
+    #            fmt = '%.3f', delimiter = ',',
+    #            header = 'Distribution of subvolumes. \n Center x, Center y, Center z')
+
+    # return model, cvr, x_r
+    return x_r
 
 def view_subvols(geo, folder,
                  centers_conv,
@@ -204,4 +229,6 @@ def view_subvols(geo, folder,
     ax2.set_title('Relative cover volume')
     ax3.set_title('Center Displacement')
 
-    plt.savefig(folder+'subvolumes.png')
+    plt.savefig(folder+'subvolumes_dist.png')
+
+    plt.close(fig)

@@ -1,0 +1,32 @@
+--mat_folder       test_material\
+--hdf_file         kappa-m313131.hdf5
+--poscar_file      POSCAR
+--mat_names        silicon
+--pickled_mat      0
+--geometry         cuboid
+--dimensions       5e3 1e3 1e3
+--scale            1 1 1
+--geo_rotation     0 0 0 xyz
+--subvolumes       slice 10 0
+--bound_facets     0 3 1 5
+--bound_pos        
+--bound_cond       T T R R P
+--connect_facets   2 4
+--reservoir_gen    fixed_rate
+--bound_values     302 298 0 0
+--reference_temp   297
+--energy_normal    mean
+--temp_dist        cold
+--empty_subvols    
+--subvol_temp      
+--particles        total 1e5
+--part_dist        random_subvol
+--timestep         1
+--iterations       500
+--results_folder   test
+--results_location test_results
+--conv_crit        0
+--lookup           0
+--colormap         jet
+--fig_plot         subvol omega energy
+--rt_plot          

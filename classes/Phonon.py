@@ -1,4 +1,5 @@
 # calculations
+# from msilib.schema import AdvtUISequence
 import numpy as np
 from scipy.interpolate import interp1d, RegularGridInterpolator
 from scipy.spatial.transform import Rotation as rot
@@ -36,12 +37,20 @@ class Phonon(Constants):
     def __init__(self, arguments, mat_index):
         super(Phonon, self).__init__()
         self.args = arguments
-        self.mat_index = mat_index
+        self.mat_index = int(mat_index)
         self.name = self.args.mat_names[mat_index]
         
         self.mat_folder = self.args.mat_folder[mat_index]
-        if not self.mat_folder.endswith('\\'):
-            self.mat_folder += '\\'
+        if not os.path.isabs(self.mat_folder):
+            self.mat_folder = os.getcwd() + '\\' + self.mat_folder
+        if sys.platform == 'win32':
+            self.mat_folder = self.mat_folder.replace('/', '\\')
+            if not self.mat_folder.endswith('\\'):
+                self.mat_folder += '\\'
+        elif sys.platform in ['linux', 'linux2']:
+            self.mat_folder = self.mat_folder.replace('\\', '/')
+            if not self.mat_folder.endswith('/'):
+                self.mat_folder += '/'
                     
     def load_properties(self):
         '''Initialise all phonon properties from input files.'''
@@ -97,8 +106,7 @@ class Phonon(Constants):
         qpoints_FBZ,gamma=expand_FBZ(1,self.weights,self.q_points,self.gamma,0,rotations,reciprocal_lattice)
         self.gamma=gamma
 
-        self.q_points=qpoints_FBZ
-        # self.weights = np.ones((len(self.q_points[:,0]),))
+        self.q_points = qpoints_FBZ
         self.weights = np.ones(self.q_points.shape[0])
         
         self.number_of_qpoints = self.q_points.shape[0]
@@ -116,16 +124,16 @@ class Phonon(Constants):
 
         self.unique_modes = np.stack(np.meshgrid( np.arange(self.number_of_qpoints), np.arange(self.number_of_branches) ), axis = -1 ).reshape(-1, 2).astype(int)
 
-        # self.get_wavevectors_all_directions()
         self.get_wavevectors()
+        self.get_norms()
+
+        print('Searching for degeneracies...')
+        self.find_degeneracies()
 
         if len(self.args.mat_rotation) > 0:
             self.rotate_crystal()
 
-        print('To describe phonons:')
-        print(' nq=',self.number_of_qpoints)
-        print(' nb=',self.number_of_branches)
-        print(' number of modes=', self.number_of_modes)
+        print('Material info: {:d} q-points; {:d} branches -> {:d} modes in total.'.format(self.number_of_qpoints, self.number_of_branches, self.number_of_modes))
 
         print('Interpolating lifetime...')
         self.calculate_lifetime()
@@ -182,9 +190,76 @@ class Phonon(Constants):
     #     self.heat_cap = np.array(self.data_hdf['heat_capacity'])    # eV/K
     
     def get_wavevectors(self):
+        q = np.copy(self.q_points)
+        k = self.q_to_k(q)
 
-        self.wavevectors = self.q_to_k(self.q_points)
+        self.wavevectors = self.find_min_k(k)
+
+        fig, ax = plt.subplots(nrows = 1, ncols = 1, subplot_kw={'projection': '3d'})
+        ax.scatter(self.wavevectors[:, 0], self.wavevectors[:, 1], self.wavevectors[:, 2], s = 1, c = np.sum(self.wavevectors**2, axis = 1))
         
+        fig.savefig(self.mat_folder + 'FBZ.png')
+        plt.close(fig)
+
+    def find_min_k(self, k, return_disp = False):
+        '''Gives the equivalent wavevector inside the FBZ.
+           k = wavevector to be analysed (N, 3)
+           return_disp = if true, returns the displacement in reciprocal space to translate k to k_fbz.
+           
+           Returns:
+           k_fbz  = the equivalent wavevector in FBZ.
+           k_disp = the diplacement from k to k_fbz.'''
+
+        a = np.array([-1, 0, 1])
+        b = np.meshgrid(a, a, a)
+        n = (np.vstack(tuple(map(np.ravel, b))).T)
+        n = np.expand_dims(n, 1)
+
+        i0 = np.nonzero(np.all(n == 0, axis = -1))[0][0] # index where n = [0, 0, 0]
+
+        disp = np.zeros(k.shape)
+        
+        q = self.k_to_q(k)
+        active = np.ones(q.shape[0], dtype = bool)
+
+        while np.any(active):                               # For reference: Qa = number of qpoints still active
+            q_new = q[active, :] + n                        # every q in the neighbourhood (27, Qa, 3)
+            k_new = self.q_to_k(q_new)                      # convert to k (27, Qa, 3)
+            k_norm = np.linalg.norm(k_new, axis = -1).T     # calculate the norm (Qa, 27)
+            k_min = k_norm.min(axis = 1, keepdims = True)   # minimum norm for each mode (Qa, 1)
+            i_min = np.argmax(k_norm == k_min, axis = 1)    # get the index where the minimum is located (Qa,)
+
+            if return_disp:
+                disp[active, :] += n[i_min, 0, :]              # displacement from previous k in reduced coordinates
+
+            q[active, :] = np.copy(q_new[i_min, np.arange(active.sum()), :])
+
+            active[active] = ~(i_min == i0)                  # If the minimum is in i0, the shortest wavevector was found for that mode
+
+        if return_disp:
+            return self.q_to_k(q), self.q_to_k(disp)
+        else:
+            return self.q_to_k(q)
+
+    def is_k_min(self, k):
+        a = np.array([-1, 0, 1])
+        b = np.meshgrid(a, a, a)
+        n = (np.vstack(map(np.ravel, b)).T)
+
+        d = self.q_to_k(n)          # convert to k coordinates
+        d = np.expand_dims(d, 1)    # (27, 1, 3)
+
+        i0 = np.nonzero(np.all(n == 0, axis = 1))[0][0] # index where n = [0, 0, 0]
+
+        k_new = k + d                                   # dislocate k (27, N, 3)
+        k_norm = np.linalg.norm(k_new, axis = -1).T     # calculate the norm (N, 27)
+        k_min = k_norm.min(axis = 1, keepdims = True)   # minimum norm for each k (N, 1)
+        i_min = np.argmax(k_norm == k_min, axis = 1)    # get the index where the minimum is located (Qa,)
+
+        return i_min == i0
+    
+    def get_norms(self):
+        self.norm_group_vel = np.linalg.norm(self.group_vel, axis = 2)
         self.norm_wavevectors = np.linalg.norm(self.wavevectors, axis = 1)
 
     def k_to_q(self, k):
@@ -192,13 +267,6 @@ class Phonon(Constants):
         a = np.linalg.inv(self.reciprocal_lattice)  # transformation vector
         
         q = np.dot(k, a.T)
-
-        # bring all points to the first brillouin zone
-        q = q % 1
-
-        # adjust for nearest interpolation
-        q = np.where(q >=  1-1/(2*self.data_mesh), q-1, q)
-        q = np.where(q <    -1/(2*self.data_mesh), q+1, q)
 
         return q
     
@@ -341,7 +409,7 @@ class Phonon(Constants):
         self.energy_array = np.array( list( map(self.calculate_crystal_energy, T_array) ) ).reshape(-1)
 
         # Interpolating
-        self.temperature_function = interp1d( self.energy_array, T_array, kind = 'linear', fill_value = '' )
+        self.temperature_function = interp1d( self.energy_array, T_array, kind = 'linear', fill_value = 'extrapolate' )
 
     def normalise_to_density(self, x):
         '''Defines conversion from energy to energy density here so it is easy to change.'''
@@ -360,6 +428,29 @@ class Phonon(Constants):
     def g(self, omega):
         i = np.searchsorted(self.g_bins, omega, side = 'left')
         return self.g_counts[i-1]
+
+    def find_degeneracies(self):
+        self.degenerate_modes = []       # list of groups of degenerate modes
+        for q in range(self.number_of_qpoints): # for each wavevector (q-point)
+            u_omega, i_omega, c_omega = np.unique(self.omega[q, :], return_inverse = True, return_counts= True) # unique frequencies, inverse and their counts
+
+            if np.any(c_omega > 1):                     # if there is any repeated omega
+                ui_omega = np.nonzero(c_omega > 1)[0]   # unique indexes of the degenerate branches
+                for ui in ui_omega:                     # for each degenerate branch
+                    b = np.nonzero(i_omega == ui)[0]    # degenerate branch index
+                    v = self.group_vel[q, b, :]         # velocities of degenerate branches
+
+                    u_v, i_v, c_v = np.unique(v, axis = 0, return_inverse = True, return_counts = True) # unique velocities, inverse and counts
+
+                    if np.any(c_v > 1):
+                        ui_v = np.nonzero(c_v > 1)[0]
+                        for uui in ui_v:
+                            d_q = (np.ones(c_v[uui])*q).astype(int) # degenerate qpoints
+                            d_b = np.nonzero(i_v == uui)[0]         # degenerate branches
+
+                            d = np.vstack((d_q, d_b)).T # array with q
+
+                            self.degenerate_modes.append(d)
 
     def pickle_material(self):
         
@@ -395,7 +486,7 @@ class Phonon(Constants):
         else:
             print('Material not yet pickled!')
             self.load_properties()
-            self.open_pickled_material()
+            return self.open_pickled_material()
 
 def expand_FBZ(axis,weight,qpoints,tensor,rank,rotations,reciprocal_lattice):
         # expand tensor from IBZ to BZ
@@ -436,7 +527,6 @@ def expand_FBZ(axis,weight,qpoints,tensor,rank,rotations,reciprocal_lattice):
                sys.exit("error in expand_FBZ")
 
            star_t=star_mulv[return_index]
-           #print(star_q.shape,star_t.shape)
 
            if (i == 0):
               qpoints_out=star_q

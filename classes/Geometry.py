@@ -4,17 +4,19 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from scipy.spatial.transform import Rotation as rot
+from scipy.interpolate import NearestNDInterpolator
+from scipy.stats.qmc import Sobol
 
 # geometry
 import trimesh as tm
 from trimesh.graph import is_watertight
 import routines.subvolumes as subvolumes
 
+from shapely.ops import polygonize_full, unary_union, triangulate
+
 # other
 import sys
 import copy
-import pickle
-import os
 
 np.set_printoptions(precision=3, threshold=sys.maxsize, linewidth=np.nan)
 
@@ -24,11 +26,14 @@ np.set_printoptions(precision=3, threshold=sys.maxsize, linewidth=np.nan)
 
 #   TO DO
 #
-#   - Define boundary conditions
+#   - Remove correlation length on the roughness boundary condition
+#   - Write docstring for all methods
+#   - Clean the code in general
 
 class Geometry:
     def __init__(self, args):
         
+        self.args            = args
         self.standard_shapes = ['cuboid', 'cillinder', 'sphere']
         self.scale           = args.scale
         self.dimensions      = args.dimensions             # angstrom
@@ -36,13 +41,10 @@ class Geometry:
         self.rot_order       = args.geo_rotation[-1]
         self.shape           = args.geometry[0]
         self.subvol_type     = args.subvolumes[0]
-        self.n_of_subvols    = int(args.subvolumes[1])
+        
         self.folder          = args.results_folder
         self.offset          = float(args.offset[0])
         
-        if self.subvol_type == 'slice':
-            self.slice_axis      = int(args.subvolumes[2])
-
         # Processing mesh
 
         self.tol_decimals = 1
@@ -68,7 +70,7 @@ class Geometry:
         if shape == 'cuboid':
             self.mesh = tm.creation.box( self.dimensions )
         elif shape == 'cylinder':
-            self.mesh = tm.creation.cone( self.dimensions[0], height = self.dimensions[1] )
+            self.mesh = tm.creation.cylinder( radius = self.dimensions[1], height = self.dimensions[0], sections = int(self.dimensions[2]))
         elif shape == 'cone':
             self.mesh = tm.creation.cone( self.dimensions[0], self.dimensions[1] )
         elif shape == 'capsule':
@@ -223,9 +225,11 @@ class Geometry:
         self.n_of_facets = len(self.mesh.facets)
     
     def set_subvolumes(self):
-        print('Defining subvolumes centers')
+        print('Defining subvolumes centers...')
 
         if self.subvol_type == 'slice':
+            self.n_of_subvols    = int(self.args.subvolumes[1])
+            self.slice_axis      = int(self.args.subvolumes[2])
             
             self.subvol_center = np.zeros((self.n_of_subvols, 3))
             self.subvol_center += np.mean(self.bounds, axis = 0)
@@ -235,114 +239,220 @@ class Geometry:
             array += self.bounds[0, self.slice_axis]
 
             self.subvol_center[:, self.slice_axis] = array
-
-            # if pickled, get pickled. else, train model and pickle it.
-            # files = os.listdir('../MultiscaleThermalCond/subvol_classifiers')
-            # n_sv   = [1, 1, 1]
-            # n_sv[self.slice_axis] = self.n_of_subvols
-            # n_sv = [str(i) for i in n_sv]
-
-            # sv_class_name = 'slice_'+'_'.join(n_sv)+'.pickle'
-            
-            # if sv_class_name in files:
-            #     pickle_in = open('../MultiscaleThermalCond/subvol_classifiers/'+sv_class_name, 'rb')
-            #     self.subvol_classifier = pickle.load(pickle_in)
-            # else:
-            #     self.subvol_classifier = subvolumes.train_model(self.subvol_center, int(1e6), self.mesh)
-            #     pickle_out = open('../MultiscaleThermalCond/subvol_classifiers/'+sv_class_name, 'wb')
-            #     pickle.dump(self.subvol_classifier, pickle_out)
-
-            self.subvol_classifier = slice_classifier(self.n_of_subvols, self.slice_axis)
-
-            samples = subvolumes.generate_points(self.mesh, int(1e6))
-
-            samples = self.scale_positions(samples)
-
-            r = np.argmax(self.subvol_classifier.predict(samples), axis = 1)
-            cover = subvolumes.get_cover(r, self.n_of_subvols)
-
-            self.subvol_volume = cover*self.mesh.volume
             
             self.slice_length = np.ptp(self.bounds[:, self.slice_axis])/self.n_of_subvols
 
-        elif self.subvol_type == 'voronoi':
-            self.subvol_classifier, cover, self.subvol_center = subvolumes.distribute(self.mesh, self.n_of_subvols, self.folder, view = True)
+            self.subvol_classifier = slice_classifier(n  = self.n_of_subvols,
+                                                  xc = self.scale_positions(self.subvol_center))
             
-            self.subvol_volume = cover*self.mesh.volume
+            try: # try slicing the mesh first
+                self.subvol_volume = self.calculate_subvol_volume()
+            except: # if it gives an error, try with quasi monte carlo / sobol sampling
+                self.subvol_volume = self.calculate_subvol_volume(algorithm = 'qmc')
 
+        elif self.subvol_type == 'voronoi':
+            self.n_of_subvols    = int(self.args.subvolumes[1])
+            self.subvol_center = subvolumes.distribute(self.mesh, self.n_of_subvols, self.folder, view = True)
+            self.subvol_classifier = slice_classifier(n  = self.n_of_subvols,
+                                                  xc = self.scale_positions(self.subvol_center))
+
+            try: # try slicing the mesh first
+                self.subvol_volume = self.calculate_subvol_volume()
+            except: # if it gives an error, try with quasi monte carlo / sobol sampling
+                self.subvol_volume = self.calculate_subvol_volume(algorithm = 'qmc')
+        
+        elif self.subvol_type == 'grid':
+            nx = int(self.args.subvolumes[1])
+            ny = int(self.args.subvolumes[2])
+            nz = int(self.args.subvolumes[3])
+            
+            dx = 1/nx
+            dy = 1/ny
+            dz = 1/nz
+
+            xx = np.linspace(dx/2, 1-dx/2, nx)
+            yy = np.linspace(dy/2, 1-dy/2, ny)
+            zz = np.linspace(dz/2, 1-dz/2, nz)
+
+            g = np.meshgrid(xx, yy, zz)
+
+            self.subvol_center = (np.vstack(map(np.ravel, g)).T)*self.bounds.ptp(axis = 0)+self.bounds[0, :]
+
+            flag = True
+            
+            while flag:
+                self.n_of_subvols = self.subvol_center.shape[0]
+
+                self.subvol_classifier = slice_classifier(n  = self.n_of_subvols,
+                                                          xc = self.scale_positions(self.subvol_center))
+                try: # try slicing the mesh first
+                    self.subvol_volume = self.calculate_subvol_volume()
+                except: # if it gives an error, try with quasi monte carlo / sobol sampling
+                    self.subvol_volume = self.calculate_subvol_volume(algorithm = 'qmc', tol = 1e-4, verbose = False)
+
+                non_zero = self.subvol_volume > 0
+
+                mean = self.subvol_volume[non_zero].mean()
+                std  = self.subvol_volume[non_zero].std()
+
+                dev = (self.subvol_volume - mean)/std # normalised deviation from the mean
+                
+                outliers = dev < -2
+
+                self.subvol_center = self.subvol_center[~outliers, :]
+
+                plt.close('all')
+                plt.plot(self.subvol_center[:, 0], self.subvol_center[:, 1], 'o')
+                # plt.show()
+
+                flag = np.any(outliers)
+
+                print(self.subvol_volume)
+                print(mean, std)
+                print(dev)
+                print(outliers.astype(int))
+                
         else:
-            print('Invalid subvolume!')
+            print('Invalid subvolume type!')
             print('Stopping simulation...')
             quit()
-
-    def set_subvolumes_old(self):
-        print('Generating subvolumes...')
-
-        if self.subvol_type == 'slice':
-
-            self.slice_length = self.bounds.ptp(axis = 0)[self.slice_axis]/self.n_of_subvols
-
-            self.slice_normal = np.zeros(3)
-            self.slice_normal[self.slice_axis] = 1  # define the normal vector of the planes slicing the domain
-
-            plus_normal  =  self.slice_normal
-            minus_normal = -self.slice_normal
-
-            normals = np.vstack( (plus_normal, minus_normal) )
-
-            self.subvol_meshes = []
-
-            for i in range(self.n_of_subvols):
-
-                plus_origin                   = np.zeros(3)
-                plus_origin[self.slice_axis]  = i *self.bounds.ptp(axis = 0)[self.slice_axis]/self.n_of_subvols
-                
-                minus_origin                  = np.zeros(3)
-                minus_origin[self.slice_axis] = (i+1)*self.bounds.ptp(axis = 0)[self.slice_axis]/self.n_of_subvols
-
-                origins = np.vstack( (plus_origin, minus_origin) )
-                
-                if i == 0:
-                    subvol_mesh =  self.mesh.slice_plane( origins[1, :], normals[1, :], cap = True)    # slicing only the positive face
-                elif i == self.n_of_subvols-1:
-                    subvol_mesh =  self.mesh.slice_plane( origins[0, :], normals[0, :], cap = True)    # slicing only the negative face
-                else:
-                    subvol_mesh =  self.mesh.slice_plane( origins, normals, cap = True)    # slicing both
-
-                subvol_mesh.process(validate = True)
-
-                self.subvol_meshes.append(subvol_mesh)
-
-            check_wt = np.array([mesh.is_watertight for mesh in self.subvol_meshes])
-            
-            if ~np.all(check_wt):
-                print('Subvolume is not watertight!!!!')
-                print('Stopping simulation...')
-                quit()
-                
-        elif self.subvol_type in ['sphere', 'box']:
-            
-            self.subvol_meshes = subvolumes.distribute(self.mesh, self.n_of_subvols, self.subvol_type, self.folder, view = True)
-                
-        else:
-            print('Invalid subvolume!')
-            print('Stopping simulation.')
-            quit()
         
-        self.subvol_volume = np.array([subvol.volume      for subvol in self.subvol_meshes])
-        self.subvol_center = np.array([subvol.center_mass for subvol in self.subvol_meshes])
-        self.subvol_bounds = np.array([subvol.bounds      for subvol in self.subvol_meshes])
+        # saving subvol data
+        np.savetxt(fname = self.folder + 'subvolumes.txt',
+               X = np.hstack((self.subvol_center, self.subvol_volume.reshape(-1, 1))),
+               fmt = '%.3f', delimiter = ',',
+               header = 'Distribution of subvolumes. \n Center x, Center y, Center z')
+
+    def calculate_subvol_volume(self, algorithm = 'submesh', tol = 1e-5, verbose = False):
+        print('Calculating volumes... Algorithm:', algorithm)
+        # calculating subvol cover and volume
+
+        if algorithm in ['submesh', 'submesh_qmc']:
+            ################ TRYING TO CALCULATE VOLUME BY SLICING MESH #####################
+            origins = (self.subvol_center+np.expand_dims(self.subvol_center, axis = 1))/2
+            normals = self.subvol_center-np.expand_dims(self.subvol_center, axis = 1)
+
+            subvol_volume = np.zeros(self.n_of_subvols)
+
+            for sv in range(self.n_of_subvols):
+                sv_mesh = copy.copy(self.mesh)
+                for sv_p in [i for i in range(self.n_of_subvols) if i != sv]:
+                    lines = tm.intersections.mesh_plane(sv_mesh, normals[sv_p, sv, :], origins[sv, sv_p, :])
+                    if lines.shape[0] > 0:
+                        sv_mesh = tm.intersections.slice_mesh_plane(sv_mesh, normals[sv_p, sv, :], origins[sv, sv_p, :], cap = True)
+                
+                subvol_volume[sv] = sv_mesh.volume # trimesh estimation
+            
+            if algorithm == 'submesh_qmc':
+                # submesh quasi monte carlo estimation
+                ns = int(2**20)
+                nt  = 0
+                nin = 0
+
+                vbox = np.prod(sv_mesh.bounds.ptp(axis = 0))
+                v    = vbox
+                err = 1
+                
+                while err > tol:
+                    s = np.random.rand(ns, 3)*sv_mesh.bounds.ptp(axis = 0)+sv_mesh.bounds[0, :]
+                    i = sv_mesh.contains(s)
+
+                    nt  += ns
+                    nin += i.sum()
+
+                    v_new = (nin/nt)*(vbox)
+
+                    err = np.absolute((v_new - v)/v)
+
+                    v = v_new
+
+                subvol_volume[sv] = v_new
+                if verbose:
+                    print('Comparing: tm: {}, mc: {}, ratio-1:{}'.format(sv_mesh.volume, v_new, (v_new/sv_mesh.volume)-1))
+
+        elif algorithm == 'qmc':
+            ################# RANDOM SAMPLES ########################
+            cover = np.zeros(self.n_of_subvols)
+            err   = np.ones(self.n_of_subvols)
+
+            n_t  = 0
+            n_sv = np.zeros(self.n_of_subvols)
+
+            ns = int(2**7)
+            gen = Sobol(3)
+
+            cnt = 1
+            while err.max() > tol:
+                
+                samples = gen.random(ns)*self.bounds.ptp(axis = 0)+self.bounds[0, :]
+
+                samples_in = np.nonzero(self.mesh.contains(samples))[0]
+
+                samples = samples[samples_in, :]
+
+                n_t += samples_in.shape[0]
+
+                samples = self.scale_positions(samples)
+                r = np.argmax(self.subvol_classifier.predict(samples), axis = 1)
+                
+                for i in range(self.n_of_subvols):
+                    n_sv[i] += (r == i).sum()
+                
+                new_cover = n_sv/n_t
+
+                with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
+                    err = np.absolute((new_cover - cover)/cover)
+                
+                if verbose:
+                    print('{:4d} - Samples: {:>8.2e} - Max error: {:>8.2e}'.format(cnt, n_t, err.max()))
+
+                cnt += 1
+                cover = copy.copy(new_cover)
+
+            subvol_volume = cover*self.mesh.volume
+
+        ##############################################################
+        
+        
+        
+        return subvol_volume
 
     def get_bound_facets(self, args):
 
         # initialize boundary condition array with the last one
         self.bound_cond = np.array([args.bound_cond[-1] for _ in range(self.n_of_facets)])
 
-        # correct for the specified facets
-        for i in range(len(args.bound_facets)):
-            bound_facet = args.bound_facets[i]
-            self.bound_cond[bound_facet] = args.bound_cond[i]
-        
+        if len(args.bound_facets) > 0:
+            # correct for the specified facets
+            self.bound_facets = args.bound_facets
+            for i in range(len(args.bound_facets)):
+                self.bound_cond[self.bound_facets[i]] = args.bound_cond[i]
+        elif len(args.bound_pos) > 0:
+            # correct for specified positions
+            try:
+                self.bound_pos = np.array(args.bound_pos[1:]).reshape(-1, 3).astype(float)
+            except:
+                print('Boundary positions ill defined. Check input parameters.')
+                quit()
+            
+            if   args.bound_pos[0] == 'relative':
+                    self.bound_pos = self.bound_pos*self.bounds.ptp(axis = 0)+self.bounds[0, :]
+            elif args.bound_pos[0] == 'absolute':
+                pass
+            else:
+                print('Please specify the type of position for BC with the keyword "absolute" or "relative".')
+                quit()
+
+            _, _, close_tri = tm.proximity.closest_point(self.mesh, self.bound_pos)
+            
+            self.bound_facets = np.zeros(0)
+            for i_t, t in enumerate(close_tri):
+                for i_f, f in enumerate(self.mesh.facets):
+                    if t in f:
+                        self.bound_facets = np.append(self.bound_facets, i_f)
+                        self.bound_cond[i_f] = args.bound_cond[i_t]
+                        break
+
         self.res_facets     = np.arange(self.n_of_facets, dtype = int)[np.logical_or(self.bound_cond == 'T', self.bound_cond == 'F')]
         self.res_bound_cond = self.bound_cond[np.logical_or(self.bound_cond == 'T', self.bound_cond == 'F')]
         self.rough_facets   = np.arange(self.n_of_facets, dtype = int)[self.bound_cond == 'R']
@@ -352,37 +462,29 @@ class Geometry:
         self.n_of_rough_facets = self.rough_facets.shape[0]
 
         # getting how many 
-        self.res_values          = np.ones( self.n_of_reservoirs      )*np.nan
-        self.rough_facets_values = np.ones((self.n_of_rough_facets, 2))*np.nan
+        self.res_values          = np.ones(self.n_of_reservoirs  )*np.nan
+        self.rough_facets_values = np.ones(self.n_of_rough_facets)*np.nan
         
         # saving the generalised boundary condition, if there's any
         if args.bound_cond[-1] in ['T', 'F']:
             self.res_values[:] = args.bound_values[-1]
         elif args.bound_cond[-1] == 'R':
-            self.rough_facets_values[:, 0] = args.bound_values[-2]
-            self.rough_facets_values[:, 1] = args.bound_values[-1]
+            self.rough_facets_values[:] = args.bound_values[-1]
         
         # saving values
-        counter = 0                                                           # initialize counter
-
-        for i in range(len(args.bound_facets)):                               # for each specified facet
+        for i in range(len(self.bound_facets)):                               # for each specified facet
             
-            bound_facet = args.bound_facets[i]                                # get the facet location
+            bound_facet = self.bound_facets[i]                                # get the facet location
             
             if bound_facet in self.res_facets:                                # if it is a reservoir
                 j = self.res_facets == bound_facet                            # get where it is
-                self.res_values[j] = args.bound_values[counter]               # save the value in res array
+                self.res_values[j] = args.bound_values[i]               # save the value in res array
                 
-                counter += 1                                                  # update counter
-            
             elif bound_facet in self.rough_facets:                            # if it is a rough facet
                 j = self.rough_facets == bound_facet                          # get the facet location
                 
-                self.rough_facets_values[j, 0] = args.bound_values[counter]   # save roughness (eta)
-                self.rough_facets_values[j, 1] = args.bound_values[counter+1] # save correlation length (lambda)
-
-                counter += 2                                                  # update counter
-
+                self.rough_facets_values[j] = args.bound_values[i]   # save roughness (eta)
+        
         faces    = [self.mesh.facets[i]      for i in range(self.n_of_facets)] # indexes of the faces that define each facet
         vertices = [self.mesh.faces[i]       for i in faces                       ] # indexes of the vertices that ar contained by each facet
         coords   = [self.mesh.vertices[i, :] for i in vertices                    ] # vertices coordinates contained by the boundary facet
@@ -416,28 +518,10 @@ class Geometry:
                     self.facet_centroid[i, 2],
                     i)
         
-        # faces
-        # for i in range(np.array(self.mesh.faces).shape[0]):
-        #     v_index = np.array(self.mesh.faces[i])
-        #     centroid = self.mesh.vertices[v_index, :].mean(axis = 0)
-        #     ax.scatter(centroid[0],
-        #                centroid[1],
-        #                centroid[2],
-        #                c = 'r')
-        #     ax.plot([centroid[0], centroid[0]+100*self.mesh.face_normals[i, 0]],
-        #             [centroid[1], centroid[1]+100*self.mesh.face_normals[i, 1]],
-        #             [centroid[2], centroid[2]+100*self.mesh.face_normals[i, 2]],
-        #             c = 'k')
-            
-        #     ax.text(centroid[0],
-        #             centroid[1],
-        #             centroid[2],
-        #             i)
-
         plt.tight_layout()
         plt.savefig(self.folder + 'facets.png')
         plt.close(fig=fig)
-        plt.show()
+        # plt.show()
         
     def check_connections(self, args):
 
@@ -450,7 +534,6 @@ class Geometry:
             normal_2 = self.mesh.facets_normal[connections[i, 1], :]
             normal_check = np.all(np.absolute(normal_1+normal_2) < 10**-self.tol_decimals)
 
-            # vertices_1 = np.around(self.facet_vertices[connections[i, 0]] - self.facet_centroid[connections[i, 0], :], decimals = self.tol_decimals)
             vertices_1 = self.facet_vertices[connections[i, 0]] - self.facet_centroid[connections[i, 0], :]
             index_1 = np.lexsort(vertices_1.T)
             vertices_1 = vertices_1[index_1, :]
@@ -480,7 +563,7 @@ class Geometry:
         print('Adjusting mesh.')
         self.adjust_connections(connections)
 
-        #self.facets_plot()
+        self.facets_plot()
 
     def adjust_connections(self, connections):
         
@@ -569,41 +652,56 @@ class Geometry:
         self.res_areas = np.array([mesh.area for mesh in self.res_meshes])
 
         h = 2*self.offset # margin to adjust - a little more than offset just to be sure
-        for r in range(self.n_of_reservoirs): # for each reservoir
+
+        for r in range(self.n_of_reservoirs):
             mesh = self.res_meshes[r]
-            edges = np.sort(mesh.edges, axis = 1)
 
-            edges, counts =  np.unique(edges, axis = 0, return_counts = True)
-            edges = edges[counts == 1, :] # unique external edges (indices of connected vertices)
+            origin = mesh.vertices[0, :]        # plane origin
+            normal = mesh.facets_normal[0, :]   # plane normal
 
-            new_v = copy.copy(mesh.vertices)
+            b1 = np.random.rand(3)             # generate random vector
+            b1 = b1 - normal*np.sum(normal*b1) # make b1 orthogonal to the normal
+
+            b1 = b1/np.sum(b1**2)**0.5            # normalise b1
+
+            b2 = np.cross(normal, b1)          # generate b2 = n x b1
+
+            plane_coord = np.zeros((0, 2))
+            for v in mesh.vertices:         # for each vertex
+
+                B = np.expand_dims((v - origin), 1)     # get relative coord
+                A = np.vstack((b1, b2, normal)).T # get x and y bases coefficients
+                plane_coord = np.vstack((plane_coord, np.linalg.solve(A, B).T[0, :2])) # store the plane coordinates
             
-            for v in range(mesh.vertices.shape[0]):
-                edg_rows = np.where(edges == v)[0]
-                if np.any(edg_rows):
-                    edg_cols = np.argmax(edges[edg_rows, :] != v, axis = 1) 
+            lines = tuple(tuple(tuple(plane_coord[p, :]) for p in l) for l in mesh.edges)    # line pairs
 
-                    main_v = mesh.vertices[v                        , :] # main vertex
-                    con_v  = mesh.vertices[edges[edg_rows, edg_cols], :] # vertices connected to v
+            result, _, _, _ = polygonize_full(lines)                        # polygons
 
-                    L = np.linalg.norm(con_v - main_v, axis = 1, keepdims = True) # length of each edge
-                    n = (con_v - main_v)/L                                        # base vectors
+            merged = unary_union(result)
 
-                    dot = np.sum(np.prod(n, axis = 0)) # dot product of the bases
+            right_offset = merged.exterior.parallel_offset(h, 'right', 2)
+            left_offset  = merged.exterior.parallel_offset(h, 'left' , 2)
 
-                    theta = 0.5*(np.pi - np.arccos(-dot)) # angle between the displacement of the main vertex and each bases (it's the same for both)
+            if right_offset.length < left_offset.length:
+                offset = right_offset.simplify(0.1)
+            else: offset = left_offset.simplify(0.1)
 
-                    dL = h/np.sin(theta) # dislocation length
+            tris = triangulate(offset)
 
-                    dLi = dL/np.sqrt(2*(1+dot))
+            v_2d = np.vstack([np.vstack(t.exterior.xy).T for t in tris])
+            uv_2d = np.unique(v_2d, axis = 0)
 
-                    dx = dLi*np.sum(n, axis = 0)
-                    
-                    new_v[v, :] += dx
+            faces = []
+            for t in tris:
+                v = np.vstack(t.exterior.xy).T[:3, :]       # vertices of the triangle
+                f = [np.all(v[0, :] == uv_2d, axis = 1).nonzero()[0][0],
+                     np.all(v[1, :] == uv_2d, axis = 1).nonzero()[0][0],
+                     np.all(v[2, :] == uv_2d, axis = 1).nonzero()[0][0]]
+                faces.append(f)
             
-            new_v -= self.offset*self.res_meshes[r].facets_normal
-
-            self.res_meshes[r].vertices = new_v
+            uv_3d = np.expand_dims(uv_2d[:, 0], 1)*b1 + np.expand_dims(uv_2d[:, 1], 1)*b2 + origin
+            
+            self.res_meshes[r] = tm.base.Trimesh(vertices = uv_3d, faces = faces)
 
     def faces_to_facets(self, index_faces):
         ''' get which facet those faces are part of '''
@@ -654,14 +752,18 @@ class Geometry:
         self.face_k = copy.copy(face_k)
         
 class slice_classifier():
-    def __init__(self, n, a):
+    def __init__(self, n, xc = None, a = None):
+        
         self.n  = n                                  # number of subvolumes
-        self.xc = np.linspace(0, 1-1/n, n) + 1/(2*n) # center positions
-        self.a  = a                                  # slicing axis
-    
-    def predict(self, x):
-        diff = x[:, self.a].reshape(-1, 1) - self.xc
-        diff = np.abs(diff)
-        r = (diff == np.amin(diff, axis = 1, keepdims = True))
 
-        return r
+        if xc is None:
+            self.a  = a                                  # slicing axis
+            self.xc = np.ones((self.n, 3))*0.5
+            self.xc[:, self.a] = np.linspace(0, 1-1/n, n) + 1/(2*n) # center positions
+        else:
+            self.xc = xc
+
+        self.f = NearestNDInterpolator(self.xc, np.eye(self.n, self.n))
+        
+    def predict(self, x):
+        return self.f(x)

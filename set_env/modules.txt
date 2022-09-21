@@ -1,9 +1,12 @@
+scipy
+matplotlib
 h5py
 trimesh
+pyembree
+shapely
 networkx
 triangle
 rtree
-pyembree
 phonopy
 imageio
-
+pyqt
