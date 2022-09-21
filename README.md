@@ -32,7 +32,7 @@ This should ensure that all necessary packages are installed either from conda r
 
 **Obs.**: Depending on the operating system, some modules may not be available on conda repositories. In this case, manually install from conda the available modules and try to install the remaining via pip by running `conda run -n nanokappa python -m pip install module1 module2 [module3 ...]`. This is done automatically by the `set_env.py` file mentioned on step 3.
 
-1. Run a test by executing `python nanokappa.py -ff parameters_test.txt`. The resulting files should be located at `Nanokappa/test_results/test_X/`. These result files can be safely deleted after the test is finished.
+7. Run a test by executing `python nanokappa.py -ff parameters_test.txt`. The resulting files should be located at `Nanokappa/test_results/test_X/`. These result files can be safely deleted after the test is finished.
 
 <!-- **Obs.**: To install on the cluster:
 
