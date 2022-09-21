@@ -7,6 +7,8 @@ Nano-k is a Python code for phonon transport simulation. It allows to estimate t
 
 # Setting the environment
 
+**Obs:** I've tested this process on Windows 11 and Ubuntu 20. I have no idea of the limitations on other OS.
+
 It is recommended to run nano-k using a Conda environment. It can be set by following the steps:
 
 1. Clone this repository or download its files to the desired folder;
