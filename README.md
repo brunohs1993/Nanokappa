@@ -1,4 +1,5 @@
-![](readme_fig\logo_white.png)
+![](/readme_fig/logo_white.png#gh-light-mode-only)
+![](/readme_fig/logo_black.png#gh-dark-mode-only)
 
 # What is nano-k?
 
