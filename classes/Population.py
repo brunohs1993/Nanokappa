@@ -12,7 +12,10 @@ from scipy.interpolate.ndgriddata import NearestNDInterpolator
 
 # geometry
 import trimesh as tm
-from trimesh.ray.ray_pyembree import RayMeshIntersector # FASTER
+try:
+    from trimesh.ray.ray_pyembree import RayMeshIntersector # FASTER
+except:
+    from trimesh.ray.ray_triangle import RayMeshIntersector # SLOWER
 from trimesh.triangles import points_to_barycentric #, closest_point
 
 # other

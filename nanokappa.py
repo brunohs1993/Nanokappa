@@ -6,11 +6,15 @@ from classes.Visualisation import Visualisation
 from argument_parser import *
 import sys
 
-print('88888b.   8888b.  88888b.   .d88b.      8888    d88P\n'+
-      '888 "88b     "88b 888 "88b d88""88b       888 .88P\n'+
-      '888  888 .d888888 888  888 888  888 8888  888888K \n'+
-      '888  888 888  888 888  888 Y88..88P       888 "88b\n'+
-      '888  888 "Y888888 888  888  "Y88P"      8888    888b')
+print('\n'+
+      ' nonano          no   onanonan        onanon          on nonanonan              anon    anona\n'+
+      'ano   ona       ano  nona   anon     non  onan       nonano     anon            ano   ona\n'+
+      'ano    nano     anonano      nona    non    anon     nonan       non    anona   anonano\n'+
+      'ano     anon    anonan         nan   non     nona    nonan       non   nanon    nano anon\n'+
+      'ano       onan  anona           anonanon      onan   nonano     anon           nan   nona\n'+
+      'an         nanonano               nonanon      nanonano  nonanonan            onan    onano')
+
+print('\n'+'Running simulation, please wait. Check the results folder for the current status.')
 
 args = read_args()
 
@@ -34,8 +38,8 @@ f.close()
 start_time = datetime.now()
 
 print('---------- o ----------- o ------------- o ------------')
-print("Year: {:<4d}, Month: {:<2d}, Day: {:<2d}".format(start_time.year, start_time.month, start_time.day))
-print("Start at: {:<2d} h {:<2d} min {:<2d} s".format(start_time.hour, start_time.minute, start_time.second))	
+print("Year: {:<4d}, Month: {:>02d}, Day: {:>02d}".format(start_time.year, start_time.month, start_time.day))
+print("Start at: {:>02d} h {:>02d} min {:>02d} s".format(start_time.hour, start_time.minute, start_time.second))	
 print("Simulation name: " + args.results_folder)
 print('---------- o ----------- o ------------- o ------------')
 
@@ -86,8 +90,8 @@ end_time = datetime.now()
 total_time = end_time - start_time
 
 print('---------- o ----------- o ------------- o ------------')
-print("Start at: {:<2d}/{:<2d}/{:<4d}, {:<2d} h {:<2d} min {:<2d} s".format(start_time.day, start_time.month, start_time.year, start_time.hour, start_time.minute, start_time.second))	
-print("Finish at: {:<2d}/{:<2d}/{:<4d}, {:<2d} h {:<2d} min {:<2d} s".format(end_time.day, end_time.month, end_time.year, end_time.hour, end_time.minute, end_time.second))
+print("Start at: {:>02d}/{:>02d}/{:>4d}, {:>02d} h {:>02d} min {:>02d} s".format(start_time.day, start_time.month, start_time.year, start_time.hour, start_time.minute, start_time.second))	
+print("Finish at: {:>02d}/{:>02d}/{:>4d}, {:>02d} h {:>02d} min {:>02d} s".format(end_time.day, end_time.month, end_time.year, end_time.hour, end_time.minute, end_time.second))
 
 hours = total_time.seconds//3600
 minutes = (total_time.seconds//60)%60
@@ -96,13 +100,13 @@ seconds = total_time.seconds - 3600*hours - 60*minutes
 
 f = open(args_filename, 'a+')
 f.write('---------- o ----------- o ------------- o ------------\n' +
-        "Start at: {:>2d}/{:>2d}/{:>4d}, {:<2d} h {:<2d} min {:<2d} s\n".format(start_time.day, start_time.month, start_time.year, start_time.hour, start_time.minute, start_time.second)+
-        "Finish at: {:>2d}/{:>2d}/{:>4d}, {:<2d} h {:<2d} min {:<2d} s\n".format(end_time.day, end_time.month, end_time.year, end_time.hour, end_time.minute, end_time.second)+
-        "Total time: {:>2d} days {:>2d} h {:<2d} min {:<2d} s\n".format(total_time.days, hours, minutes, seconds)+
+        "Start at: {:>02d}/{:>02d}/{:>4d}, {:>02d} h {:>02d} min {:>02d} s\n".format(start_time.day, start_time.month, start_time.year, start_time.hour, start_time.minute, start_time.second)+
+        "Finish at: {:>02d}/{:>02d}/{:>4d}, {:>02d} h {:>02d} min {:>02d} s\n".format(end_time.day, end_time.month, end_time.year, end_time.hour, end_time.minute, end_time.second)+
+        "Total time: {:>02d} days {:>02d} h {:>02d} min {:>02d} s\n".format(total_time.days, hours, minutes, seconds)+
         '---------- o ----------- o ------------- o ------------')
 f.close()
 
-print("Total time: {:<2d} days {:<2d} h {:<2d} min {:<2d} s\n".format(total_time.days, hours, minutes, seconds))
+print("Total time: {:>02d} days {:>02d} h {:>02d} min {:>02d} s\n".format(total_time.days, hours, minutes, seconds))
 print('---------- o ----------- o ------------- o ------------')
 
 output_file.close()

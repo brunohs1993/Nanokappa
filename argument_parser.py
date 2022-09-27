@@ -137,7 +137,7 @@ def generate_results_folder(args):
     if sys.platform == 'win32':
         folder_sep = '\\'
         loc = loc.replace('/', folder_sep)
-    elif sys.platform in ['linux', 'linux2']:
+    elif sys.platform in ['linux', 'linux2', 'darwin']:
         folder_sep = '/'
         loc = loc.replace('\\', folder_sep)
 

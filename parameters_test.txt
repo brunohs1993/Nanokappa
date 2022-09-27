@@ -2,7 +2,7 @@
 --hdf_file         kappa-m313131.hdf5
 --poscar_file      POSCAR
 --mat_names        silicon
---pickled_mat      0
+--pickled_mat      
 --geometry         cuboid
 --dimensions       5e3 1e3 1e3
 --scale            1 1 1

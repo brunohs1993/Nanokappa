@@ -47,7 +47,7 @@ class Phonon(Constants):
             self.mat_folder = self.mat_folder.replace('/', '\\')
             if not self.mat_folder.endswith('\\'):
                 self.mat_folder += '\\'
-        elif sys.platform in ['linux', 'linux2']:
+        elif sys.platform in ['linux', 'linux2', 'darwin']:
             self.mat_folder = self.mat_folder.replace('\\', '/')
             if not self.mat_folder.endswith('/'):
                 self.mat_folder += '/'

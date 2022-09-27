@@ -1,38 +1,54 @@
 ![](/readme_fig/logo_white.png#gh-light-mode-only)
 ![](/readme_fig/logo_black.png#gh-dark-mode-only)
 
-# What is nano-k?
+# What is nano-$\kappa$?
 
-Nano-k is a Python code for phonon transport simulation. It allows to estimate the transport of heat in a given material by importing its properties derived from ab-initio calculations. It is possible to use standard geometries or import external ones.
+Nano-$\kappa$ is a Python code for phonon transport simulation. It allows to estimate the transport of heat in a given material by importing its properties derived from ab-initio calculations. It is possible to use standard geometries or import external ones.
 
 # Setting the environment
 
-It is recommended to run nano-k using a Conda environment. It can be set by following the steps:
+It is recommended to run nano-$\kappa$ using a Conda environment. Firstly, install Anaconda on your computer (https://www.anaconda.com/).
 
-1. Clone this repository or download its files to the desired folder;
-2. Install Anaconda on your computer (https://www.anaconda.com/);
-3. To set the `nanokappa` environment automatically, open `Nanokappa` folder on terminal and run (make sure Python version $\geq$ 3.5):
+Next, clone this repository or download its files to the desired folder.
+
+The necessary libraries can be installed either automatically or manually.
+
+## **Automatic installation:**
+
+To set the `nanokappa` environment automatically, open `Nanokappa` folder on terminal and run (make sure Python version $\geq$ 3.5):
 
         python set_env/set_env.py
 
-This should ensure that all necessary packages are installed either from conda repositories or via pip. A test simulation is run at the end to check if everything goes ok. It should take some minutes.
+This should ensure that all necessary packages are installed either from Conda repositories or via pip. A test simulation is run at the end to check if everything goes ok. It should take some minutes.
 
-4. You can also set the environment manually. Create an environment (here called `nanokappa`, but it is an user's choice) and activate it:
+## **Manual installation**
+
+If you prefer, you can also set the environment manually:
+
+1.  Create an environment (here called `nanokappa`, but it is an user's choice) and activate it:
    
        conda create -n nanokappa python=3.8
        conda activate nanokappa
 
-5. Add conda-forge to the available channels:
+2. Add conda-forge to the available channels:
    
        conda config --add channels conda-forge
 
-6. Install the needed modules:
+3. Install the needed modules:
    
         conda install -n nanokappa --file <path-to-nanokappa>/Nanokappa/set_env/modules.txt
 
-**Obs.**: Depending on the operating system, some modules may not be available on conda repositories. In this case, manually install from conda the available modules and try to install the remaining via pip by running `conda run -n nanokappa python -m pip install module1 module2 [module3 ...]`. This is done automatically by the `set_env.py` file mentioned on step 3.
+4. Run a test by executing `python nanokappa.py -ff <path-to-nanokappa>/Nanokappa/parameters_test.txt`. The resulting files should be located at `Nanokappa/test_results/test_X/`. These result files can be safely deleted after the test is finished.
 
-7. Run a test by executing `python nanokappa.py -ff <path-to-nanokappa>/Nanokappa/parameters_test.txt`. The resulting files should be located at `Nanokappa/test_results/test_X/`. These result files can be safely deleted after the test is finished.
+**Obs.**: Depending on the operating system, some modules may not be available on Conda repositories. In this case, check the modules that caused errors, and manually install from Conda the available modules by running:
+
+        conda install -n nanokappa module1 module2 [module3 ...]
+
+And then try to install the remaining via pip by running
+        
+        conda run -n nanokappa python -m pip install module1 module2 [module3 ...]
+        
+This proedure is done automatically by the `set_env.py` when running the automatic installation.
 
 <!-- **Obs.**: To install on the cluster:
 

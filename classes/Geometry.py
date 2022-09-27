@@ -239,6 +239,9 @@ class Geometry:
             array += self.bounds[0, self.slice_axis]
 
             self.subvol_center[:, self.slice_axis] = array
+            self.subvol_center = self.subvol_center[np.lexsort((self.subvol_center[:,2],
+                                                                self.subvol_center[:,1],
+                                                                self.subvol_center[:,0]))] # sort it
             
             self.slice_length = np.ptp(self.bounds[:, self.slice_axis])/self.n_of_subvols
 
@@ -253,6 +256,9 @@ class Geometry:
         elif self.subvol_type == 'voronoi':
             self.n_of_subvols    = int(self.args.subvolumes[1])
             self.subvol_center = subvolumes.distribute(self.mesh, self.n_of_subvols, self.folder, view = True)
+            self.subvol_center = self.subvol_center[np.lexsort((self.subvol_center[:,2],
+                                                                self.subvol_center[:,1],
+                                                                self.subvol_center[:,0]))] # sort it
             self.subvol_classifier = slice_classifier(n  = self.n_of_subvols,
                                                   xc = self.scale_positions(self.subvol_center))
 
@@ -277,6 +283,9 @@ class Geometry:
             g = np.meshgrid(xx, yy, zz)
 
             self.subvol_center = (np.vstack(map(np.ravel, g)).T)*self.bounds.ptp(axis = 0)+self.bounds[0, :]
+            self.subvol_center = self.subvol_center[np.lexsort((self.subvol_center[:,2],
+                                                                self.subvol_center[:,1],
+                                                                self.subvol_center[:,0]))] # sort it
 
             flag = True
             

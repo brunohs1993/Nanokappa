@@ -42,9 +42,15 @@ cmd = 'echo Do not close this window... & conda run -n nanokappa python nanokapp
 if sys.platform in ['linux', 'linux2']:
     sp = subprocess.Popen('gnome-terminal --wait -- ' + cmd, shell = True)
     sp.wait()
+elif sys.platform == 'darwin':
+    sp = subprocess.Popen("osascript -e 'tell app \"Terminal\" to do script \"{}\"' ".format(cmd), shell = True)
+    sp.wait()
 elif sys.platform == 'win32':
     sp = subprocess.Popen('wt '+cmd, shell = True)
     sp.wait()
+
+    
+
 
 while sp.poll() is None:
     time.sleep(1)
