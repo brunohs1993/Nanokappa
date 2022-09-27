@@ -234,7 +234,7 @@ The definition of the Voronoi subvolumes is given by the following algorithm:
 
 The Figure shows an example in two dimensions. The red dots are the current $x_r$ and the black dots are the updated $x_r$ for the next iteration. It can be seen that even with a number of subvolumes that is not a perfect square, the subvolumes are organised rather evenly at the end of the process.
 
-![](readme_fig\voronoi.png)
+![](/readme_fig/voronoi.png)
 
 This algorithm has shown to be flexible, but can cause some problems depending of the complexity of the geometry and of the initial $x_r$. Geometries with indents or holes, for example, can lead to particles on each side of the gap to be considered in the same subvolume, which can lead to an unreal energy transfer through the space. This sometimes can be avoided by just rerunning the simulation, but usually better results can be achieved by increasing the number of subvolumes, so that each side of the empty space is classified as a different subvolume. It is important to have user discretion while applying this type of subvolume.
 
