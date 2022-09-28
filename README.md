@@ -1,13 +1,13 @@
 ![](/readme_fig/logo_white.png#gh-light-mode-only)
 ![](/readme_fig/logo_black.png#gh-dark-mode-only)
 
-# What is nano-$\kappa$?
+# What is Nano-k?
 
-Nano-$\kappa$ is a Python code for phonon transport simulation. It allows to estimate the transport of heat in a given material by importing its properties derived from ab-initio calculations. It is possible to use standard geometries or import external ones.
+Nano-k is a Python code for phonon transport simulation. It allows to estimate the transport of heat in a given material by importing its properties derived from ab-initio calculations. It is possible to use standard geometries or import external ones.
 
 # Setting the environment
 
-It is recommended to run nano-$\kappa$ using a Conda environment. Firstly, install Anaconda on your computer (https://www.anaconda.com/).
+It is recommended to run nano-k using a Conda environment. Firstly, install [Anaconda](https://www.anaconda.com/) on your computer.
 
 Next, clone this repository or download its files to the desired folder.
 
@@ -15,9 +15,11 @@ The necessary libraries can be installed either automatically or manually.
 
 ## **Automatic installation:**
 
-To set the `nanokappa` environment automatically, open `Nanokappa` folder on terminal and run (make sure Python version $\geq$ 3.5):
+To set the `nanokappa` environment automatically, open a terminal window and run:
 
-        python set_env/set_env.py
+        $ python <path-to-nanokappa>/set_env/set_env.py
+        
+> **Obs.:** make sure Python version $\geq$ 3.5. On Linux or MacOS you may need to call `python3` instead of `python`.
 
 This should ensure that all necessary packages are installed either from Conda repositories or via pip. A test simulation is run at the end to check if everything goes ok. It should take some minutes.
 
@@ -27,28 +29,30 @@ If you prefer, you can also set the environment manually:
 
 1.  Create an environment (here called `nanokappa`, but it is an user's choice) and activate it:
    
-       conda create -n nanokappa python=3.8
-       conda activate nanokappa
+        $ conda create -n nanokappa python=3.8
+        $ conda activate nanokappa
+
+The `(nanokappa)` word will appear on the command line, signaling the conda environment is active.
 
 2. Add conda-forge to the available channels:
    
-       conda config --add channels conda-forge
+       (nanokappa) $ conda config --add channels conda-forge
 
 3. Install the needed modules:
    
-        conda install -n nanokappa --file <path-to-nanokappa>/Nanokappa/set_env/modules.txt
+        (nanokappa) $ conda install -n nanokappa --file <path-to-nanokappa>/Nanokappa/set_env/modules.txt
 
 4. Run a test by executing `python nanokappa.py -ff <path-to-nanokappa>/Nanokappa/parameters_test.txt`. The resulting files should be located at `Nanokappa/test_results/test_X/`. These result files can be safely deleted after the test is finished.
 
-**Obs.**: Depending on the operating system, some modules may not be available on Conda repositories. In this case, check the modules that caused errors, and manually install from Conda the available modules by running:
-
-        conda install -n nanokappa module1 module2 [module3 ...]
-
-And then try to install the remaining via pip by running
-        
-        conda run -n nanokappa python -m pip install module1 module2 [module3 ...]
-        
-This proedure is done automatically by the `set_env.py` when running the automatic installation.
+> **Obs.**: Depending on the operating system, some modules may not be available on Conda repositories. In this case, check the modules that caused errors, and manually install from Conda the available modules by running:
+>
+>        (nanokappa) $ conda install -n nanokappa module1 module2 [module3 ...]
+>
+> And then try to install the remaining via pip by running
+>        
+>        (nanokappa) $ conda run -n nanokappa python -m pip install module1 module2 [module3 ...]
+>        
+> This proedure is done automatically by the `set_env.py` when running the automatic installation.
 
 <!-- **Obs.**: To install on the cluster:
 
@@ -77,7 +81,7 @@ Here is a list of all parameters that can be set:
 | Material names           | `--mat_names`        | `-mn`   | Material name identifier.  | String | |
 | Pickled materials        | `--pickled_mat`      | `-pm`   | Material indexes as declared on `-mf` to check whether it is already processed and pickled or not. If it is not, it will be pickled for use next time. Useful to avoid redoing phonon calculations for the same reference temperature. | Integer | |
 | Results folder           | `--results_folder`   | `-rf`   | The name of the folder to be created containing all result files. If none is informed, no folder is created.                      | String     | `''`            |
-| Results location         | `--results_location` | `-rl`   | The path where the result folder will be created. It accepts `local` if the results should be saved in the current directory, `main` if they should be saved in the same directory as `main_program.py`, or a custom path.               | String     | `local`            |
+| Results location         | `--results_location` | `-rl`   | The path where the result folder will be created. It accepts `local` if the results should be saved in the current directory, `main` if they should be saved in the same directory as `nanokappa.py`, or a custom path.               | String     | `local`            |
 | Geometry                 | `--geometry`         | `-g`    | Standard geometry name or file name. Geometry coordinates in angstroms | String     | `cuboid`        |
 | Dimensions               | `--dimensions`       | `-d`    | Dimensions for standard base geometries as asked by [trimesh.creation](https://trimsh.org/trimesh.creation.html) primitives | Floats | `20e3 1e3 1e3` |
 | Scale                    | `--scale`            | `-s`    | Scale factors for the base geometry (x, y, z)                          | Float   x3 | `1 1 1`         |
@@ -85,7 +89,7 @@ Here is a list of all parameters that can be set:
 | Material rotation        | `--mat_rotation`     | `-mr`   | Euler angles to change crystal orientation (see [scipy.rotation.from_euler](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.from_euler.html)) | Float x3 | `0 0 0`         |
 | Boundary conditions      | `--bound_cond`       | `-bc`   | Type of boundary condition for each facet declared in `--bound_facets`. If one condition more is given, it is considered to be the same for all non informed facets. Accepts `T` for temperature, `P` for periodic, `R` for roughness/reflection, `F` for heat flux. | String     | `T T P`      |
 | Facets with imposed BC   | `--bound_facets`     | `-bf`   | The facets to imposed the boundary conditions on. | Integer | `0 3` | 
-| Boundary condition values| `--bound_values`     | `-bv`   | Values for each imposed boundary conditions. Temperatures in Kelvin, heat fluxes in W/m$^2$, Roughness in angstroms.                 | Float   | `303 297`       |
+| Boundary condition values| `--bound_values`     | `-bv`   | Values for each imposed boundary conditions. Temperatures in Kelvin, heat fluxes in W/m<sup>2</sup>, Roughness in angstroms.                 | Float   | `303 297`       |
 | Connected faces          | `--connect_facets`   | `-cf`   | Indexes of the connected facets to apply the periodic boundary condition. They are grouped in pairs (first with second, third with fourth, and so on). They must: 1. Have vertices with the same coordinates in relation to their centroids; 2. Have the same area; 3. Have their normals parallel to each other and in opposite directions. | Integer | `1 5 2 4` |
 | Collision offset         | `--offset`           | `-os`   | Offset of the collision detection from the wall to avoid errors in the reflection procedure. Usually unnecessary to change, but useful to have as an option. | Float | `2e-8` |
 | Temperature distribution | `--temp_dist`        | `-td`   | Shape of the initial temperature profile. Accepts `cold`, `hot`, `mean`, `random`, `custom`.    | String     | `cold` |
@@ -163,13 +167,11 @@ The properties describing the material are derived from hdf5 and POSCAR files. T
 
 The geometry can be defined from an standard geometry or an external file. The standard geometries are defined by functions in [trimesh.creation](https://trimsh.org/trimesh.creation.html):
 
-| Geometry | Key for `--geometry` | [trimesh.creation](https://trimsh.org/trimesh.creation.html) function | Parameters for `--dimensions`         | Obs               |
-| -------- | -------------------- | --------------------------------------------------------------------- | ------------------------------------- | ----------------- |
-| Cuboid   | `cuboid`             | `trimesh.creation.box`                                                | x, y and z lengths                    |                   |
-| Sphere   | `sphere`             | `trimesh.creation.icosphere`                                          | Radius and subdivisions               | To be implemented |
-| Cylinder | `cylinder`           | `trimesh.creation.cylinder`                                           | Radius and height                     | To be implemented |
-| Cone     | `cone`               | `trimesh.creation.cone`                                               | Radius and height                     | To be implemented |
-| Annulus  | `annulus`            | `trimseh.creation.annulus`                                            | Inner radius, outer radius and height | To be implemented |
+| Geometry | Key for `--geometry` | [trimesh.creation](https://trimsh.org/trimesh.creation.html) function | Parameters for `--dimensions`         |
+| -------- | -------------------- | --------------------------------------------------------------------- | ------------------------------------- |
+| Cuboid   | `cuboid`             | `trimesh.creation.box`                                                | x, y and z lengths                    |
+| Sphere   | `sphere`             | `trimesh.creation.icosphere`                                          | Radius and subdivisions               |
+| Cylinder | `cylinder`           | `trimesh.creation.cylinder`                                           | Radius, height and sides              |
 
 <p>&nbsp</p>
 
