@@ -1,4 +1,12 @@
-import subprocess, sys, time
+import subprocess, sys, time, os
+from threading import local
+
+if sys.platform == 'win32':
+    folder_sep = '\\'
+elif sys.platform in ['linux', 'linux2', 'darwin']:
+    folder_sep = '/'
+
+main_path = os.path.realpath(__file__).replace('set_env{}set_env.py'.format(folder_sep), '') # path of Nanokappa main
 
 subprocess.run('conda create -n nanokappa python=3.8 --yes', shell = True)
 subprocess.run('conda activate nanokappa', shell = True)
@@ -38,7 +46,7 @@ with open('set_env/install_log.txt', 'w') as f:
         subprocess.run('conda run -n nanokappa python -m pip install'+pip_mods_str, shell = True, stdout = f)
 
 print('Running test...')
-cmd = 'echo Do not close this window... & conda run -n nanokappa python nanokappa.py -ff parameters_test.txt'
+cmd = 'echo Do not close this window... & conda run -n {}nanokappa python nanokappa.py -ff {}parameters_test.txt'.format(main_path)
 if sys.platform in ['linux', 'linux2']:
     sp = subprocess.Popen('gnome-terminal --wait -- ' + cmd, shell = True)
     sp.wait()
@@ -48,9 +56,6 @@ elif sys.platform == 'darwin':
 elif sys.platform == 'win32':
     sp = subprocess.Popen('wt '+cmd, shell = True)
     sp.wait()
-
-    
-
 
 while sp.poll() is None:
     time.sleep(1)

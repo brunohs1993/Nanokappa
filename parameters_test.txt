@@ -23,8 +23,8 @@
 --part_dist        random_subvol
 --timestep         1
 --iterations       500
---results_folder   test
---results_location test_results
+--results_folder   test_results/test
+--results_location main
 --conv_crit        0
 --lookup           0
 --colormap         jet
