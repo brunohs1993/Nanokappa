@@ -633,7 +633,7 @@ class Population(Constants):
         subvol_id = geometry.subvol_classifier.predict(scaled_positions) # get subvol_id from the model
 
         if get_np:
-            self.subvol_N_p = subvol_id.sum(axis = 0)
+            self.subvol_N_p = subvol_id.sum(axis = 0).astype(int)
 
             self.N_p = self.subvol_N_p.sum()
 

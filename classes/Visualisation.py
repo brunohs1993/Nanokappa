@@ -1122,7 +1122,7 @@ class Visualisation(Constants):
 
         # Energy balance
         y_axis = self.en_res
-        sign = np.sign(y_axis)
+        
         ax1.plot(x_axis, y_axis)
         ax1.plot(x_axis, y_axis.sum(axis = 1), linestyle = '--', color = 'k')
         
@@ -1146,16 +1146,16 @@ class Visualisation(Constants):
         for i in range(self.n_of_reservoirs*3):
             ax2.plot(x_axis, y_axis[:, i])
         
-        line = ['--', ':', '-.']
-        for d in range(3):
-            i = np.arange(self.n_of_reservoirs)*3+d
-            ax2.plot(x_axis, np.sum((y_axis*sign)[:, i], axis = 1), linestyle = line[d], color = 'k')
+        # line = ['--', ':', '-.']
+        # for d in range(3):
+        #     i = np.arange(self.n_of_reservoirs)*3+d
+        #     ax2.plot(x_axis, np.sum(y_axis[:, i], axis = 1), linestyle = line[d], color = 'k')
         
         ax2.set_xlabel('Simulation time [ps]', fontsize = 12)
         ax2.set_ylabel('Heat flux balance on surface [W/m²]', fontsize = 12)
         
         phi_labels = [r'$\phi_{}$, Res {}'.format(a, r) for r in range(self.n_of_reservoirs) for a in ['x', 'y', 'z']]
-        phi_labels += ['Balance {}'.format(d) for d in ['x', 'y', 'z']]
+        # phi_labels += ['Balance {}'.format(d) for d in ['x', 'y', 'z']]
 
         if self.n_of_reservoirs <=10:
             ax2.legend(phi_labels)
