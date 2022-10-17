@@ -30,3 +30,4 @@
 --colormap         jet
 --fig_plot         subvol omega energy
 --rt_plot          
+--output           file
