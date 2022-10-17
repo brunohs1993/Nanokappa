@@ -5,8 +5,10 @@ trimesh
 pyembree
 shapely
 networkx
+mapbox_earcut
 triangle
 rtree
 phonopy
 imageio
 pyqt
+pyglet

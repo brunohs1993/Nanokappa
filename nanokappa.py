@@ -24,8 +24,9 @@ args = generate_results_folder(args)
 # saving arguments on file
 args_filename = args.results_folder + 'arguments.txt'
 
-output_file = open(args.results_folder + 'output.txt', 'a')
-sys.stdout = output_file
+if args.output == 'file':
+    output_file = open(args.results_folder + 'output.txt', 'a')
+    sys.stdout = output_file
 
 f = open(args_filename, 'w')
 
@@ -109,4 +110,5 @@ f.close()
 print("Total time: {:>02d} days {:>02d} h {:>02d} min {:>02d} s\n".format(total_time.days, hours, minutes, seconds))
 print('---------- o ----------- o ------------- o ------------')
 
-output_file.close()
+if args.output == 'file':
+    output_file.close()

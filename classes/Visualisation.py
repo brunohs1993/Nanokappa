@@ -70,6 +70,9 @@ class Visualisation(Constants):
         if verbose: print('Plotting heat flux convergence...')
         self.convergence_heat_flux()
 
+        if verbose: print('Plotting kappa convergence...')
+        self.convergence_kappa()
+
         if verbose: print('Plotting energy density convergence...')
         self.convergence_energy()
 
@@ -252,17 +255,47 @@ class Visualisation(Constants):
         self.timestep = data[:, 1].astype(int)
         self.sim_time = data[:, 2].astype(float)
         self.total_en = data[:, 3].astype(float)
-        self.en_res   = data[:, 4                                            : 4+self.n_of_reservoirs                      ].astype(float)
-        self.phi_res  = data[:, 4+self.n_of_reservoirs                       : 4+4*self.n_of_reservoirs                    ].astype(float)
-        self.mtm_res  = data[:, 4+4*self.n_of_reservoirs                     : 4+7*self.n_of_reservoirs                    ].astype(float)
-        self.N_p      = data[:, 4+7*self.n_of_reservoirs                                                                   ].astype(int  )
-        self.T        = data[:, 5+7*self.n_of_reservoirs                     : 5+7*self.n_of_reservoirs+self.n_of_subvols  ].astype(float)
-        self.sv_en    = data[:, 5+7*self.n_of_reservoirs+self.n_of_subvols   : 5+7*self.n_of_reservoirs+2*self.n_of_subvols].astype(float)
-        self.sv_phi   = data[:, 5+7*self.n_of_reservoirs+2*self.n_of_subvols : 5+7*self.n_of_reservoirs+5*self.n_of_subvols].astype(float)
-        self.sv_mtm   = data[:, 5+7*self.n_of_reservoirs+5*self.n_of_subvols : 5+7*self.n_of_reservoirs+8*self.n_of_subvols].astype(float)
-        self.sv_Np    = data[:, 5+7*self.n_of_reservoirs+8*self.n_of_subvols : 5+7*self.n_of_reservoirs+9*self.n_of_subvols].astype(float)
+        self.en_res   = data[:, 4                                            : 4+  self.n_of_reservoirs                     ].astype(float)
+        self.phi_res  = data[:, 4+  self.n_of_reservoirs                     : 4+4*self.n_of_reservoirs                     ].astype(float)
+        self.mtm_res  = data[:, 4+4*self.n_of_reservoirs                     : 4+7*self.n_of_reservoirs                     ].astype(float)
+        self.N_p      = data[:, 4+7*self.n_of_reservoirs                                                                    ].astype(int  )
+        self.T        = data[:, 5+7*self.n_of_reservoirs                     : 5+7*self.n_of_reservoirs+   self.n_of_subvols].astype(float)
+        self.sv_en    = data[:, 5+7*self.n_of_reservoirs+   self.n_of_subvols: 5+7*self.n_of_reservoirs+ 2*self.n_of_subvols].astype(float)
+        self.sv_phi   = data[:, 5+7*self.n_of_reservoirs+ 2*self.n_of_subvols: 5+7*self.n_of_reservoirs+ 5*self.n_of_subvols].astype(float)
+        self.sv_mtm   = data[:, 5+7*self.n_of_reservoirs+ 5*self.n_of_subvols: 5+7*self.n_of_reservoirs+ 8*self.n_of_subvols].astype(float)
+        self.sv_Np    = data[:, 5+7*self.n_of_reservoirs+ 8*self.n_of_subvols: 5+7*self.n_of_reservoirs+ 9*self.n_of_subvols].astype(float)
+        self.k_pt     = data[:, 5+7*self.n_of_reservoirs+ 9*self.n_of_subvols                                               ].astype(float)
+        self.k_lu     = data[:, 6+7*self.n_of_reservoirs+ 9*self.n_of_subvols                                               ].astype(float)
+        self.sv_k_pt  = data[:, 7+7*self.n_of_reservoirs+ 9*self.n_of_subvols: 7+7*self.n_of_reservoirs+10*self.n_of_subvols].astype(float)
+        self.sv_k_lu  = data[:, 7+7*self.n_of_reservoirs+10*self.n_of_subvols: 7+7*self.n_of_reservoirs+11*self.n_of_subvols].astype(float)
 
         del(data)
+
+        self.mean_total_en = self.total_en[-100:].mean(axis = 0)
+        self.mean_en_res   = self.en_res[-100:, :].mean(axis = 0)
+        self.mean_phi_res  = self.phi_res[-100:, :].mean(axis = 0)
+        self.mean_mtm_res  = self.mtm_res[-100:, :].mean(axis = 0)
+        self.mean_Np       = self.N_p[-100:].mean(axis = 0)
+        self.mean_T        = self.T[-100:, :].mean(axis = 0)
+        self.mean_sv_en    = self.sv_en[-100:, :].mean(axis = 0)
+        self.mean_sv_phi   = self.sv_phi[-100:, :].mean(axis = 0)
+        self.mean_sv_mtm   = self.sv_mtm[-100:, :].mean(axis = 0)
+        self.mean_sv_Np    = self.sv_Np[-100:, :].mean(axis = 0)
+        self.mean_sv_k_pt  = np.nanmean(self.sv_k_pt[-100:, :], axis = 0)
+        self.mean_sv_k_lu  = np.nanmean(self.sv_k_lu[-100:, :], axis = 0)
+
+        self.std_total_en = self.total_en[-100:].std(axis = 0)
+        self.std_en_res   = self.en_res[-100:, :].std(axis = 0)
+        self.std_phi_res  = self.phi_res[-100:, :].std(axis = 0)
+        self.std_mtm_res  = self.mtm_res[-100:, :].std(axis = 0)
+        self.std_Np       = self.N_p[-100:].std(axis = 0)
+        self.std_T        = self.T[-100:, :].std(axis = 0)
+        self.std_sv_en    = self.sv_en[-100:, :].std(axis = 0)
+        self.std_sv_phi   = self.sv_phi[-100:, :].std(axis = 0)
+        self.std_sv_mtm   = self.sv_mtm[-100:, :].std(axis = 0)
+        self.std_sv_Np    = self.sv_Np[-100:, :].std(axis = 0)
+        self.std_sv_k_pt  = np.nanstd(self.sv_k_pt[-100:, :], axis = 0, where = (np.absolute(self.sv_k_pt[-100:, :]) != np.inf))
+        self.std_sv_k_lu  = np.nanstd(self.sv_k_lu[-100:, :], axis = 0, where = (np.absolute(self.sv_k_pt[-100:, :]) != np.inf))
 
     def read_particles(self, verbose = True):
 
@@ -340,7 +373,10 @@ class Visualisation(Constants):
             else:
                 labels.append('{:.2f} ps'.format(self.sim_time[index]))
                 ax[1].plot( sv_axis, self.T[index, :], '-+', color = rgba_colors[i, :])
-
+            
+        ax[1].errorbar(sv_axis, self.mean_T, yerr = self.std_T, linestyle = '--', marker = 'o', color = 'k', capsize = 5)
+        labels.append(r'$\mu \pm \sigma$')
+        
         ax[1].legend(labels)
 
         ax[0].grid(True, ls = '--', lw = 1, color = 'slategray')
@@ -402,17 +438,9 @@ class Visualisation(Constants):
                 labels.append('{:.2f} ps'.format(self.sim_time[index]))
                 ax[1].plot( sv_axis, self.sv_Np[index, :], '-+', color = rgba_colors[i, :])
 
-        if self.args.particles[0] == 'total':
-            N_p = int(float(self.args.particles[1]))
-        elif self.args.particles[0] == 'pmps':
-            N_p = int(float(self.args.particles[1])*self.n_of_subvols*self.phonon.number_of_modes)
-        elif self.args.particles[0] == 'pv':
-            N_p = int(float(self.args.particles[1])*self.geometry.volume)
+        ax[1].errorbar(sv_axis, self.mean_sv_Np, yerr = self.std_sv_Np, linestyle = '--', marker = 'o', color = 'k', capsize = 5)
+        labels.append(r'$\mu \pm \sigma$')
 
-        N_p /= self.n_of_subvols
-
-        labels.append('Total/subvol')
-        
         ax[1].legend(labels)
 
         ax[1].set_xlabel('Subvolume', fontsize = 12)
@@ -422,8 +450,6 @@ class Visualisation(Constants):
         ax[1].grid(True, ls = '--', lw = 1, color = 'slategray')
 
         ax[0].ticklabel_format(axis = 'y', style = 'plain', scilimits=(0,0), useOffset = False)
-
-        
 
         plt.suptitle('Number of particles in each slice: evolution over time and profiles.', fontsize = 'xx-large')
 
@@ -484,6 +510,9 @@ class Visualisation(Constants):
                 else:
                     labels.append('{:.2f} ps'.format(self.sim_time[index]))
                     ax[d, 1].plot( sv_axis, self.sv_phi[index, dim_i], '-+', color = rgba_colors[i, :])
+            
+            ax[d, 1].errorbar(sv_axis, self.mean_sv_phi[dim_i], yerr = self.std_sv_phi[dim_i], linestyle = '--', marker = 'o', color = 'k', capsize = 5)
+            labels.append(r'$\mu \pm \sigma$')
 
         for a in ax[:, 1]:
             a.legend(labels)
@@ -551,6 +580,9 @@ class Visualisation(Constants):
                 labels.append('{:.2f} ps'.format(self.sim_time[index]))
                 ax[1].plot( sv_axis, self.sv_en[index, :], '-+', color = rgba_colors[i, :])
 
+        ax[1].errorbar(sv_axis, self.mean_sv_en, yerr = self.std_sv_en, linestyle = '--', marker = 'o', color = 'k', capsize = 5)
+        labels.append(r'$\mu \pm \sigma$')
+
         ax[1].legend(labels)
 
         ax[0].grid(True, ls = '--', lw = 1, color = 'slategray')
@@ -562,6 +594,104 @@ class Visualisation(Constants):
 
         plt.tight_layout()
         plt.savefig(self.folder+'convergence_energy.png')
+
+        plt.close(fig)
+
+    def convergence_kappa(self):
+        fig, ax = plt.subplots(nrows = 3, ncols = 2, figsize = (15, 15), sharey = 'all', sharex = 'col')
+        sv_axis = np.arange(self.n_of_subvols)+1
+        x_axis = self.sim_time
+
+        for i in range(self.n_of_subvols):
+            ax[0, 0].plot(x_axis, self.sv_k_pt[:, i]) # particle values
+            ax[1, 0].plot(x_axis, self.sv_k_lu[:, i]) #   lookup values
+        
+        labels = ['Sv {:d}'.format(i) for i in sv_axis]
+
+        ax[0, 0].plot(x_axis, self.k_pt, '--', color = 'k')
+        ax[1, 0].plot(x_axis, self.k_lu, '--', color = 'k')
+        
+        ax[2, 0].plot(x_axis, self.k_pt,  '-', color = 'r')
+        ax[2, 0].plot(x_axis, self.k_lu,  '-', color = 'b')
+
+        N = 100
+        rolling_mean_k_pt = np.convolve(self.k_pt, np.ones(N)/N, mode = 'full')[:-N+1]
+        rolling_mean_k_lu = np.convolve(self.k_lu, np.ones(N)/N, mode = 'full')[:-N+1]
+
+        dev_pt = (self.k_pt - rolling_mean_k_pt)**2
+        dev_lu = (self.k_lu - rolling_mean_k_lu)**2
+
+        rolling_std_k_pt = (np.convolve(dev_pt, np.ones(N)/N, mode = 'full')[:-N+1])**0.5
+        rolling_std_k_lu = (np.convolve(dev_lu, np.ones(N)/N, mode = 'full')[:-N+1])**0.5
+
+        labels.append(r'Total $\kappa$')
+
+        for a in ax[[0, 1], 0]:
+            if self.n_of_subvols <=10:
+                a.legend(labels)
+
+        ax[2, 0].fill_between(x_axis, rolling_mean_k_pt-rolling_std_k_pt, rolling_mean_k_pt+rolling_std_k_pt, color = 'lightcoral'    , alpha = 0.5)
+        ax[2, 0].fill_between(x_axis, rolling_mean_k_lu-rolling_std_k_lu, rolling_mean_k_lu+rolling_std_k_lu, color = 'lightsteelblue', alpha = 0.5)
+        ax[2, 0].legend(['Particles', 'Modes', r'$\mu \pm \sigma$ - Particles', r'$\mu \pm \sigma$ - Modes'])
+        
+        ax[0, 0].set_ylabel(r'$\kappa$ for Subvolume [W/m²$\cdot$K] - Particle data', fontsize = 12)
+        ax[1, 0].set_ylabel(r'$\kappa$ for Subvolume [W/m²$\cdot$K] - Modes data'   , fontsize = 12)
+        ax[2, 0].set_ylabel(r'Total $\kappa$ for each method [W/m²$\cdot$K]'   , fontsize = 12)
+        
+        ax[-1, 0].set_xlabel('Simulation time [ps]', fontsize = 12)
+
+        # Kappa profile
+        n_timesteps = self.sv_k_pt.shape[0]
+
+        labels = []
+
+        n = 5
+        color = 'royalblue'
+
+        alphas = np.linspace(0.1, 1.0, n)
+        rgba_colors = np.zeros((n, 4))
+        rgba_colors[:, :3] = matplotlib.colors.to_rgb(color)
+        rgba_colors[:,  3] = alphas
+
+        for i in range(n):
+            index = int(np.floor(i*n_timesteps/(n-1)))
+            if i == n-1:
+                labels.append('{:.2f} ps'.format(self.sim_time[-1]))
+                ax[0, 1].plot( sv_axis, self.sv_k_pt[-1, :], '-+', color = rgba_colors[i, :])
+                ax[1, 1].plot( sv_axis, self.sv_k_lu[-1, :], '-+', color = rgba_colors[i, :])
+            else:
+                labels.append('{:.2f} ps'.format(self.sim_time[index]))
+                ax[0, 1].plot( sv_axis, self.sv_k_pt[index, :], '-+', color = rgba_colors[i, :])
+                ax[1, 1].plot( sv_axis, self.sv_k_lu[index, :], '-+', color = rgba_colors[i, :])
+
+        ax[0, 1].errorbar(sv_axis, self.mean_sv_k_pt, yerr = self.std_sv_k_pt, linestyle = '--', marker = 'o', color = 'k', capsize = 5)
+        ax[1, 1].errorbar(sv_axis, self.mean_sv_k_lu, yerr = self.std_sv_k_lu, linestyle = '--', marker = 'o', color = 'k', capsize = 5)
+        
+        labels.append(r'$\mu \pm \sigma$')
+
+        ax[2, 1].errorbar(sv_axis, self.mean_sv_k_pt, yerr = self.std_sv_k_pt, linestyle = '--', marker = 'o', color = 'r', capsize = 5)
+        ax[2, 1].errorbar(sv_axis, self.mean_sv_k_lu, yerr = self.std_sv_k_lu, linestyle = '--', marker = 'o', color = 'b', capsize = 5)
+        ax[2, 1].legend(['Particles', 'Modes'])
+
+        for a in ax[[0, 1], 1]:
+            a.legend(labels)
+        for a in ax[:, 1]:
+            a.set_xticks(sv_axis)
+
+        ax[-1, 1].set_xlabel('Subvolume', fontsize = 12)
+
+        max_k = max([self.k_pt.max(), self.k_lu.max()])
+        for a in ax[:, 0]:
+            a.set_ylim(0, max_k*1.5)
+
+        plt.suptitle('Thermal conductivity for each subvolume: evolution over time and profiles.', fontsize = 'xx-large')
+
+        for a in ax.ravel():
+            a.grid(True, ls = '--', lw = 1, color = 'slategray')
+            a.ticklabel_format(axis = 'y', style = 'sci', scilimits=(0,0), useOffset = False)
+
+        plt.tight_layout()
+        plt.savefig(self.folder+'convergence_kappa.png')
 
         plt.close(fig)
 
@@ -992,6 +1122,7 @@ class Visualisation(Constants):
 
         # Energy balance
         y_axis = self.en_res
+        sign = np.sign(y_axis)
         ax1.plot(x_axis, y_axis)
         ax1.plot(x_axis, y_axis.sum(axis = 1), linestyle = '--', color = 'k')
         
@@ -1014,13 +1145,17 @@ class Visualisation(Constants):
         y_axis = self.phi_res
         for i in range(self.n_of_reservoirs*3):
             ax2.plot(x_axis, y_axis[:, i])
-        ax2.plot(x_axis, y_axis[:, 0]-y_axis[:, 1], linestyle = '--', color = 'k')
+        
+        line = ['--', ':', '-.']
+        for d in range(3):
+            i = np.arange(self.n_of_reservoirs)*3+d
+            ax2.plot(x_axis, np.sum((y_axis*sign)[:, i], axis = 1), linestyle = line[d], color = 'k')
         
         ax2.set_xlabel('Simulation time [ps]', fontsize = 12)
         ax2.set_ylabel('Heat flux balance on surface [W/m²]', fontsize = 12)
         
         phi_labels = [r'$\phi_{}$, Res {}'.format(a, r) for r in range(self.n_of_reservoirs) for a in ['x', 'y', 'z']]
-        phi_labels.append('Balance')
+        phi_labels += ['Balance {}'.format(d) for d in ['x', 'y', 'z']]
 
         if self.n_of_reservoirs <=10:
             ax2.legend(phi_labels)

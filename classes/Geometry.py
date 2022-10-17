@@ -9,10 +9,12 @@ from scipy.stats.qmc import Sobol
 
 # geometry
 import trimesh as tm
-from trimesh.graph import is_watertight
 import routines.subvolumes as subvolumes
 
-from shapely.ops import polygonize_full, unary_union, triangulate
+from shapely.geometry import Polygon, Point
+
+from triangle import triangulate as triangulate_tri
+from mapbox_earcut import triangulate_float32 as triangulate_earcut
 
 # other
 import sys
@@ -56,8 +58,10 @@ class Geometry:
         self.get_bound_facets(args)    # get boundary conditions facets
         self.check_connections(args)   # check if all connections are valid and adjust vertices
         self.get_plane_k()
+        # self.get_offset_mesh()
         self.save_reservoir_meshes()   # save meshes of each reservoir after adjust vertices
         self.set_subvolumes()          # define subvolumes and save their meshes and properties
+        # self.get_voronoi_diagram()
 
         print('Geometry processing done!')
 
@@ -248,6 +252,7 @@ class Geometry:
             self.subvol_classifier = slice_classifier(n  = self.n_of_subvols,
                                                   xc = self.scale_positions(self.subvol_center))
             
+            # self.subvol_volume = self.calculate_subvol_volume()
             try: # try slicing the mesh first
                 self.subvol_volume = self.calculate_subvol_volume()
             except: # if it gives an error, try with quasi monte carlo / sobol sampling
@@ -504,34 +509,6 @@ class Geometry:
         # this is equal to the mean of triangles centroids.
         self.facet_centroid = np.array([vertices.mean(axis = 0) for vertices in self.facet_vertices])
         
-    def facets_plot(self):
-        # debug plot
-        fig = plt.figure(figsize = (10, 10), dpi = 100)
-        ax = fig.add_subplot(111, projection='3d')
-        ax.scatter(self.mesh.vertices[:, 0],
-                   self.mesh.vertices[:, 1],
-                   self.mesh.vertices[:, 2], c = 'b')
-        
-        # facets
-        ax.scatter(self.facet_centroid[:, 0],
-                   self.facet_centroid[:, 1],
-                   self.facet_centroid[:, 2], c = 'r')
-        
-        for i in range(self.facet_centroid.shape[0]):
-            ax.plot([self.facet_centroid[i, 0], self.facet_centroid[i, 0]+100*self.mesh.facets_normal[i, 0]],
-                    [self.facet_centroid[i, 1], self.facet_centroid[i, 1]+100*self.mesh.facets_normal[i, 1]],
-                    [self.facet_centroid[i, 2], self.facet_centroid[i, 2]+100*self.mesh.facets_normal[i, 2]],
-                    c = 'k')
-            ax.text(self.facet_centroid[i, 0],
-                    self.facet_centroid[i, 1],
-                    self.facet_centroid[i, 2],
-                    i)
-        
-        plt.tight_layout()
-        plt.savefig(self.folder + 'facets.png')
-        plt.close(fig=fig)
-        # plt.show()
-        
     def check_connections(self, args):
 
         print('Checking connected faces...')
@@ -571,8 +548,6 @@ class Geometry:
         
         print('Adjusting mesh.')
         self.adjust_connections(connections)
-
-        self.facets_plot()
 
     def adjust_connections(self, connections):
         
@@ -647,7 +622,7 @@ class Geometry:
             self.mesh.rezero() # brings mesh to origin back again to avoid negative coordinates
             self.mesh.fix_normals()
         
-    def save_reservoir_meshes(self):
+    def save_reservoir_meshes(self, engine = 'earcut'):
 
         faces    = [self.mesh.facets[i] for i in range(self.n_of_facets)] # indexes of the faces that define each facet
 
@@ -660,71 +635,358 @@ class Geometry:
         # Surface area of the reservoirs' facets' meshes. Saving before adjusting so that it does not change the probability of entering with the offset.
         self.res_areas = np.array([mesh.area for mesh in self.res_meshes])
 
-        h = 2*self.offset # margin to adjust - a little more than offset just to be sure
+        h = self.offset # margin to adjust - a little more than offset just to be sure
 
         for r in range(self.n_of_reservoirs):
             mesh = self.res_meshes[r]
-
-            origin = mesh.vertices[0, :]        # plane origin
             normal = mesh.facets_normal[0, :]   # plane normal
-
-            b1 = np.random.rand(3)             # generate random vector
-            b1 = b1 - normal*np.sum(normal*b1) # make b1 orthogonal to the normal
-
-            b1 = b1/np.sum(b1**2)**0.5            # normalise b1
-
-            b2 = np.cross(normal, b1)          # generate b2 = n x b1
-
-            plane_coord = np.zeros((0, 2))
-            for v in mesh.vertices:         # for each vertex
-
-                B = np.expand_dims((v - origin), 1)     # get relative coord
-                A = np.vstack((b1, b2, normal)).T # get x and y bases coefficients
-                plane_coord = np.vstack((plane_coord, np.linalg.solve(A, B).T[0, :2])) # store the plane coordinates
+            origin = mesh.vertices[0, :]        # plane origin
             
-            lines = tuple(tuple(tuple(plane_coord[p, :]) for p in l) for l in mesh.edges)    # line pairs
+            plane_coord, b1, b2 = self.transform_3d_to_2d(mesh, normal, origin)
 
-            result, _, _, _ = polygonize_full(lines)                        # polygons
+            ring_list = self.get_boundary_rings(mesh)
 
-            merged = unary_union(result)
+            poly = self.save_polygon(plane_coord, ring_list)
 
-            right_offset = merged.exterior.parallel_offset(h, 'right', 2)
-            left_offset  = merged.exterior.parallel_offset(h, 'left' , 2)
-
-            if right_offset.length < left_offset.length:
-                offset = right_offset.simplify(0.1)
-            else: offset = left_offset.simplify(0.1)
-
-            tris = triangulate(offset)
-
-            v_2d = np.vstack([np.vstack(t.exterior.xy).T for t in tris])
-            uv_2d = np.unique(v_2d, axis = 0)
-
-            faces = []
-            for t in tris:
-                v = np.vstack(t.exterior.xy).T[:3, :]       # vertices of the triangle
-                f = [np.all(v[0, :] == uv_2d, axis = 1).nonzero()[0][0],
-                     np.all(v[1, :] == uv_2d, axis = 1).nonzero()[0][0],
-                     np.all(v[2, :] == uv_2d, axis = 1).nonzero()[0][0]]
-                faces.append(f)
+            poly = self.offset_polygon(poly, h)
             
-            uv_3d = np.expand_dims(uv_2d[:, 0], 1)*b1 + np.expand_dims(uv_2d[:, 1], 1)*b2 + origin
+            if engine == 'triangle':
+
+                v, seg, c, p = self.get_v_and_seg_for_triangle(poly, recenter = True, rescale = True)
+
+                holes = self.get_holes_for_triangle(poly, recenter = c, rescale = p)
+
+                if holes.shape[0] > 0:
+                    poly_dict = dict(vertices=v, segments=seg, holes=holes)
+                else:
+                    poly_dict = dict(vertices=v, segments=seg)
+
+                tri_dict = triangulate_tri(poly_dict, 'p')
+                
+                v_2d = tri_dict['vertices']*p+c
+                
+                faces = tri_dict['triangles']
+
+            elif engine == 'earcut':
+                v_2d, ind = self.get_v_and_ind_for_earcut(poly)
+
+                faces = triangulate_earcut(v_2d, ind).reshape(-1, 3)
+
+            v_3d = self.transform_2d_to_3d(v_2d, b1, b2, origin)
+
+            v_3d = self.adjust_reservoirs_to_offset(v_3d, h, r)
+
+            self.res_meshes[r] = tm.base.Trimesh(vertices = v_3d, faces = faces).process() # save mesh
+
+        fig, ax = self.plot_facet_boundaries(self.mesh, number_facets = True)
+        for r in self.res_meshes:
+            fig, ax = self.plot_facet_boundaries(r, fig, ax, l_color = 'b', linestyle='--')
+        
+        plt.savefig(self.args.results_folder + 'reservoir_meshes.png')
+        plt.close(fig)
+
+    def transform_3d_to_2d(self, mesh, normal, origin):
+        '''Transform the 3d vertices of a mesh to the 2d projection on a plane
+        defined by normal and origin. The other two base vectors are generated randomly and
+        orthogonal to the normal and between themselves.
+        
+        Returns the coordinates of the mesh vertices projected onto the plane and the base vectors.
+        '''
+        b1 = np.random.rand(3)              # generate random vector
+        b1 = b1 - normal*np.sum(normal*b1)  # make b1 orthogonal to the normal
+        b1 = b1/np.sum(b1**2)**0.5          # normalise b1
+        b2 = np.cross(normal, b1)           # generate b2 = n x b1
+        A = np.vstack((b1, b2, normal)).T   # get x and y bases coefficients
+        
+        plane_coord = np.zeros((0, 2))
+        for v in mesh.vertices:             # for each vertex
+
+            B = np.expand_dims((v - origin), 1)     # get relative coord
             
-            self.res_meshes[r] = tm.base.Trimesh(vertices = uv_3d, faces = faces)
+            plane_coord = np.vstack((plane_coord, np.linalg.solve(A, B).T[0, :2])) # store the plane coordinates
+        
+        return plane_coord, b1, b2
+
+    def transform_2d_to_3d(self, v, b1, b2, o):
+        return np.expand_dims(v[:, 0], 1)*b1 + np.expand_dims(v[:, 1], 1)*b2 + o 
+
+    def get_boundary_rings(self, mesh, fct = 0):
+        '''Returns a list of lists, where each inner list is a ring.
+        For each ring, the correspondent list contains the indexes of
+        the vertices ordered by connection, beginning from the lowest
+        indexed vertex in the ring.
+        
+        If fct is not informed, the first facet of the mesh is considered.'''
+        
+        # ordering the vertices for line string
+        boundary_vertices = np.unique(mesh.facets_boundary[fct])
+        bound_edges = mesh.facets_boundary[fct]
+
+        active = np.ones(bound_edges.shape[0], dtype = bool)
+        v = boundary_vertices[0]
+        ring_list = []
+        ring = [v]
+        while np.any(active):
+            loc = np.logical_and(np.any(bound_edges == v, axis = 1), active).argmax() # where v is found on bound_edges
+            e = bound_edges[loc, :] # get the edge
+            next_v = e[e != v][0]
+            active[loc] = False
+            if next_v in ring: # if the next vertex is already registered, close the ring
+                ring.append(next_v)
+                ring_list.append(ring)
+                v = boundary_vertices[np.argmax(~np.in1d(boundary_vertices, ring))]
+                ring = [v]
+            else:
+                ring.append(next_v)
+                v = next_v
+        
+        return ring_list
+
+    def get_external_ring_index(self, v, ring_list):
+        ring_bounds = [np.vstack((v[ring, :].min(axis = 0),
+                                  v[ring, :].max(axis = 0))) for ring in ring_list]
+        
+        ext_i = 0 # assume exterior ring is the first
+        for i, rbound in enumerate(ring_bounds):
+            if np.all(rbound[0, :] <= ring_bounds[ext_i][0, :]) and np.all(rbound[1, :] >= ring_bounds[ext_i][1, :]):
+                ext_i = i
+        
+        return ext_i
+
+    def save_polygon(self, vertices, ring_list, return_ext_i = False):
+        '''Save shapely Polygon object from vertices and ring list.
+        
+        Automatically identifies exterior and interior rings.'''
+        ext_i = self.get_external_ring_index(vertices, ring_list)
+        
+        interiors = []
+        for i in range(len(ring_list)):
+            if i != ext_i:
+                interiors.append(vertices[ring_list[i], :])
+
+        poly = Polygon(vertices[ring_list[ext_i], :], interiors)
+        
+        if return_ext_i:
+            return poly, ext_i
+        else:
+            return poly
+
+    def offset_polygon(self, poly, h, join_style = 2, tolerance = 0.1):
+    
+        '''Returns the inner offset of a 2D shapely polygon by h, given join style and tolerance.'''
+
+        # shell offset
+        right_offset = poly.exterior.parallel_offset(h, 'right', 2)
+        left_offset  = poly.exterior.parallel_offset(h, 'left' , 2)
+
+        if right_offset.length < left_offset.length:
+            ext_offset = right_offset.simplify(tolerance)
+        else: ext_offset = left_offset.simplify(tolerance)
+
+        # holes offsets
+        int_offset = []
+        for int_line in poly.interiors:
+            right_offset = int_line.buffer(tolerance, join_style = join_style).exterior.parallel_offset(h, 'right', join_style)
+            left_offset  = int_line.buffer(tolerance, join_style = join_style).exterior.parallel_offset(h, 'left' , join_style)
+
+            if right_offset.length > left_offset.length: # holes get larger
+                int_offset.append(right_offset.simplify(0.1))
+            else: int_offset.append(left_offset.simplify(0.1))
+        
+        offset_poly = Polygon(ext_offset.coords, [i.coords for i in int_offset]) # offset polygon
+        
+        return offset_poly
+
+    def get_holes_for_triangle(self, poly, N = 50, recenter = None, rescale = None):
+        '''Returns a (M,2) numpy array with coordinates of points to be used
+        in triangle.triangulate to identify holes in the polygon. All points are inside
+        the convex hull of the polygon.'''
+
+        # looking for holes
+        bound = np.array(poly.bounds).reshape(2, 2)
+
+        ratio = bound.ptp(axis = 0)[0]/bound.ptp(axis = 0)[1]
+
+        if ratio >=1: # if dx > dy
+            nx = int(np.ceil(ratio*N))+1
+            XX, YY = np.meshgrid(np.arange(nx)/(nx-1), np.arange(N+1)/(N))
+        else:
+            ny = int(np.ceil(N/ratio))+1
+            XX, YY = np.meshgrid(np.arange(N+1)/(N), np.arange(ny)/(ny-1))
+
+        samples = np.vstack([XX.ravel(), YY.ravel()]).T*bound.ptp(axis = 0)+bound[0, :]
+
+        far_enough = np.array([Point(samples[i, :]).distance(poly) for i in range(samples.shape[0])]) > np.min(bound.ptp(axis = 0)/(2*N))
+
+        in_hull = np.array([Point(samples[i, :]).within(poly.convex_hull) for i in range(samples.shape[0])])
+
+        in_holes = ~np.array([Point(samples[i, :]).within(poly) for i in range(samples.shape[0])])
+
+        in_holes = np.logical_and(np.logical_and(in_holes, in_hull), far_enough)
+
+        holes = samples[in_holes, :]
+
+        if np.any(in_holes):
+            if recenter is not None:
+                holes -= recenter
+            if rescale is not None:
+                holes /= rescale
+
+        return holes
+
+    def get_v_and_seg_for_triangle(self, poly, recenter = True, rescale = True):
+        
+        v = np.array(poly.exterior.coords)[:-1, :]
+        N = v.shape[0]
+        seg = np.vstack([np.arange(N), np.arange(N)+1]).T % N
+
+        for i in poly.interiors:
+            new_v = np.array(i.coords)[:-1, :]
+            
+            N0 = v.shape[0]
+            Ni = new_v.shape[0]
+            
+            v = np.vstack((v, new_v))
+            
+            new_seg = np.vstack([np.arange(Ni), np.arange(Ni)+1]).T % Ni + N0
+            seg = np.vstack((seg, new_seg))
+
+        # dislocate the vertices so that origin is inside the vertices (avoid errors, for some reason)
+        if recenter:
+            c = v.mean(axis = 0)
+            v -= c
+        if rescale:
+            p = v.ptp(axis = 0)
+            v /= p
+
+        if recenter and rescale:
+            return v, seg, c, p
+        elif recenter:
+            return v, seg, c
+        elif rescale:
+            return v, seg, p
+        else:
+            return v, seg
+
+    def get_v_and_ind_for_earcut(self, poly):
+
+        v = np.array(poly.exterior.coords)[:-1, :]
+        ind = [v.shape[0]]
+
+        for i in poly.interiors:
+            new_v = np.array(i.coords)[:-1, :]
+            
+            ind.append(ind[-1]+new_v.shape[0])
+            
+            v = np.vstack((v, new_v))
+            
+        # getting indices
+        # ext_i = self.get_external_ring_index(v, ring_list)
+
+        # ind = [len(ring_list[ext_i])-1]
+        # ind += [len(ring)-1 for i, ring in enumerate(ring_list) if i != ext_i]
+        # ind = np.array(ind).cumsum()
+
+        # new_v = v[ring_list[ext_i][:-1], :]
+        # new_v = np.vstack((new_v, *(v[ring[:-1], :] for i, ring in enumerate(ring_list) if i != ext_i)))
+
+        return v, ind
+
+    def adjust_reservoirs_to_offset(self, v, h, r):
+        fct = self.res_facets[r]
+        normal = self.mesh.facets_normal[fct, :]
+
+        v -= normal*h # move the reservoir mesh to the offsett plane
+
+        _, d, close_face = tm.proximity.closest_point_naive(self.mesh, v)
+
+        d = np.round(d, decimals = 8)
+
+        too_close = np.logical_and(d < h, ~np.in1d(close_face, self.mesh.facets[fct]))
+        
+        while np.any(too_close):
+
+            n_f = self.mesh.face_normals[close_face[too_close], :] # face normals
+
+            dot_fr = np.sum(normal*n_f, axis = 1, keepdims = True)
+
+            n_l = n_f - dot_fr*normal
+            n_l /= np.linalg.norm(n_l, axis = 1, keepdims = True)
+
+            dot_lf = np.sum(n_l*n_f, axis = 1, keepdims = True)
+            
+            o = self.mesh.vertices[self.mesh.faces[close_face[too_close], 0], :] # planes origins
+
+            t_c = np.sum((o - v[too_close, :])*n_f, axis = 1, keepdims = True)/dot_lf
+
+            t_r = t_c+h/dot_lf
+
+            v[too_close, :] -= (t_r*n_l)
+
+            _, d, close_face = tm.proximity.closest_point_naive(self.mesh, v)
+
+            d = np.round(d, decimals = 8)
+
+            too_close = np.logical_and(d < h, ~np.in1d(close_face, self.mesh.facets[self.res_facets[r]]))
+
+        return v
+
+    def plot_triangles(self, mesh, fig = None, ax = None, l_color = 'k', linestyle = '-', numbers = False, m_color = 'r', markerstyle = 'o'):
+        
+        if ax is None or fig is None:
+            fig, ax = plt.subplots(nrows = 1, ncols = 1, dpi = 200, subplot_kw={'projection':'3d'})
+            ax.set_box_aspect( np.ptp(mesh.bounds, axis = 0) )
+        
+        for e in mesh.edges:
+            ax.plot(mesh.vertices[e, 0], mesh.vertices[e, 1], mesh.vertices[e, 2], linestyle = linestyle, color = l_color)
+        if numbers:
+            for i, f in enumerate(mesh.faces):
+                c = mesh.vertices[f, :].mean(axis = 0)  # mean of the vertices
+                ax.scatter(c[0], c[1], c[2], marker = markerstyle, c = m_color)
+                ax.text(c[0], c[1], c[2], s = i)
+       
+        return fig, ax
+
+
+    def plot_facet_boundaries(self, mesh, fig = None, ax = None, l_color = 'k', linestyle = '-', number_facets = False, m_color = 'r', markerstyle = 'o'):
+
+        if ax is None or fig is None:
+            fig, ax = plt.subplots(nrows = 1, ncols = 1, dpi = 200, subplot_kw={'projection':'3d'})
+            ax.set_box_aspect( np.ptp(mesh.bounds, axis = 0) )
+
+        for fct in range(len(mesh.facets)):
+            for e in mesh.facets_boundary[fct]:
+                ax.plot(mesh.vertices[e, 0], mesh.vertices[e, 1], mesh.vertices[e, 2], linestyle = linestyle, color = l_color)
+            if number_facets:
+                ue = np.unique(mesh.facets_boundary[fct]) # unique vertices
+                c  = mesh.vertices[ue, :].mean(axis = 0)  # mean of the vertices
+                ax.scatter(c[0], c[1], c[2], marker = markerstyle, c = m_color)
+                ax.text(c[0], c[1], c[2], s = fct)
+        
+        plt.tight_layout()
+
+        return fig, ax
 
     def faces_to_facets(self, index_faces):
         ''' get which facet those faces are part of '''
         
-        index_facets = np.zeros(index_faces.shape)
-        
-        for i in range(index_faces.shape[0]):
-            face = index_faces[i]
+        if isinstance(index_faces, (int, float)): # if only one index is passed
+            face = int(index_faces)
             for j in range(len(self.mesh.facets)):
                 facet = self.mesh.facets[j]
                 if face in facet:
-                    index_facets[i] = j
+                    return int(j)
+        elif isinstance(index_faces, (tuple, list, np.ndarray)):
+            index_faces = np.array(index_faces)
+            index_facets = np.zeros(index_faces.shape)
+            for i in range(index_faces.shape[0]):
+                face = index_faces[i]
+                for j in range(len(self.mesh.facets)):
+                    facet = self.mesh.facets[j]
+                    if face in facet:
+                        index_facets[i] = j
 
-        return index_facets
+            return index_facets.astype(int)
 
     def scale_positions(self, x):
         '''Method to scale positions x to the bounding box coordinates.
@@ -759,6 +1021,90 @@ class Geometry:
             face_k[facet] = self.facet_k[i]
         
         self.face_k = copy.copy(face_k)
+        
+    def get_voronoi_diagram(self):
+        print('Getting voronoi connections')
+
+        # generate samples and classify to subvolumes
+        samples = subvolumes.generate_points(self.mesh, int(2**np.ceil(np.log2(1e5))), Sobol(3)) 
+        sv_samples = np.argmax(self.subvol_classifier.predict(self.scale_positions(samples)), axis = 1)
+
+        # calculate the distances between each subvol center and all others
+        dist = np.linalg.norm(self.subvol_center - np.expand_dims(self.subvol_center, axis = 1), axis = -1)
+
+        ridge_points = np.zeros((0, 2))
+       
+        for sv in range(self.n_of_subvols):             # for each subvolume
+            print('Subvolume {}...'.format(sv))
+            i_samples = (sv_samples == sv).nonzero()[0] # which samples are in that subvolume
+            
+            sorted_i = np.argsort(dist[sv, :])[1:]      # see what are the closest other sv
+
+            sv_mesh = self.mesh                         # get total mesh
+            current_vol = sv_mesh.volume                # and total volume
+
+            for i in sorted_i:                          # for each other subvolume
+                normal =  self.subvol_center[sv, :] - self.subvol_center[i, :]      # get the normal direction
+                origin = (self.subvol_center[sv, :] + self.subvol_center[i, :])/2   # get the plane origin
+                
+                sv_mesh = tm.intersections.slice_mesh_plane(sv_mesh, normal, origin, cap = True) # cut the mesh with plane
+                bodies = sv_mesh.split()
+                for b in bodies:
+                    b.fill_holes()
+
+                sv_mesh = tm.boolean.union(bodies, engine = 'scad') 
+                
+                if sv_mesh.volume < current_vol: # if the plane really cuts the mesh, the volume will be reduced
+                    bodies = sv_mesh.split() # get separate bodies, if it is the case
+                    if len(bodies) > 1: # if there is more than one body
+                        n_samples = np.array([b.contains(samples[i_samples, :]).sum() for b in bodies]) # calculate the body with more representation for that subvolume
+                        sv_mesh = bodies[np.argmax(n_samples)]                                          # define the new mesh as that body
+                    
+                    current_vol = sv_mesh.volume
+                    ridge_points = np.vstack((ridge_points, np.array([sv, i])))
+                else:   # if it does not cut the mesh, they are not connected
+                    pass
+        
+        self.ridge_points = np.unique(np.sort(ridge_points, axis = 1), axis = 0).astype(int)
+
+    #     self.save_voronoi()
+        
+    # def save_voronoi(self):
+    #     fig, ax = plt.subplots(nrows = 1, ncols = 1, dpi = 100, figsize = (10, 10), subplot_kw ={'projection':'3d'})
+
+    #     ax.scatter(self.subvol_center[:, 0], self.subvol_center[:, 1], self.subvol_center[:, 2], marker = 'o', c = 'b')
+
+    #     for rp in self.ridge_points:
+    #         p = self.subvol_center[rp, :]
+    #         ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'k')
+        
+    #     for f in range(len(self.mesh.facets)):
+    #         for e in self.mesh.facets_boundary[f]:
+    #             p = self.mesh.vertices[e, :]
+    #             ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'r')
+            
+    #     # plt.savefig('mesh_last.png')
+    #     plt.show()
+
+    #     plt.close(fig)
+
+    #     fig, ax = plt.subplots(nrows = 1, ncols = 1, dpi = 100, figsize = (10, 10), subplot_kw ={'projection':'3d'})
+
+    #     for f in range(len(self.mesh.facets)):
+    #         for e in self.mesh.facets_boundary[f]:
+    #             p = self.mesh.vertices[e, :]
+    #             ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'r')
+        
+    #     ax.scatter(self.subvol_center[:, 0], self.subvol_center[:, 1], self.subvol_center[:, 2], marker = 'o', c = 'b')
+
+    #     for rp in self.ridge_points:
+    #         p = self.subvol_center[rp, :]
+    #         ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'k')
+            
+    #     # plt.savefig('mesh_first.png')
+    #     plt.show()
+
+    #     quit()
         
 class slice_classifier():
     def __init__(self, n, xc = None, a = None):

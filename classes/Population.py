@@ -16,7 +16,7 @@ try:
     from trimesh.ray.ray_pyembree import RayMeshIntersector # FASTER
 except:
     from trimesh.ray.ray_triangle import RayMeshIntersector # SLOWER
-from trimesh.triangles import points_to_barycentric #, closest_point
+from trimesh.triangles import points_to_barycentric
 
 # other
 import sys
@@ -307,7 +307,8 @@ class Population(Constants):
         self.collision_cond = self.get_collision_condition(self.collision_facets)
 
         self.calculate_energy(geometry, phonon, lookup = self.lookup)
-        self.calculate_heat_flux(geometry, phonon, lookup = self.lookup)
+        self.subvol_heat_flux = self.calculate_heat_flux(geometry, phonon, lookup = self.lookup)
+        self.calculate_kappa(geometry, phonon, lookup = self.lookup)
         self.calculate_momentum(geometry, phonon, lookup = self.lookup)
 
     def initialise_reservoirs(self, geometry, phonon):
@@ -634,6 +635,8 @@ class Population(Constants):
         if get_np:
             self.subvol_N_p = subvol_id.sum(axis = 0)
 
+            self.N_p = self.subvol_N_p.sum()
+
         subvol_id = np.argmax(subvol_id, axis = 1)
 
         return subvol_id
@@ -643,10 +646,7 @@ class Population(Constants):
         T = self.subvol_temperature.reshape(-1, 1, 1)
 
         self.occupation_lookup = phonon.calculate_occupation(T, phonon.omega, reference = True)
-        # self.old_reflection_occupation = np.copy(self.occupation_lookup)
-        # self.new_reflection_occupation = np.zeros(self.occupation_lookup.shape)
-        # self.reflection_count          = np.zeros(self.occupation_lookup.shape)
-    
+        
     def save_occupation_lookup(self, phonon):
 
         old_occ = copy.copy(self.occupation_lookup)
@@ -733,8 +733,55 @@ class Population(Constants):
             heat_flux = heat_flux*normalisation
         
         heat_flux = phonon.normalise_to_density(heat_flux)
+        
+        return heat_flux*self.eVpsa2_in_Wm2 # subvol heat flux
+        
+    def calculate_kappa(self, geometry, phonon, lookup = False):
+        if geometry.subvol_type == 'slice':
+            # if the subvol type is slice, the simulation is basically 1d and
+            # kappa can be calculated the usual way
+            T = np.zeros(self.n_of_subvols+2)
+            T[1:-1] = self.subvol_temperature
+            T[[0, -1]] = self.res_facet_temperature
 
-        self.subvol_heat_flux = heat_flux*self.eVpsa2_in_Wm2
+            phi = self.subvol_heat_flux[:, geometry.slice_axis]
+            
+            # local gradients
+            dx = 2*geometry.bounds[:, geometry.slice_axis].ptp()*self.a_in_m/self.n_of_subvols
+            dT = T[2:] - T[:-2]
+
+            # total gradient
+            DX = geometry.bounds[:, geometry.slice_axis].ptp()*self.a_in_m*(1+self.n_of_subvols)/self.n_of_subvols
+            DT = T[-1] - T[0]
+            
+            if lookup:
+                phi_extra = self.calculate_heat_flux(geometry, phonon, False)[:, geometry.slice_axis]
+
+                self.subvol_kappa_particles = -phi_extra*dx/dT
+                self.kappa_particles        = -np.sum(phi_extra*self.subvol_N_p)*(DX/DT)/self.N_p
+                
+                self.subvol_kappa_lookup    = -phi*dx/dT
+                self.kappa_lookup           = -np.sum(phi*self.subvol_volume)*(DX/DT)/geometry.volume
+
+            else:
+                phi_extra = self.calculate_heat_flux(geometry, phonon, True)[:, geometry.slice_axis]
+
+                self.subvol_kappa_particles = -phi*dx/dT
+                self.kappa_particles        = -np.sum(phi*self.subvol_N_p)*(DX/DT)/self.N_p
+                
+                self.subvol_kappa_lookup    = -phi_extra*dx/dT
+                self.kappa_lookup           = -np.sum(phi_extra*self.subvol_volume)*(DX/DT)/geometry.volume
+            
+            self.subvol_kappa_lookup[np.absolute(self.subvol_kappa_lookup) == np.inf] = 0
+            self.subvol_kappa_particles[np.absolute(self.subvol_kappa_particles) == np.inf] = 0
+
+        else:
+            # conductivity not yet defined for more complex geometries
+            self.subvol_kappa_particles = np.ones(self.n_of_subvols)*np.nan
+            self.kappa_particles        = np.nan
+            
+            self.subvol_kappa_lookup    = np.ones(self.n_of_subvols)*np.nan
+            self.kappa_lookup           = np.nan
 
     def calculate_momentum(self, geometry, phonon, lookup = False):
         
@@ -886,39 +933,57 @@ class Population(Constants):
         if positions.shape[0] == 0:
             ts_to_boundary      = np.zeros(0)
             index_facets        = np.zeros(0)
-            boundary_pos        = np.zeros((0, 3))
+            collision_pos        = np.zeros((0, 3))
             
-            return ts_to_boundary, index_facets, boundary_pos
-
-        boundary_pos_t, index_facets = self.find_boundary(positions, velocities, geometry) # find collision in true boundary
-
-        # If there are any numerical errors with collision calculations, delete particles to avoid further problems
-        if indexes_del_extra is not None:
-            if np.any(np.isnan(index_facets)):
-                nan_particles = np.isnan(index_facets)  # bool
-                indexes_del_extra[nan_particles] = True
+            return ts_to_boundary, index_facets, collision_pos
         
-        if indexes_del_extra is not None:
-            normals = np.ones(positions.shape)*np.nan
-            normals[~indexes_del_extra, :] = -geometry.mesh.facets_normal[index_facets[~indexes_del_extra].astype(int), :] # get the normals of the collision facets
+        mesh_pos, mesh_facets = self.find_boundary(positions, velocities, geometry) # find collision in true boundary
+
+        if indexes_del_extra is not None :
+            # If there are any numerical errors with collision calculations, delete particles to avoid further problems
+            if np.any(np.isnan(mesh_facets)):
+                nan_particles = np.isnan(mesh_facets)  # bool
+                indexes_del_extra[nan_particles] = True
+            
+            collision_pos = np.ones(positions.shape   )*np.nan
+            index_facets  = np.ones(positions.shape[0])*np.nan
+
+            collision_pos[~indexes_del_extra, :], index_facets[~indexes_del_extra] = self.apply_offset(mesh_pos[~indexes_del_extra, :], velocities[~indexes_del_extra, :], mesh_facets[~indexes_del_extra], geometry)
         else:
-            normals = -geometry.mesh.facets_normal[index_facets.astype(int), :] # get the normals of the collision facets
-        v_norm  = np.linalg.norm(velocities, axis = 1, keepdims = True)     # get the velocity norm
-
-        offset_dist_norm = - v_norm*self.offset/np.sum(velocities*normals, axis = 1, keepdims = True) # ||d|| = ||v|| h / v . n
-        offset_dist      = - velocities*offset_dist_norm/v_norm                                       # d = ||d|| v/||v||
-
-        boundary_pos_p = boundary_pos_t + offset_dist # the corrected collision point
+            collision_pos, index_facets = self.apply_offset(mesh_pos, velocities, mesh_facets, geometry)
 
         # calculate distances for given particles
-        boundary_dist = np.linalg.norm(boundary_pos_p - positions, axis = 1 ) # distance travelled up to collision
+        boundary_dist = np.linalg.norm(collision_pos - positions, axis = 1 ) # distance travelled up to collision
 
         ts_to_boundary = boundary_dist/( np.linalg.norm(velocities, axis = 1) * self.dt )  # such that particle hits the boundary when n_timesteps == 0 (crosses boundary)
 
         if indexes_del_extra is None:
-            return ts_to_boundary, index_facets, boundary_pos_p
+            return ts_to_boundary, index_facets, collision_pos
         else:
-            return ts_to_boundary, index_facets, boundary_pos_p, indexes_del_extra
+            return ts_to_boundary, index_facets, collision_pos, indexes_del_extra
+
+    def apply_offset(self, collision_pos, velocities, facets, geo):
+
+        normals = -geo.mesh.facets_normal[facets.astype(int), :] # get the normals of the collision facets
+        
+        collision_pos += velocities*self.offset/np.sum(velocities*normals, axis = 1, keepdims = True) # ||d|| = ||v|| h / v . n
+
+        _, close_distance, close_face = tm.proximity.closest_point(geo.mesh, collision_pos) # get closest points on the mesh
+            
+        too_close = np.absolute(self.offset - close_distance) > 1e-8 # check if there is any too close
+
+        while np.any(too_close):
+            extra_offset = np.where(close_distance < self.offset, self.offset - close_distance, 0).reshape(-1, 1) # calculate extra displacement
+
+            facets = np.where(close_distance < self.offset, geo.faces_to_facets(close_face), facets).astype(int) # correct facet index
+
+            collision_pos += extra_offset*(velocities/np.sum(velocities*-geo.mesh.facets_normal[facets, :], axis = 1, keepdims = True)) # adjust position
+
+            _, close_distance, close_face = tm.proximity.closest_point(geo.mesh, collision_pos) # get new closest points on the mesh
+            
+            too_close = np.absolute(self.offset - close_distance) > 1e-8 # check again if there is any too close
+
+        return collision_pos, facets
 
     def delete_particles(self, indexes):
         '''Delete all information about particles according to the given indexes.
@@ -1059,131 +1124,6 @@ class Population(Constants):
         new_modes = new_modes.astype(int)
 
         return new_modes
-
-    # def initialise_unique_sv_col(self, geometry):
-    #     '''Detect all possible combinations of subvolume and collision facet by
-    #        going on every facet and checking to which subvolumes correspond to 
-    #        random samples on the surface.'''
-        
-    #     N = int(1e4) # number of samples
-
-    #     self.unique_sv_col = np.zeros((0, 2))
-
-    #     for i_fct, fct in enumerate(geometry.mesh.facets): # for each facet
-
-    #         if i_fct in self.rough_facets:                   # if the facet is rough
-    #             weights = np.zeros(len(geometry.mesh.faces))      # initialise weights as zeros
-    #             weights[fct] = geometry.mesh.area_faces[fct] # weight by area faces contained in facet
-
-    #             collisions = tm.sample.sample_surface(geometry.mesh, N, face_weight = weights)[0] # generate samples on the facet
-
-    #             u_subvol_id = np.unique(self.get_subvol_id(collisions, geometry)) # detect the subvols of collisions
-
-    #             self.unique_sv_col = np.vstack((self.unique_sv_col, np.vstack((u_subvol_id, np.ones(u_subvol_id.shape[0])*i_fct)).T )) # save the (sv,col) pair
-
-    #     self.unique_sv_col = self.unique_sv_col.astype(int)
-
-    #     # initialise the reflection lookup table as equilibrium
-    #     self.reflection_lookup = self.occupation_lookup[self.unique_sv_col[:, 0], :, :]
-
-    # def distribute_reflected_energy(self, in_modes, in_occ, col_pos, col_fac, geometry, phonon):
-    #     '''col_fac   = the facet where they collided and are leaving from;
-    #        subvol_id = the subvolume they are in;
-    #        phonon    = phonon object with material properties.'''
-
-    #     in_modes = in_modes.astype(int)
-
-    #     N = in_modes.shape[0] # number of particles
-
-    #     col_sv = self.get_subvol_id(col_pos, geometry)
-
-    #     rough_index = [np.nonzero(self.rough_facets == f)[0][0] for f in col_fac] # rough facet index (to get specularity)
-        
-    #     ###########  vectorisation
-
-    #     # index of the respective pair (sv, col_fac)
-    #     i_pair = np.zeros(N)
-    #     for i, pair in enumerate(np.vstack((col_sv, col_fac)).T):
-    #         i_pair[i] = np.all(pair == self.unique_sv_col, axis = 1).nonzero()[0][0]
-
-    #     # find the outgoing specular modes
-    #     c = np.zeros((self.unique_sv_col.shape[0], phonon.number_of_qpoints, phonon.number_of_branches)) # counting matrix (because of degeneracies)
-    #     n = np.zeros((self.unique_sv_col.shape[0], phonon.number_of_qpoints, phonon.number_of_branches)) # occupation matrix
-
-    #     for i, m in enumerate(in_modes):
-    #         if self.true_specular[rough_index[i], m[0], m[1]]:
-    #             row = np.nonzero(np.all(np.insert(m, 0, col_fac[i]) == self.correspondent_modes[:, :3], axis = 1))[0][0]
-    #             out_mode = self.correspondent_modes[row, 3:]
-
-    #             out_col = np.insert(out_mode, 0, i_pair[i]) # outgoing collision  = [i_pair, q, j]
-
-    #             for deg in phonon.degenerate_modes:
-    #                 if out_col[1:] in deg:
-    #                     c[out_col[0], deg[:, 0], deg[:, 1]] += 1 # if degenerate, sum the counting to all degeneracies
-    #                     n[out_col[0], deg[:, 0], deg[:, 1]] += in_occ[i]
-    #                     break
-    #             else:
-    #                 c[out_col[0], out_col[1], out_col[2]] += 1
-    #                 n[out_col[0], out_col[1], out_col[2]] += in_occ[i]
-
-    #     n_eq = phonon.calculate_occupation(np.expand_dims(self.subvol_temperature[self.unique_sv_col[:, 0]], (1, 2)), phonon.omega, reference = True) # equilibrium occupation
-        
-    #     i_facet_rough = [np.nonzero(self.rough_facets == f)[0][0] for f in self.unique_sv_col[:, 1]]
-    #     p             = self.specularity[i_facet_rough, :, :]
-
-    #     self.reflection_lookup = np.where(c == 0, self.reflection_lookup, n*p/c + (1-p)*n_eq)
-
-        ######################################
-
-        # updating pairs that have collisions
-        # for i_pair, pair in enumerate(self.unique_sv_col): # for each (sv, col) pair in the collisions happening
-        #     start = time.time()
-
-        #     i = np.logical_and(col_sv == pair[0], col_fac == pair[1]) # get with particles are colliding in this pair
-        #     i = np.nonzero(np.logical_and(i, p > 0))[0]               # the only ones that need to be calculated are the specular ones
-        #                                                               # (the diffuse ones are absorbed to equilibrium)
-
-        #     if i.shape[0] > 0:                                        # if there are collisions for this pair
-        #         in_data = in_modes[i, :]                              # get their modes
-
-        #         # find the outgoing specular modes
-        #         out_data = np.zeros(in_data.shape)
-        #         for i_m, m in enumerate(in_data):
-        #             row = np.nonzero(np.all(np.insert(m, 0, pair[1]) == self.correspondent_modes[:, :3], axis = 1))[0][0]
-        #             out_data[i_m, :] = self.correspondent_modes[row, 3:]
-
-        #         out_data = out_data.astype(int)
-
-        #         # store energy transfer
-        #         spec_occ_sum = np.zeros(phonon.omega.shape) # initialise the new occupation matrix
-        #         for i_p, ii in enumerate(i):                # for each particle 
-        #             for deg in phonon.degenerate_modes:
-        #                 if out_data[i_p, :] in deg:
-        #                     # if the outgoing mode is degenerate sum the occupation of the specular part of the reflection for all of them
-        #                     spec_occ_sum[deg[:, 0], deg[:, 1]] += in_occ[ii]*p[ii]
-        #                     break
-        #             else:
-        #                 # if not degenerate, sum only to the only ougoing data
-        #                 spec_occ_sum[out_data[i_p, 0], out_data[i_p, 1]] += in_occ[ii]*p[ii]
-                
-        #         # averaging
-        #         c = np.zeros(phonon.omega.shape) # counting matrix (because of degeneracies)
-
-        #         u_m, count = np.unique(out_data, axis = 0, return_counts = True) # unique modes reflecting and how many times
-                
-        #         for i_m, m in enumerate(u_m):
-        #             for deg in phonon.degenerate_modes:
-        #                 if m in deg:
-        #                     c[deg[:, 0], deg[:, 1]] += count[i_m] # if degenerate, sum the counting to all degeneracies
-        #                     break
-        #             else:
-        #                 c[m[0], m[1]] += count[i_m]
-                
-        #         spec = self.specularity[(self.rough_facets == pair[1]).nonzero()[0], :, :] # specularity of reflections on this facet
-        #         n_eq = phonon.calculate_occupation(self.subvol_temperature[pair[0]], phonon.omega, reference = True) # equilibrium occupation
-
-        #         self.reflection_lookup[i_pair, :, :] = np.where(c == 0, self.reflection_lookup[i_pair, :, :], spec_occ_sum/c + (1-spec)*n_eq)
-        #         print(i_pair, time.time()-start)
 
     def find_specular_correspondences(self, geo, phonon):
         facets = self.rough_facets
@@ -1359,15 +1299,6 @@ class Population(Constants):
         # update v
         new_group_vel  = phonon.group_vel[new_modes[:, 0], new_modes[:, 1], :]
 
-        # update omega
-        # new_omega      = phonon.omega[new_modes[:, 0], new_modes[:, 1]]
-
-        # update occupation
-        # new_occupation = self.old_reflection_occupation[subvol_id, new_modes[:, 0], new_modes[:, 1]]
-        # start = time.time()
-        # new_occupation = self.distribute_reflected_energy(new_modes, collision_facets, subvol_id, phonon)
-        # print('Distribute reflected energy, Time:', time.time() - start)
-
         # find next scattering event
         (new_ts_to_boundary     ,
          new_collision_facets   ,
@@ -1413,16 +1344,16 @@ class Population(Constants):
 
         new_n_timesteps = copy.copy(self.n_timesteps) # (N_p,)
 
-        col_track_n = np.zeros(0)
-        col_track_fac = np.zeros(0)
-        col_track_pos = np.zeros((0, 3))
-        col_track_mode = np.zeros((0, 2))
+        # col_track_n = np.zeros(0)
+        # col_track_fac = np.zeros(0)
+        # col_track_pos = np.zeros((0, 3))
+        # col_track_mode = np.zeros((0, 2))
 
         self.N_leaving = np.zeros(self.n_of_reservoirs, dtype = int)
 
         # while there are any particles with the timestep not completely calculated
         while np.any(calculated_ts < 1):
-
+            
             # I. Deleting particles entering reservoirs
 
             # identifying particles hitting rough facets
@@ -1500,12 +1431,6 @@ class Population(Constants):
             indexes_ref = np.logical_and(indexes_ref, ~indexes_del_extra)
             
             if np.any(indexes_ref):
-                col_track_mode = np.vstack((col_track_mode, self.modes[indexes_ref, :]))
-                col_track_n    = np.concatenate((col_track_n, self.occupation[indexes_ref]))
-                col_track_fac  = np.concatenate((col_track_fac, self.collision_facets[indexes_ref]))
-                col_track_pos  = np.vstack((col_track_pos, self.positions[indexes_ref, :]))
-
-
                 (self.modes[indexes_ref, :]              ,
                  self.positions[indexes_ref, :]          ,
                  self.group_vel[indexes_ref, :]          ,
@@ -1543,10 +1468,6 @@ class Population(Constants):
             
         self.n_timesteps = copy.copy(new_n_timesteps)
         
-        # start = time.time()
-        # self.distribute_reflected_energy(col_track_mode, col_track_n, col_track_pos, col_track_fac, geometry, phonon)
-        # print('Distribute energy, Time:', time.time() - start)
-
         if self.n_of_reservoirs > 0:
             
             self.res_energy_balance   = phonon.normalise_to_density(self.res_energy_balance)
@@ -1622,7 +1543,8 @@ class Population(Constants):
         if ( self.current_timestep % self.n_dt_to_conv) == 0:
             
             
-            self.calculate_heat_flux(geometry, phonon, lookup = self.lookup)
+            self.subvol_heat_flux = self.calculate_heat_flux(geometry, phonon, lookup = self.lookup)
+            self.calculate_kappa(geometry, phonon, lookup = self.lookup)
             self.calculate_momentum(geometry, phonon, lookup = self.lookup)
 
             self.write_convergence()      # write data on file
@@ -1705,6 +1627,15 @@ class Population(Constants):
         ax.set_ylim(geometry.bounds[:, 1])
         ax.set_zlim(geometry.bounds[:, 2])
 
+        for f in range(len(geometry.mesh.facets)):
+            for e in geometry.mesh.facets_boundary[f]:
+                p = geometry.mesh.vertices[e, :]
+                # ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'gray')
+                # testing in a geometry with straight lines, so this makes sense in this case:
+                equal_coord = p[0, :] == p[1, :]
+                if np.any(np.isin(p[0, equal_coord], self.bounds[0, :])):
+                    ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'gray')
+
         graph = ax.scatter(self.positions[:, 0],
                            self.positions[:, 1],
                            self.positions[:, 2],
@@ -1713,6 +1644,16 @@ class Population(Constants):
                            vmax = vmax         ,
                            c    = colors       ,
                            cmap = self.colormap)
+        
+        for f in range(len(geometry.mesh.facets)):
+            for e in geometry.mesh.facets_boundary[f]:
+                p = geometry.mesh.vertices[e, :]
+                # ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'gray')
+                # testing in a geometry with straight lines, so this makes sense in this case:
+                equal_coord = p[0, :] == p[1, :]
+                if np.any(np.isin(p[0, equal_coord], self.bounds[1, :])):
+                    ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'gray')
+        
         # fig.colorbar(graph)
 
         # graph.set_animated(True)
@@ -1787,6 +1728,12 @@ class Population(Constants):
 
         ax = fig.add_subplot(111, projection='3d')
         ax.set_box_aspect( np.ptp(geometry.bounds, axis = 0) )
+        
+        for f in range(len(geometry.mesh.facets)):
+            for e in geometry.mesh.facets_boundary[f]:
+                p = geometry.mesh.vertices[e, :]
+                ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'k')
+        
         graph = ax.scatter(self.positions[:, 0],
                            self.positions[:, 1],
                            self.positions[:, 2],
@@ -1873,8 +1820,14 @@ class Population(Constants):
             line += ' Momnt y Sv {:>2d} '.format(i)
             line += ' Momnt z Sv {:>2d} '.format(i)
         for i in range(self.n_of_subvols):
-            line += ' Np Sv {:>2d}  '.format(i)
-        
+            line += ' Np Sv {:>3d} '.format(i)
+        line += ' Kappa partic '
+        line += ' Kappa lookup '
+        for i in range(self.n_of_subvols):
+            line += ' K Pt Sv {:>3d} '.format(i)
+        for i in range(self.n_of_subvols):
+            line += ' K Lu Sv {:>3d} '.format(i)
+
         line += '\n'
 
         self.f.write(line)
@@ -1898,7 +1851,7 @@ class Population(Constants):
             for i in range(self.n_of_reservoirs):
                 line += np.array2string(self.res_momentum_balance[i, :], formatter = {'float_kind':'{:>14.6e}'.format}).strip('[]') + ' '
 
-        line += '{:>10d} '.format( self.omega.shape[0] )  # number of particles
+        line += '{:>10d} '.format( self.N_p )  # number of particles
 
         line += np.array2string(self.subvol_temperature, formatter = {'float_kind':'{:>9.3f}'.format} ).strip('[]') + ' '
         line += np.array2string(self.subvol_energy     , formatter = {'float_kind':'{:>12.5e}'.format}).strip('[]') + ' '
@@ -1908,8 +1861,14 @@ class Population(Constants):
         for i in range(self.n_of_subvols):
             line += np.array2string(self.subvol_momentum[i, :] , formatter = {'float_kind':'{:>14.6e}'.format}).strip('[]') + ' '
 
-        line += np.array2string(self.subvol_N_p        , formatter = {'int'       :'{:>10d}'.format}  ).strip('[]') + ' '
-        
+        line += np.array2string(self.subvol_N_p.astype(int), formatter = {'int':'{:>10d}'.format}  ).strip('[]') + ' '
+
+        line += '{:>13.6e} '.format(self.kappa_particles)
+        line += '{:>13.6e} '.format(self.kappa_lookup)
+
+        line += np.array2string(self.subvol_kappa_particles, formatter = {'float_kind':'{:>12.5e}'.format}  ).strip('[]') + ' '
+        line += np.array2string(self.subvol_kappa_lookup   , formatter = {'float_kind':'{:>12.5e}'.format}  ).strip('[]') + ' '
+
         line += '\n'
 
         filename = self.results_folder_name+'convergence.txt'
@@ -1927,7 +1886,7 @@ class Population(Constants):
         # saving final particle states: modes, positions, subvol id and occupation number.
         # Obs.: phonon properties of particles can be retrieved by mode information and subvol temperature
         
-        # filename = self.results_folder_name + 'particle_data_{:.0f}ps.txt'.format(self.t)
+        #### PARTICLE DATA ####
         filename = self.results_folder_name + 'particle_data.txt'
 
         header ='Particles final state data \n' + \
@@ -1942,8 +1901,7 @@ class Population(Constants):
         # comma separated
         np.savetxt(filename, data, '%d, %d, %.3f, %.3f, %.3f, %.6e', delimiter = ',', header = header)
         
-        # modes data
-        # filename = self.results_folder_name + 'modes_data_{:.0f}ps.txt'.format(self.t)
+        #### MODE DATA ####
         filename = self.results_folder_name + 'modes_data.txt'
         
         header ='Occupation data for each subvolume \n' + \
@@ -1956,61 +1914,26 @@ class Population(Constants):
 
         np.savetxt(filename, data, '%.6e', delimiter = ',', header = header)
 
-        # saving final subvol states: temperatures and heat flux
+        #### MEAN AND STDEV QUANTITIES ####
+        if self.current_timestep > 0:
+            filename = self.results_folder_name + 'mean_and_sigma.txt'
 
-        filename = self.results_folder_name + 'subvol_data.txt'
+            header ='subvols final state data \n' + \
+                    'Date and time: {}\n'.format(time) + \
+                    'hdf file = {}, POSCAR file = {}\n'.format(self.args.hdf_file, self.args.poscar_file) + \
+                    'subvol id, subvol position, subvol volume, T [K], sigma T [K], HF x [W/m^2], sigma HF [W/m^2], HF y [W/m^2], sigma HF [W/m^2], HF z [W/m^2], sigma HF [W/m^2], k mean pt, k std pt, k mean lu, k std lu'
 
-        header ='subvols final state data \n' + \
-                'Date and time: {}\n'.format(time) + \
-                'hdf file = {}, POSCAR file = {}\n'.format(self.args.hdf_file, self.args.poscar_file) + \
-                'subvol id, subvol volume, temperature [K], heat flux x, y, and z [W/m^2]'
-
-        data = np.hstack( (np.arange(self.n_of_subvols).reshape(-1, 1),
-                           geometry.subvol_center, 
-                           self.subvol_volume.reshape(-1, 1),
-                           self.subvol_temperature.reshape(-1, 1),
-                           self.subvol_heat_flux) )
-        
-        # comma separated
-        np.savetxt(filename, data, '%d, %.3e, %.3e, %.3e, %.3e, %.3f, %.3e, %.3e, %.3e', delimiter = ',', header = header)
-
-####################################################
-
-#  ▄  █ ▄█ ▄█▄           ▄▄▄▄▄   ▄      ▄     ▄▄▄▄▀     ██▄   █▄▄▄▄ ██   ▄█▄    ████▄    ▄   ▄███▄     ▄▄▄▄▄   
-# █   █ ██ █▀ ▀▄        █     ▀▄  █      █ ▀▀▀ █        █  █  █  ▄▀ █ █  █▀ ▀▄  █   █     █  █▀   ▀   █     ▀▄ 
-# ██▀▀█ ██ █   ▀      ▄  ▀▀▀▀▄ █   █ ██   █    █        █   █ █▀▀▌  █▄▄█ █   ▀  █   █ ██   █ ██▄▄   ▄  ▀▀▀▀▄   
-# █   █ ▐█ █▄  ▄▀      ▀▄▄▄▄▀  █   █ █ █  █   █         █  █  █  █  █  █ █▄  ▄▀ ▀████ █ █  █ █▄   ▄▀ ▀▄▄▄▄▀    
-#    █   ▐ ▀███▀               █▄ ▄█ █  █ █  ▀          ███▀    █      █ ▀███▀        █  █ █ ▀███▀             
-#   ▀                           ▀▀▀  █   ██                    ▀      █               █   ██                   
-#                                                                    ▀                                               
-
-# This is the edge of the code. Here beyond are methods that were coded, but substituted or outrightly excluded.
-# I am a little reluctant abound deleting them though, since they can evenetually be useful in de future, or
-# give some hint of some coding problem I may have. But they are really not being used.
-
-################# 
-    
-    
-
-    
-    def print_sim_info(self, geometry, phonon):
-        print('---------- o ----------- o ------------- o ------------')
-        print('Simulation Info:')
-
-        T_max = self.res_facet_temperature.max()
-
-        Tqj = np.hstack((np.ones(phonon.number_of_active_modes).reshape(-1, 1)*T_max, phonon.unique_modes))
-        tau = phonon.lifetime_function(Tqj)
-        v = np.absolute(phonon.group_vel[phonon.unique_modes[:, 0], phonon.unique_modes[:, 1], self.slice_axis])
-
-        kn = v*tau/self.slice_length
-
-        maximum_n_slices = int(np.floor(geometry.bounds[:, self.slice_axis].ptp()/(v.max()*self.dt)))
-
-        prob_enter = 100*v*self.dt/self.slice_length
-        prob_enter = np.where(prob_enter>100, 100, prob_enter)
-
-        print('Slice Knudsen number: Max = {:.3e}, Min = {:.3e}'.format(kn.max(), kn.min()))
-        print('Maximum number of slices: {}'.format(maximum_n_slices))
-        print('Probability of entering: Max = {:.3f}%, Min = {:.3f}%'.format(prob_enter.max(), prob_enter.min()))
-        print('---------- o ----------- o ------------- o ------------')
+            data = np.hstack((np.arange(self.n_of_subvols).reshape(-1, 1),
+                              geometry.subvol_center,
+                              self.subvol_volume.reshape(-1, 1),
+                              self.view.mean_T.reshape(-1, 1),
+                              self.view.std_T.reshape(-1, 1),
+                              self.view.mean_sv_phi.reshape(-1, 3) ,
+                              self.view.std_sv_phi.reshape(-1, 3)  ,
+                              self.view.mean_sv_k_pt.reshape(-1, 1),
+                              self.view.std_sv_k_pt.reshape(-1, 1) ,
+                              self.view.mean_sv_k_lu.reshape(-1, 1),
+                              self.view.std_sv_k_lu.reshape(-1, 1) ))
+            
+            # comma separated
+            np.savetxt(filename, data, '%d, %.3e, %.3e, %.3e, %.3e, %.3f, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e', delimiter = ',', header = header)

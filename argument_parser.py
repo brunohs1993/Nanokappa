@@ -65,7 +65,7 @@ def initialise_parser():
     parser.add_argument('--reservoir_gen' , '-gn' , default = ['fixed_rate'], choices = ['fixed_rate', 'one_to_one'],
                         type = str  , nargs = '*' , help    = 'Set the type of generation of particles in the reservoir. "fixed_rate" means the generation is independent from the particles leaving the domain. '+
                                                               '"one_to_one" means that a particle will be generated only when a particle leaves the domain (one leaves, one enters).')
-    parser.add_argument('--offset'        , '-os' , default = [2e-8],
+    parser.add_argument('--offset'        , '-os' , default = [1e-3],
                         type = float, nargs = 1   , help    = 'The offset margin from facets to avoid problems with Trimesh collision detection. Default is 2*trimesh.tol.merge = 2e-8.')
 
     parser.add_argument('--energy_normal' , '-en' , default = ['fixed'],
@@ -84,6 +84,9 @@ def initialise_parser():
                                                                0 for False (no lookup) or any other value for True.')
     parser.add_argument('--conv_crit'     , '-cc' , default = [1e-6],
                         type = float, nargs = 1   , help    = 'Value of convergence criteria, calculated as the norm of phonon number variation.')
+
+    parser.add_argument('--output'        , '-op' , default = 'file',
+                        type = str  , nargs = 1   , help    = 'Where to print the output. "file" to save it in outuput.txt. "screen" to print on terminal.')
 
     parser.add_argument('--mat_folder'      , '-mf', required = True   , type = str, nargs = '*', help     = 'Set folder with material data.'  ) # lattice properties
     parser.add_argument('--poscar_file'     , '-pf', required = True   , type = str, nargs = '*', help     = 'Set the POSCAR file to be read.' ) # lattice properties
@@ -134,12 +137,7 @@ def generate_results_folder(args):
     loc = args.results_location
     
     # define folder separator symbol and adjust folder path according to opperating system
-    if sys.platform == 'win32':
-        folder_sep = '\\'
-        loc = loc.replace('/', folder_sep)
-    elif sys.platform in ['linux', 'linux2', 'darwin']:
-        folder_sep = '/'
-        loc = loc.replace('\\', folder_sep)
+    loc, folder_sep = correct_folder_separator(loc)
 
     if loc == 'local':
         args.results_location = os.getcwd()     # stay in the same folder
@@ -158,6 +156,15 @@ def generate_results_folder(args):
     folder = args.results_folder
 
     if folder != '':    # if a folder name is specified
+
+        folder, folder_sep = correct_folder_separator(folder)
+
+        subfolders = folder.split(folder_sep)
+
+        if len(subfolders) > 1: # if there are subfolders
+            args.results_location += folder_sep + folder_sep.join(subfolders[:-1]) # add subfolders to results_location path
+            os.makedirs(args.results_location, exist_ok=True)                      # create subfolders if they don't exist
+            folder = subfolders[-1]                                                # save new folder name
 
         folders = os.listdir(args.results_location) # get folders in working directory
     
@@ -180,3 +187,14 @@ def generate_results_folder(args):
         args.results_folder = args.results_location + folder_sep
 
     return args
+
+def correct_folder_separator(path):
+
+    if sys.platform == 'win32':
+        folder_sep = '\\'
+        path = path.replace('/', folder_sep)
+    elif sys.platform in ['linux', 'linux2', 'darwin']:
+        folder_sep = '/'
+        path = path.replace('\\', folder_sep)
+    
+    return path, folder_sep
