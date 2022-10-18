@@ -754,23 +754,25 @@ class Population(Constants):
             DX = geometry.bounds[:, geometry.slice_axis].ptp()*self.a_in_m*(1+self.n_of_subvols)/self.n_of_subvols
             DT = T[-1] - T[0]
             
-            if lookup:
-                phi_extra = self.calculate_heat_flux(geometry, phonon, False)[:, geometry.slice_axis]
+            with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
+                if lookup:
+                    phi_extra = self.calculate_heat_flux(geometry, phonon, False)[:, geometry.slice_axis]
 
-                self.subvol_kappa_particles = -phi_extra*dx/dT
-                self.kappa_particles        = -np.sum(phi_extra*self.subvol_N_p)*(DX/DT)/self.N_p
-                
-                self.subvol_kappa_lookup    = -phi*dx/dT
-                self.kappa_lookup           = -np.sum(phi*self.subvol_volume)*(DX/DT)/geometry.volume
+                    self.subvol_kappa_particles = -phi_extra*dx/dT
+                    self.kappa_particles        = -np.sum(phi_extra*self.subvol_N_p)*(DX/DT)/self.N_p
+                    
+                    self.subvol_kappa_lookup    = -phi*dx/dT
+                    self.kappa_lookup           = -np.sum(phi*self.subvol_volume)*(DX/DT)/geometry.volume
 
-            else:
-                phi_extra = self.calculate_heat_flux(geometry, phonon, True)[:, geometry.slice_axis]
+                else:
+                    
+                    phi_extra = self.calculate_heat_flux(geometry, phonon, True)[:, geometry.slice_axis]
 
-                self.subvol_kappa_particles = -phi*dx/dT
-                self.kappa_particles        = -np.sum(phi*self.subvol_N_p)*(DX/DT)/self.N_p
-                
-                self.subvol_kappa_lookup    = -phi_extra*dx/dT
-                self.kappa_lookup           = -np.sum(phi_extra*self.subvol_volume)*(DX/DT)/geometry.volume
+                    self.subvol_kappa_particles = -phi*dx/dT
+                    self.kappa_particles        = -np.sum(phi*self.subvol_N_p)*(DX/DT)/self.N_p
+                    
+                    self.subvol_kappa_lookup    = -phi_extra*dx/dT
+                    self.kappa_lookup           = -np.sum(phi_extra*self.subvol_volume)*(DX/DT)/geometry.volume
             
             self.subvol_kappa_lookup[np.absolute(self.subvol_kappa_lookup) == np.inf] = 0
             self.subvol_kappa_particles[np.absolute(self.subvol_kappa_particles) == np.inf] = 0

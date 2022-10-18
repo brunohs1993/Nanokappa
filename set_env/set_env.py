@@ -46,7 +46,7 @@ with open('set_env/install_log.txt', 'w') as f:
         subprocess.run('conda run -n nanokappa python -m pip install'+pip_mods_str, shell = True, stdout = f)
 
 print('Running test...')
-cmd = 'echo Do not close this window... & conda run -n {}nanokappa python nanokappa.py -ff {}parameters_test.txt'.format(main_path)
+cmd = 'echo Do not close this window... & conda run -n nanokappa python {}nanokappa.py -ff {}parameters_test.txt'.format(main_path, main_path)
 if sys.platform in ['linux', 'linux2']:
     sp = subprocess.Popen('gnome-terminal --wait -- ' + cmd, shell = True)
     sp.wait()

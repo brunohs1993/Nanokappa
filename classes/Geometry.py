@@ -10,11 +10,14 @@ from scipy.stats.qmc import Sobol
 # geometry
 import trimesh as tm
 import routines.subvolumes as subvolumes
-
 from shapely.geometry import Polygon, Point
-
-from triangle import triangulate as triangulate_tri
 from mapbox_earcut import triangulate_float32 as triangulate_earcut
+try:
+    from triangle import triangulate as triangulate_tri
+    # soft dependency, not really needed. Maybe add it as an option, like trimesh?
+    # I tested both earcut and triangle and I don't see much difference, but I'll keep it for now. 
+except: pass
+
 
 # other
 import sys
@@ -59,7 +62,7 @@ class Geometry:
         self.check_connections(args)   # check if all connections are valid and adjust vertices
         self.get_plane_k()
         # self.get_offset_mesh()
-        self.save_reservoir_meshes()   # save meshes of each reservoir after adjust vertices
+        self.save_reservoir_meshes(engine = 'earcut')   # save meshes of each reservoir after adjust vertices
         self.set_subvolumes()          # define subvolumes and save their meshes and properties
         # self.get_voronoi_diagram()
 
