@@ -61,7 +61,7 @@ The `(nanokappa)` word will appear on the command line, signaling the conda envi
         conda install -c conda-forge h5py trimesh phonopy pyembree
         mkdir nanokappa
         cd nanokappa
-        git clone https://github.com/brunohs1993/MultiscaleThermalCond
+        git clone https://github.com/brunohs1993/Nanokappa
         conda install -c conda-forge ipython -->
 
 # Running a simulation

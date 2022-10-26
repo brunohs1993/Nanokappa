@@ -18,6 +18,7 @@ except:
     from trimesh.ray.ray_triangle import RayMeshIntersector # SLOWER
 from trimesh.triangles import points_to_barycentric
 
+
 # other
 import sys
 import os
@@ -127,11 +128,14 @@ class Population(Constants):
         
         self.residue   = np.ones(self.occupation_lookup.shape)*2*self.conv_crit
 
+        self.plot_figures(geometry, property_plot = self.args.fig_plot, colormap = self.args.colormap[0])
+
         print('Creating convergence file...')
-        self.open_convergence()
-        self.write_convergence()
+        self.open_convergence(geometry)
+        self.write_convergence(geometry)
 
         self.view = Visualisation(self.args, geometry, phonon) # initialising visualisation class
+        self.view.preprocess()
 
         if len(self.rt_plot) > 0:
             print('Starting real-time plot...')
@@ -141,6 +145,8 @@ class Population(Constants):
         
     def initialise_modes(self, phonon):
         '''Generate first modes.'''
+
+        print('Assigning modes...')
 
         # creating unique mode matrix
         self.unique_modes = np.vstack(np.where(~phonon.inactive_modes_mask)).T
@@ -284,7 +290,7 @@ class Population(Constants):
         self.omega, self.group_vel, self.wavevectors = self.assign_properties(self.modes, phonon)
         
         # initialising slice id
-        self.subvol_id = self.get_subvol_id(self.positions, geometry)
+        self.subvol_id = self.get_subvol_id(self.positions, geometry, verbose = True)
 
         # assign temperatures
         self.temperatures, self.subvol_temperature = self.assign_temperatures(self.positions, geometry)
@@ -297,6 +303,7 @@ class Population(Constants):
         self.energies          = self.hbar*self.omega*self.occupation
         self.momentum          = self.hbar*self.wavevectors*self.occupation.reshape(-1, 1)
         
+        print('Getting first boundary collisions...')
         # getting scattering arrays
         (self.n_timesteps        ,
          self.collision_facets   ,
@@ -306,6 +313,7 @@ class Population(Constants):
 
         self.collision_cond = self.get_collision_condition(self.collision_facets)
 
+        print('Initialising local quantities...')
         self.calculate_energy(geometry, phonon, lookup = self.lookup)
         self.subvol_heat_flux = self.calculate_heat_flux(geometry, phonon, lookup = self.lookup)
         self.calculate_kappa(geometry, phonon, lookup = self.lookup)
@@ -557,6 +565,8 @@ class Population(Constants):
     def assign_properties(self, modes, phonon):
         '''Get properties from the indexes.'''
 
+        print('Assigning properties...')
+
         omega      = phonon.omega[ modes[:,0], modes[:,1] ]        # THz * rad
         group_vel  = phonon.group_vel[ modes[:,0], modes[:,1], : ] # THz * angstrom
         wavevector = phonon.wavevectors[modes[:, 0], :]
@@ -565,6 +575,8 @@ class Population(Constants):
 
     def assign_temperatures(self, positions, geometry):
         '''Atribute initial temperatures imposing fixed temperatures on first and last slice. Constant at T_cold unless specified otherwise.'''
+
+        print('Assigning temperatures...')
 
         number_of_particles = positions.shape[0]
         key = self.T_distribution
@@ -618,16 +630,21 @@ class Population(Constants):
         
         collision_cond = np.empty(collision_facets.shape, dtype = str) # initialise as an empty string array
         
-        collision_cond[ np.isnan(collision_facets)] = 'N'              # identify all nan facets with 'N'
+        nan_i = np.isnan(collision_facets)
 
-        non_nan_facets = collision_facets[~np.isnan(collision_facets)].astype(int) # get non-nan facets
+        collision_cond[nan_i] = 'N'              # identify all nan facets with 'N'
+
+        non_nan_facets = collision_facets[~nan_i].astype(int) # get non-nan facets
         
-        collision_cond[~np.isnan(collision_facets)] = self.bound_cond[non_nan_facets] # save their condition
+        collision_cond[~nan_i] = self.bound_cond[non_nan_facets] # save their condition
 
         return collision_cond
 
-    def get_subvol_id(self, positions, geometry, get_np = True):
+    def get_subvol_id(self, positions, geometry, get_np = True, verbose = False):
         
+        if verbose:
+            print('Identifying subvols...')
+
         scaled_positions = geometry.scale_positions(positions) # scale positions between 0 and 1
 
         subvol_id = geometry.subvol_classifier.predict(scaled_positions) # get subvol_id from the model
@@ -643,6 +660,8 @@ class Population(Constants):
 
     def initialise_occupation_lookup(self, phonon):
         
+        print('Initialising BTE solution table...')
+
         T = self.subvol_temperature.reshape(-1, 1, 1)
 
         self.occupation_lookup = phonon.calculate_occupation(T, phonon.omega, reference = True)
@@ -763,9 +782,7 @@ class Population(Constants):
                     
                     self.subvol_kappa_lookup    = -phi*dx/dT
                     self.kappa_lookup           = -np.sum(phi*self.subvol_volume)*(DX/DT)/geometry.volume
-
                 else:
-                    
                     phi_extra = self.calculate_heat_flux(geometry, phonon, True)[:, geometry.slice_axis]
 
                     self.subvol_kappa_particles = -phi*dx/dT
@@ -778,12 +795,21 @@ class Population(Constants):
             self.subvol_kappa_particles[np.absolute(self.subvol_kappa_particles) == np.inf] = 0
 
         else:
-            # conductivity not yet defined for more complex geometries
-            self.subvol_kappa_particles = np.ones(self.n_of_subvols)*np.nan
-            self.kappa_particles        = np.nan
-            
-            self.subvol_kappa_lookup    = np.ones(self.n_of_subvols)*np.nan
-            self.kappa_lookup           = np.nan
+            # renaming the indices to keep the code readable
+            i = geometry.subvol_connections[:,0]
+            j = geometry.subvol_connections[:,1]
+
+            # local gradients
+            dx = geometry.subvol_center[j, :] - geometry.subvol_center[i, :] # (C, 3)
+            n  = dx/np.linalg.norm(dx, axis = 1, keepdims = True)              # normalised dx (C, 3)
+            dT = self.subvol_temperature[j] - self.subvol_temperature[i]       # (C,)
+
+            phi = (self.subvol_heat_flux[i, :] + self.subvol_heat_flux[j, :])/2 # (C,3)
+
+            phi_dot_n = np.sum(phi*n, axis = 1)
+
+            with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
+                self.svcon_kappa = np.where(dT == 0, 0, -phi_dot_n*np.linalg.norm(dx, axis = 1)*self.a_in_m/dT)
 
     def calculate_momentum(self, geometry, phonon, lookup = False):
         
@@ -850,84 +876,11 @@ class Population(Constants):
 
         if np.any(nan_particles):
             (all_boundary_pos[nan_particles, :],
-             all_facets[nan_particles]         ) = self.find_collision_naive(positions[nan_particles, :] ,
-                                                                             velocities[nan_particles, :],
-                                                                             geometry                    )
+             _,
+             all_facets[nan_particles]         ) = geometry.find_boundary_naive(positions[nan_particles, :] ,
+                                                                             velocities[nan_particles, :])
         
         return all_boundary_pos, all_facets
-
-    def find_collision_naive(self, x, v, geo):
-        '''To be used when trimesh fails to find it with ray casting.
-           It uses vector algebra to find the collision position in every facet,
-           and pick the one that hits first between its vertices.'''
-
-        n = -geo.mesh.facets_normal # normals - (F, 3)
-        k = geo.facet_k
-
-        with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
-            #          (N, F)                                    (F,)            (N,F)
-            t = -(np.sum(x.reshape(-1, 1, 3)*n, axis = 2)+k)/np.sum(v.reshape(-1, 1, 3)*n, axis = 2)
-        
-        t_valid = t >= 0
-
-        t = np.where(t_valid, t, np.inf) # update t - (N, F)
-        
-        xc = np.ones(x.shape)*np.nan    # (N, 3)
-        fc = np.ones(x.shape[0])*np.nan # (N,)
-
-        active = np.isnan(fc) # generate a follow up boolean mask - (N,)
-        
-        out = np.all(~t_valid, axis = 1) # particles that are out would result in an infinite loop
-        active[out] = False              # those that are out are not active
-
-        while np.any(active):
-            t_min = np.amin(t[active, :], axis = 1, keepdims = True) # get minimum t
-
-            cand_f = np.argmax(t[active, :] == t_min, axis = 1)      # which facet
-            
-            cand_xc = x[active, :]+t_min*v[active, :] # candidate collision positions based on t_min
-
-            for f in range(len(geo.mesh.facets)): # for each facet
-                f_particles = cand_f == f       # particles that may hit that facet
-                if np.any(f_particles):
-                    faces = geo.mesh.facets[f] # indexes of faces part of that facet
-                    
-                    n_fp = f_particles.sum()
-
-                    in_facet = np.zeros(n_fp).astype(bool)
-                    
-                    for face in faces: # for each face in the facet
-                        
-                        tri = geo.mesh.vertices[geo.mesh.faces[face], :] # vertces of the face
-
-                        tri = np.ones((n_fp, 3, 3))*tri # reshaping for barycentric
-                        
-                        # trying to use 'cross' because 'cramer' was causing infinite loops due to a division by zero
-                        bar = tm.triangles.points_to_barycentric(tri, cand_xc[f_particles, :], method = 'cross')
-
-                        # check whether the points are between the vertices of the face
-                        valid = np.all(np.logical_and(bar >= 0, bar <= 1), axis = 1)
-
-                        in_facet[valid] = True # those valid are in facet
-                    
-                    indices = np.where(f_particles)[0][in_facet] # indices of the particles analysed for that facet that are really hitting
-
-                    if len(indices) > 0:
-                        xc[indices, :] = cand_xc[indices, :]
-                        fc[indices] = f
-
-            t_valid[active, cand_f] = False
-
-            active = np.isnan(fc)
-
-            t_valid[~active, :] = False
-            t = np.where(t_valid, t, np.inf) # update t - (N, F)
-
-            out = np.all(~t_valid, axis = 1) # particles that are out would result in an infinite loop
-            out = np.logical_or(out, np.all(np.absolute(t) == np.inf, axis = 1))
-            active[out] = False              # those that are out are not active
-
-        return xc, fc
 
     def timesteps_to_boundary(self, positions, velocities, geometry, indexes_del_extra = None):
         '''Calculate how many timesteps to boundary scattering.'''
@@ -938,9 +891,9 @@ class Population(Constants):
             collision_pos        = np.zeros((0, 3))
             
             return ts_to_boundary, index_facets, collision_pos
+        # mesh_pos, mesh_facets = self.find_boundary(positions, velocities, geometry) # find collision in true boundary
+        mesh_pos, _, mesh_facets = geometry.find_boundary_naive(positions, velocities) # find collision in true boundary
         
-        mesh_pos, mesh_facets = self.find_boundary(positions, velocities, geometry) # find collision in true boundary
-
         if indexes_del_extra is not None :
             # If there are any numerical errors with collision calculations, delete particles to avoid further problems
             if np.any(np.isnan(mesh_facets)):
@@ -970,19 +923,17 @@ class Population(Constants):
         
         collision_pos += velocities*self.offset/np.sum(velocities*normals, axis = 1, keepdims = True) # ||d|| = ||v|| h / v . n
 
-        _, close_distance, close_face = tm.proximity.closest_point(geo.mesh, collision_pos) # get closest points on the mesh
-            
+        _, close_distance, facets = geo.find_boundary_naive(collision_pos)
+
         too_close = np.absolute(self.offset - close_distance) > 1e-8 # check if there is any too close
-
+        
         while np.any(too_close):
-            extra_offset = np.where(close_distance < self.offset, self.offset - close_distance, 0).reshape(-1, 1) # calculate extra displacement
-
-            facets = np.where(close_distance < self.offset, geo.faces_to_facets(close_face), facets).astype(int) # correct facet index
+            extra_offset = np.where(too_close, self.offset - close_distance, 0).reshape(-1, 1) # calculate extra displacement
 
             collision_pos += extra_offset*(velocities/np.sum(velocities*-geo.mesh.facets_normal[facets, :], axis = 1, keepdims = True)) # adjust position
 
-            _, close_distance, close_face = tm.proximity.closest_point(geo.mesh, collision_pos) # get new closest points on the mesh
-            
+            _, close_distance, facets = geo.find_boundary_naive(collision_pos)
+
             too_close = np.absolute(self.offset - close_distance) > 1e-8 # check again if there is any too close
 
         return collision_pos, facets
@@ -1549,7 +1500,7 @@ class Population(Constants):
             self.calculate_kappa(geometry, phonon, lookup = self.lookup)
             self.calculate_momentum(geometry, phonon, lookup = self.lookup)
 
-            self.write_convergence()      # write data on file
+            self.write_convergence(geometry)      # write data on file
 
         if (len(self.rt_plot) > 0) and (self.current_timestep % self.n_dt_to_plot == 0):
             self.plot_real_time()
@@ -1779,7 +1730,7 @@ class Population(Constants):
 
         plt.close(fig)
 
-    def open_convergence(self):
+    def open_convergence(self, geometry):
 
         n_dt_to_conv = np.floor( np.log10( self.args.iterations[0] ) ) - 2    # number of timesteps to save convergence data
         n_dt_to_conv = int(10**n_dt_to_conv)
@@ -1823,19 +1774,23 @@ class Population(Constants):
             line += ' Momnt z Sv {:>2d} '.format(i)
         for i in range(self.n_of_subvols):
             line += ' Np Sv {:>3d} '.format(i)
-        line += ' Kappa partic '
-        line += ' Kappa lookup '
-        for i in range(self.n_of_subvols):
-            line += ' K Pt Sv {:>3d} '.format(i)
-        for i in range(self.n_of_subvols):
-            line += ' K Lu Sv {:>3d} '.format(i)
+        if geometry.subvol_type == 'slice':
+            line += ' Kappa partic '
+            line += ' Kappa lookup '
+            for i in range(self.n_of_subvols):
+                line += ' K Pt Sv {:>3d} '.format(i)
+            for i in range(self.n_of_subvols):
+                line += ' K Lu Sv {:>3d} '.format(i)
+        else:
+            for _, svc in enumerate(geometry.subvol_connections):
+                line += ' K Con {:>3d}-{:>3d} '.format(svc[0], svc[1])
 
         line += '\n'
 
         self.f.write(line)
         self.f.close()
 
-    def write_convergence(self):
+    def write_convergence(self, geometry):
         
         line = ''
         line += datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f ')  # real time in ISO format
@@ -1865,11 +1820,15 @@ class Population(Constants):
 
         line += np.array2string(self.subvol_N_p.astype(int), formatter = {'int':'{:>10d}'.format}  ).strip('[]') + ' '
 
-        line += '{:>13.6e} '.format(self.kappa_particles)
-        line += '{:>13.6e} '.format(self.kappa_lookup)
+        if geometry.subvol_type == 'slice':
 
-        line += np.array2string(self.subvol_kappa_particles, formatter = {'float_kind':'{:>12.5e}'.format}  ).strip('[]') + ' '
-        line += np.array2string(self.subvol_kappa_lookup   , formatter = {'float_kind':'{:>12.5e}'.format}  ).strip('[]') + ' '
+            line += np.array2string(self.subvol_kappa_particles, formatter = {'float_kind':'{:>12.5e}'.format}  ).strip('[]') + ' '
+            line += np.array2string(self.subvol_kappa_lookup   , formatter = {'float_kind':'{:>12.5e}'.format}  ).strip('[]') + ' '
+
+            line += '{:>13.6e} '.format(self.kappa_particles)
+            line += '{:>13.6e} '.format(self.kappa_lookup)
+        else:
+            line += np.array2string(self.svcon_kappa, formatter = {'float_kind':'{:>14.7e}'.format}  ).strip('[]') + ' '
 
         line += '\n'
 
@@ -1920,22 +1879,41 @@ class Population(Constants):
         if self.current_timestep > 0:
             filename = self.results_folder_name + 'mean_and_sigma.txt'
 
-            header ='subvols final state data \n' + \
-                    'Date and time: {}\n'.format(time) + \
-                    'hdf file = {}, POSCAR file = {}\n'.format(self.args.hdf_file, self.args.poscar_file) + \
-                    'subvol id, subvol position, subvol volume, T [K], sigma T [K], HF x [W/m^2], sigma HF [W/m^2], HF y [W/m^2], sigma HF [W/m^2], HF z [W/m^2], sigma HF [W/m^2], k mean pt, k std pt, k mean lu, k std lu'
+            if geometry.subvol_type == 'slice':
 
-            data = np.hstack((np.arange(self.n_of_subvols).reshape(-1, 1),
-                              geometry.subvol_center,
-                              self.subvol_volume.reshape(-1, 1),
-                              self.view.mean_T.reshape(-1, 1),
-                              self.view.std_T.reshape(-1, 1),
-                              self.view.mean_sv_phi.reshape(-1, 3) ,
-                              self.view.std_sv_phi.reshape(-1, 3)  ,
-                              self.view.mean_sv_k_pt.reshape(-1, 1),
-                              self.view.std_sv_k_pt.reshape(-1, 1) ,
-                              self.view.mean_sv_k_lu.reshape(-1, 1),
-                              self.view.std_sv_k_lu.reshape(-1, 1) ))
+                header ='subvols final state data \n' + \
+                        'Date and time: {}\n'.format(time) + \
+                        'hdf file = {}, POSCAR file = {}\n'.format(self.args.hdf_file, self.args.poscar_file) + \
+                        'subvol id, subvol position, subvol volume, T [K], sigma T [K], HF x [W/m^2], sigma HF [W/m^2], HF y [W/m^2], sigma HF [W/m^2], HF z [W/m^2], sigma HF [W/m^2], k mean pt, k std pt, k mean lu, k std lu'
+
+                data = np.hstack((np.arange(self.n_of_subvols).reshape(-1, 1),
+                                geometry.subvol_center,
+                                self.subvol_volume.reshape(-1, 1),
+                                self.view.mean_T.reshape(-1, 1),
+                                self.view.std_T.reshape(-1, 1),
+                                self.view.mean_sv_phi.reshape(-1, 3) ,
+                                self.view.std_sv_phi.reshape(-1, 3)  ,
+                                self.view.mean_sv_k_pt.reshape(-1, 1),
+                                self.view.std_sv_k_pt.reshape(-1, 1) ,
+                                self.view.mean_sv_k_lu.reshape(-1, 1),
+                                self.view.std_sv_k_lu.reshape(-1, 1) ))
+                
+                # comma separated
+                np.savetxt(filename, data, '%d, %.3e, %.3e, %.3e, %.3e, %.3f, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e', delimiter = ',', header = header)
             
-            # comma separated
-            np.savetxt(filename, data, '%d, %.3e, %.3e, %.3e, %.3e, %.3f, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e', delimiter = ',', header = header)
+            else:
+                header ='subvols final state data \n' + \
+                        'Date and time: {}\n'.format(time) + \
+                        'hdf file = {}, POSCAR file = {}\n'.format(self.args.hdf_file, self.args.poscar_file) + \
+                        'subvol id, subvol position, subvol volume, T [K], sigma T [K], HF x [W/m^2], sigma HF [W/m^2], HF y [W/m^2], sigma HF [W/m^2], HF z [W/m^2], sigma HF [W/m^2]'
+
+                data = np.hstack((np.arange(self.n_of_subvols).reshape(-1, 1),
+                                geometry.subvol_center,
+                                self.subvol_volume.reshape(-1, 1),
+                                self.view.mean_T.reshape(-1, 1),
+                                self.view.std_T.reshape(-1, 1),
+                                self.view.mean_sv_phi.reshape(-1, 3) ,
+                                self.view.std_sv_phi.reshape(-1, 3)))
+                
+                # comma separated
+                np.savetxt(filename, data, '%d, %.3e, %.3e, %.3e, %.3e, %.3f, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e', delimiter = ',', header = header)

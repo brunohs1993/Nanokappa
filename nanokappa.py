@@ -67,12 +67,6 @@ else:
 
 pop = Population(args, geo, phonons)
 
-pop.plot_figures(geo, property_plot = args.fig_plot, colormap = args.colormap[0])
-
-visuals = Visualisation(args, geo, phonons)
-
-visuals.preprocess()
-
 while (pop.current_timestep < args.iterations[0]) and (pop.residue.max() >= pop.conv_crit):
     
     pop.run_timestep(geo, phonons)
@@ -84,7 +78,7 @@ pop.f.close()
 
 pop.save_plot_real_time()
 
-visuals.postprocess()
+pop.view.postprocess()
 
 end_time = datetime.now()
 

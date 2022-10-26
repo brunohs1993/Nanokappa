@@ -1,0 +1,51 @@
+#!/bin/bash -x 
+
+#SBATCH --account=dcc70
+#SBATCH --partition=std
+##SBATCH --constraint=IB
+#SBATCH --job-name=Test
+#SBATCH --output=slurm-%x.%N.%j.out 
+#SBATCH --error=slurm-%x.%N.%j.err 
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=1
+#SBATCH --time=0-10:00:00
+
+#Locales
+export LANGUAGE=fr_FR.UTF-8
+export LANG=fr_FR.UTF-8
+export LC_ALL=fr_FR.UTF-8
+
+# Phonopy
+export PYTHONPATH=~/.local/lib:$PYTHONPATH
+export PYTH=~/.local/bin:$PAT
+
+
+# >>> conda initialize >>>
+# !! Contents within this block are managed by 'conda init' !!
+__conda_setup="$('/home/bcc72/uhx62/miniconda/bin/conda' 'shell.bash' 'hook' 2> /dev/null)"
+if [ $? -eq 0 ]; then
+    eval "$__conda_setup"
+else
+    if [ -f "/home/bcc72/uhx62/miniconda/etc/profile.d/conda.sh" ]; then
+        . "/home/bcc72/uhx62/miniconda/etc/profile.d/conda.sh"
+    else
+        export PATH="/home/bcc72/uhx62/miniconda/bin:$PATH"
+    fi
+fi
+unset __conda_setup
+
+conda deactivate
+conda activate nanokappa
+
+export I_MPI_FABRICS=dapl
+srun python /home/bcc72/uhx62/Nano-kappa/Nanokappa/nanokappa.py -ff parameters_test.txt
+
+## Copying back files to submit directory
+
+cp $SLURM_SUBMIT_DIR/slurm-$SLURM_JOB_ID.out log
+## Copying back files to submit directory
+cp -rf * $SLURM_SUBMIT_DIR/.
+cp log $SLURM_SUBMIT_DIR/slurm-$SLURM_JOB_ID.out
+rm log

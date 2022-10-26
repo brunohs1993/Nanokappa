@@ -88,13 +88,13 @@ def initialise_parser():
     parser.add_argument('--output'        , '-op' , default = 'file',
                         type = str  , nargs = 1   , help    = 'Where to print the output. "file" to save it in outuput.txt. "screen" to print on terminal.')
 
-    parser.add_argument('--mat_folder'      , '-mf', required = True   , type = str, nargs = '*', help     = 'Set folder with material data.'  ) # lattice properties
+    parser.add_argument('--mat_folder'      , '-mf', default  = ['']   ,  type = str, nargs = '*', help     = 'Set folder with material data.'  ) # lattice properties
     parser.add_argument('--poscar_file'     , '-pf', required = True   , type = str, nargs = '*', help     = 'Set the POSCAR file to be read.' ) # lattice properties
     parser.add_argument('--hdf_file'        , '-hf', required = True   , type = str, nargs = '*', help     = 'Set the hdf5 file to be read.'   ) # phonon properties of the material
     parser.add_argument('--pickled_mat'     , '-pm', default  = []     , type = int, nargs = '*', help     = 'Inform if any material can be loaded from pickled object.')
     parser.add_argument('--mat_names'       , '-mn', required = True   , type = str, nargs = '*', help     = 'Set the names of each material.' ) #
 
-    parser.add_argument('--results_folder'  , '-rf', default  = ''     , type = str, help     = 'Set the results folder name.'    ) # 
+    parser.add_argument('--results_folder'  , '-rf', default  = []     , type = str,nargs = '*', help     = 'Set the results folder name.'    ) # 
     parser.add_argument('--results_location', '-rl', default  = 'local', type = str, help     = 'Set the results folder location.') # 
     
 
@@ -153,9 +153,11 @@ def generate_results_folder(args):
         args.results_location = loc
 
     # get results folder name
-    folder = args.results_folder
+    
 
-    if folder != '':    # if a folder name is specified
+    if len(args.results_folder)>0:    # if a folder name is specified
+
+        folder = args.results_folder[0]
 
         folder, folder_sep = correct_folder_separator(folder)
 
@@ -183,7 +185,7 @@ def generate_results_folder(args):
 
         args.results_folder += folder_sep
     
-    elif folder == '':  # if not specified
+    else:  # if not specified
         args.results_folder = args.results_location + folder_sep
 
     return args

@@ -1,4 +1,5 @@
 # calculations
+from calendar import c
 from errno import EBADMSG
 import numpy as np
 import matplotlib.pyplot as plt
@@ -6,6 +7,7 @@ import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as rot
 from scipy.interpolate import NearestNDInterpolator
 from scipy.stats.qmc import Sobol
+from scipy.spatial import Delaunay
 
 # geometry
 import trimesh as tm
@@ -17,6 +19,7 @@ try:
     # soft dependency, not really needed. Maybe add it as an option, like trimesh?
     # I tested both earcut and triangle and I don't see much difference, but I'll keep it for now. 
 except: pass
+from trimesh.proximity import ProximityQuery
 
 
 # other
@@ -61,10 +64,23 @@ class Geometry:
         self.get_bound_facets(args)    # get boundary conditions facets
         self.check_connections(args)   # check if all connections are valid and adjust vertices
         self.get_plane_k()
-        # self.get_offset_mesh()
         self.save_reservoir_meshes(engine = 'earcut')   # save meshes of each reservoir after adjust vertices
         self.set_subvolumes()          # define subvolumes and save their meshes and properties
-        # self.get_voronoi_diagram()
+
+        # xc, tc, fc = self.find_boundary_naive(self.subvol_center)
+
+        # fig, ax = self.plot_facet_boundaries(self.mesh)
+        # ax.scatter(xc[:, 0], xc[:, 1], xc[:, 2], s = 1, c = 'r')
+        # ax.scatter(self.subvol_center[:, 0], self.subvol_center[:, 1], self.subvol_center[:, 2], s = 1, c = 'b')
+        # for i, d in enumerate(tc):
+        #     ax.plot([xc[i, 0], self.subvol_center[i, 0]],
+        #             [xc[i, 1], self.subvol_center[i, 1]],
+        #             [xc[i, 2], self.subvol_center[i, 2]], ':', c = 'k', linewidth = 1)
+        #     ax.text(xc[i, 0], xc[i, 1], xc[i, 2], s = int(fc[i]), fontdict={'fontsize':5})
+
+        # plt.show()
+
+        # quit()
 
         print('Geometry processing done!')
 
@@ -253,17 +269,22 @@ class Geometry:
             self.slice_length = np.ptp(self.bounds[:, self.slice_axis])/self.n_of_subvols
 
             self.subvol_classifier = slice_classifier(n  = self.n_of_subvols,
-                                                  xc = self.scale_positions(self.subvol_center))
+                                                      xc = self.scale_positions(self.subvol_center))
             
-            # self.subvol_volume = self.calculate_subvol_volume()
             try: # try slicing the mesh first
                 self.subvol_volume = self.calculate_subvol_volume()
             except: # if it gives an error, try with quasi monte carlo / sobol sampling
                 self.subvol_volume = self.calculate_subvol_volume(algorithm = 'qmc')
+            
+            self.get_subvol_connections()
 
         elif self.subvol_type == 'voronoi':
             self.n_of_subvols    = int(self.args.subvolumes[1])
             self.subvol_center = subvolumes.distribute(self.mesh, self.n_of_subvols, self.folder, view = True)
+
+            inside = self.mesh.contains(self.subvol_center)
+            self.subvol_center = self.subvol_center[inside, :]
+
             self.subvol_center = self.subvol_center[np.lexsort((self.subvol_center[:,2],
                                                                 self.subvol_center[:,1],
                                                                 self.subvol_center[:,0]))] # sort it
@@ -274,6 +295,8 @@ class Geometry:
                 self.subvol_volume = self.calculate_subvol_volume()
             except: # if it gives an error, try with quasi monte carlo / sobol sampling
                 self.subvol_volume = self.calculate_subvol_volume(algorithm = 'qmc')
+            
+            self.get_subvol_connections()
         
         elif self.subvol_type == 'grid':
             nx = int(self.args.subvolumes[1])
@@ -290,45 +313,28 @@ class Geometry:
 
             g = np.meshgrid(xx, yy, zz)
 
-            self.subvol_center = (np.vstack(map(np.ravel, g)).T)*self.bounds.ptp(axis = 0)+self.bounds[0, :]
+            self.subvol_center = (np.vstack(list(map(np.ravel, g))).T)*self.bounds.ptp(axis = 0)+self.bounds[0, :] # create centers
+
+            passed = tm.proximity.signed_distance(self.mesh, self.subvol_center) > 0 
+
+            self.subvol_center = self.subvol_center[passed, :]
+
             self.subvol_center = self.subvol_center[np.lexsort((self.subvol_center[:,2],
                                                                 self.subvol_center[:,1],
-                                                                self.subvol_center[:,0]))] # sort it
+                                                                self.subvol_center[:,0]))] # sort them
 
-            flag = True
-            
-            while flag:
-                self.n_of_subvols = self.subvol_center.shape[0]
+            self.n_of_subvols = self.subvol_center.shape[0]
 
-                self.subvol_classifier = slice_classifier(n  = self.n_of_subvols,
-                                                          xc = self.scale_positions(self.subvol_center))
-                try: # try slicing the mesh first
-                    self.subvol_volume = self.calculate_subvol_volume()
-                except: # if it gives an error, try with quasi monte carlo / sobol sampling
-                    self.subvol_volume = self.calculate_subvol_volume(algorithm = 'qmc', tol = 1e-4, verbose = False)
+            self.get_subvol_connections()
 
-                non_zero = self.subvol_volume > 0
+            self.subvol_classifier = slice_classifier(n  = self.n_of_subvols,
+                                                      xc = self.scale_positions(self.subvol_center))
 
-                mean = self.subvol_volume[non_zero].mean()
-                std  = self.subvol_volume[non_zero].std()
+            try: # try slicing the mesh first
+                self.subvol_volume = self.calculate_subvol_volume(verbose = False)
+            except: # if it gives an error, try with quasi monte carlo / sobol sampling
+                self.subvol_volume = self.calculate_subvol_volume(algorithm = 'qmc', tol = 1e-4, verbose = False)
 
-                dev = (self.subvol_volume - mean)/std # normalised deviation from the mean
-                
-                outliers = dev < -2
-
-                self.subvol_center = self.subvol_center[~outliers, :]
-
-                plt.close('all')
-                plt.plot(self.subvol_center[:, 0], self.subvol_center[:, 1], 'o')
-                # plt.show()
-
-                flag = np.any(outliers)
-
-                print(self.subvol_volume)
-                print(mean, std)
-                print(dev)
-                print(outliers.astype(int))
-                
         else:
             print('Invalid subvolume type!')
             print('Stopping simulation...')
@@ -341,7 +347,8 @@ class Geometry:
                header = 'Distribution of subvolumes. \n Center x, Center y, Center z')
 
     def calculate_subvol_volume(self, algorithm = 'submesh', tol = 1e-5, verbose = False):
-        print('Calculating volumes... Algorithm:', algorithm)
+        if verbose:
+            print('Calculating volumes... Algorithm:', algorithm)
         # calculating subvol cover and volume
 
         if algorithm in ['submesh', 'submesh_qmc']:
@@ -429,8 +436,6 @@ class Geometry:
             subvol_volume = cover*self.mesh.volume
 
         ##############################################################
-        
-        
         
         return subvol_volume
 
@@ -883,16 +888,6 @@ class Geometry:
             
             v = np.vstack((v, new_v))
             
-        # getting indices
-        # ext_i = self.get_external_ring_index(v, ring_list)
-
-        # ind = [len(ring_list[ext_i])-1]
-        # ind += [len(ring)-1 for i, ring in enumerate(ring_list) if i != ext_i]
-        # ind = np.array(ind).cumsum()
-
-        # new_v = v[ring_list[ext_i][:-1], :]
-        # new_v = np.vstack((new_v, *(v[ring[:-1], :] for i, ring in enumerate(ring_list) if i != ext_i)))
-
         return v, ind
 
     def adjust_reservoirs_to_offset(self, v, h, r):
@@ -950,19 +945,23 @@ class Geometry:
        
         return fig, ax
 
-
     def plot_facet_boundaries(self, mesh, fig = None, ax = None, l_color = 'k', linestyle = '-', number_facets = False, m_color = 'r', markerstyle = 'o'):
 
         if ax is None or fig is None:
             fig, ax = plt.subplots(nrows = 1, ncols = 1, dpi = 200, subplot_kw={'projection':'3d'})
             ax.set_box_aspect( np.ptp(mesh.bounds, axis = 0) )
+            ax.tick_params(labelsize = 5)
+            ax.set_xlabel('x')
+            ax.set_ylabel('y')
+            ax.set_zlabel('z')
 
         for fct in range(len(mesh.facets)):
             for e in mesh.facets_boundary[fct]:
                 ax.plot(mesh.vertices[e, 0], mesh.vertices[e, 1], mesh.vertices[e, 2], linestyle = linestyle, color = l_color)
             if number_facets:
                 ue = np.unique(mesh.facets_boundary[fct]) # unique vertices
-                c  = mesh.vertices[ue, :].mean(axis = 0)  # mean of the vertices
+                # c  = mesh.vertices[ue, :].mean(axis = 0)  # mean of the vertices
+                c = self.get_facet_centroid(fct)
                 ax.scatter(c[0], c[1], c[2], marker = markerstyle, c = m_color)
                 ax.text(c[0], c[1], c[2], s = fct)
         
@@ -1018,96 +1017,263 @@ class Geometry:
 
         self.facet_k = -np.sum(n*ref_vert, axis = 1) # k for each facet
 
-        face_k = np.zeros(self.mesh.faces.shape[0])
-        for i in range(self.n_of_facets):
-            facet = self.mesh.facets[i]
-            face_k[facet] = self.facet_k[i]
+    def find_boundary_naive(self, x, direction = None):
+        '''Finds the boundary in relation to a point. If v is informed, the
+           the boundary is searched along the path in v direction. If not,
+           it looks for the closest point to the mesh. This may be a better
+           alternative for small meshes with not many faces than the Trimesh.
+           
+           Obs: THIS WORKS ONLY FOR POINTS INSIDE THE MESH (for now).'''
+
+        n = -self.mesh.facets_normal # normals - (F, 3)
+        k = self.facet_k             # (F,)
+
+        if direction is None:
+            t = np.sum(x.reshape(-1, 1, 3)*n, axis = 2)+k
+        else:
+            v = direction
+            with np.errstate(divide = 'ignore', invalid = 'ignore', over = 'ignore'):
+                t = -(np.sum(x.reshape(-1, 1, 3)*n, axis = 2)+k)/np.sum(v.reshape(-1, 1, 3)*n, axis = 2)
         
-        self.face_k = copy.copy(face_k)
+        t_valid = t >= 0
+
+        t = np.where(t_valid, t, np.inf) # update t - (N, F)
         
-    def get_voronoi_diagram(self):
-        print('Getting voronoi connections')
+        xc = np.ones(x.shape)*np.nan    # (N, 3)
+        tc = np.ones(x.shape[0])*np.inf # (N,)
+        fc = -np.ones(x.shape[0], dtype = int) # (N,)
 
-        # generate samples and classify to subvolumes
-        samples = subvolumes.generate_points(self.mesh, int(2**np.ceil(np.log2(1e5))), Sobol(3)) 
-        sv_samples = np.argmax(self.subvol_classifier.predict(self.scale_positions(samples)), axis = 1)
+        active = fc < 0 # generate a follow up boolean mask - (N,)
+        
+        out = np.all(~t_valid, axis = 1) # particles that are out would result in an infinite loop
+        active[out] = False              # those that are out are not active
 
-        # calculate the distances between each subvol center and all others
-        dist = np.linalg.norm(self.subvol_center - np.expand_dims(self.subvol_center, axis = 1), axis = -1)
+        while np.any(active):
+            t_min = np.amin(t[active, :], axis = 1, keepdims = True) # get minimum t
 
-        ridge_points = np.zeros((0, 2))
-       
-        for sv in range(self.n_of_subvols):             # for each subvolume
-            print('Subvolume {}...'.format(sv))
-            i_samples = (sv_samples == sv).nonzero()[0] # which samples are in that subvolume
-            
-            sorted_i = np.argsort(dist[sv, :])[1:]      # see what are the closest other sv
+            cand_f = np.argmax(t[active, :] == t_min, axis = 1)      # which facet
 
-            sv_mesh = self.mesh                         # get total mesh
-            current_vol = sv_mesh.volume                # and total volume
+            if direction is None:
+                v = self.mesh.facets_normal[cand_f, :]
+                cand_xc = x[active, :]+t_min*v # candidate collision positions based on t_min
+            else:
+                cand_xc = x[active, :]+t_min*v[active, :] # candidate collision positions based on t_min
 
-            for i in sorted_i:                          # for each other subvolume
-                normal =  self.subvol_center[sv, :] - self.subvol_center[i, :]      # get the normal direction
-                origin = (self.subvol_center[sv, :] + self.subvol_center[i, :])/2   # get the plane origin
-                
-                sv_mesh = tm.intersections.slice_mesh_plane(sv_mesh, normal, origin, cap = True) # cut the mesh with plane
-                bodies = sv_mesh.split()
-                for b in bodies:
-                    b.fill_holes()
+            for f, faces in enumerate(self.mesh.facets): # for each facet
+                f_particles = cand_f == f       # particles that may be close to that facet
+                if np.any(f_particles):
+                    # faces = self.mesh.facets[f] # indexes of faces part of that facet
+                    n_fp = f_particles.sum()
 
-                sv_mesh = tm.boolean.union(bodies, engine = 'scad') 
-                
-                if sv_mesh.volume < current_vol: # if the plane really cuts the mesh, the volume will be reduced
-                    bodies = sv_mesh.split() # get separate bodies, if it is the case
-                    if len(bodies) > 1: # if there is more than one body
-                        n_samples = np.array([b.contains(samples[i_samples, :]).sum() for b in bodies]) # calculate the body with more representation for that subvolume
-                        sv_mesh = bodies[np.argmax(n_samples)]                                          # define the new mesh as that body
+                    in_facet = np.zeros(n_fp, dtype = bool)
                     
-                    current_vol = sv_mesh.volume
-                    ridge_points = np.vstack((ridge_points, np.array([sv, i])))
-                else:   # if it does not cut the mesh, they are not connected
-                    pass
-        
-        self.ridge_points = np.unique(np.sort(ridge_points, axis = 1), axis = 0).astype(int)
+                    for face in faces: # for each face in the facet
+                        
+                        tri = self.mesh.vertices[self.mesh.faces[face], :] # vertces of the face
+                        tri = np.ones((n_fp, 3, 3))*tri # reshaping for barycentric
+                        
+                        # trying to use 'cross' because 'cramer' was causing infinite loops due to a division by zero
+                        bar = tm.triangles.points_to_barycentric(tri, cand_xc[f_particles, :], method = 'cramer')
 
-    #     self.save_voronoi()
-        
-    # def save_voronoi(self):
-    #     fig, ax = plt.subplots(nrows = 1, ncols = 1, dpi = 100, figsize = (10, 10), subplot_kw ={'projection':'3d'})
+                        # check whether the points are between the vertices of the face
+                        tol = 0
+                        valid = np.all(np.logical_and(bar >= -tol, bar <= 1+tol), axis = 1)
+                        
+                        in_facet[valid] = True # those valid are in facet
 
-    #     ax.scatter(self.subvol_center[:, 0], self.subvol_center[:, 1], self.subvol_center[:, 2], marker = 'o', c = 'b')
+                    in_indices = np.where(f_particles)[0][in_facet] # indices of the particles analysed for that facet that are really hitting
+                    
+                    active_indices = np.arange(x.shape[0])[active]  # active indices in general population
 
-    #     for rp in self.ridge_points:
-    #         p = self.subvol_center[rp, :]
-    #         ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'k')
+                    if direction is None:
+                        better_indices = t_min[in_indices, 0] < tc[active_indices[in_indices]]
+                        confirm_indices = active_indices[in_indices[better_indices]]
+                    else:
+                        confirm_indices = active_indices[in_indices] # those to be confirmed
+                    
+                    if len(confirm_indices) > 0:
+                        # xc[confirm_indices, :] = np.copy(cand_xc[in_indices, :])
+                        tc[confirm_indices] = np.copy(t_min[in_indices, 0])
+                        fc[confirm_indices] = f
+                    
+            t_valid[active, cand_f] = False
+
+            active = fc < 0
+
+            t_valid[~active, :] = False
+            t = np.where(t_valid, t, np.inf) # update t - (N, F)
+
+            out = np.all(~t_valid, axis = 1) # particles that are out would result in an infinite loop
+            out = np.logical_or(out, np.all(np.absolute(t) == np.inf, axis = 1))
+            active[out] = False              # those that are out are not active
+
+        if direction is None:
+            v = self.mesh.facets_normal[fc, :]
         
-    #     for f in range(len(self.mesh.facets)):
-    #         for e in self.mesh.facets_boundary[f]:
-    #             p = self.mesh.vertices[e, :]
-    #             ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'r')
+        xc = x+tc.reshape(-1, 1)*v
+
+        if direction is None:
+            # if the code is looking for the nearest point the edges need to be checked.
+
+            v1 = self.mesh.vertices[self.mesh.edges[:, 0], :]       # reference vertex (E, 3)
+            e  = self.mesh.vertices[self.mesh.edges[:, 1], :] - v1  # edge vector      (E, 3)
+
+            x_e  = np.sum( x*np.expand_dims(e, 1), axis = -1).T #  x . e - (N, E)
+            v1_e = np.sum(v1*e                   , axis = -1)   # v1 . e - (E, )
+            e_e  = np.sum( e*e                   , axis = -1).T #  e . e - (E, )
+
+            t_e = (x_e - v1_e)/(e_e) # (N, E)
+
+            t_e = np.where(t_e >= 0, t_e, np.inf) # removing t < 0
+            t_e = np.where(t_e <= 1, t_e, np.inf) # removing t > 1
+
+            #(E, N, 3)            (E, N, 1)            (E, 1, 3)           (E, 1, 3)
+            xc_cand = np.expand_dims(t_e.T, 2)*np.expand_dims(e, 1)+np.expand_dims(v1, 1) # calculate candidate positions
+
+            dist = np.linalg.norm(x-xc_cand, axis = -1).T # get distance from collision (N, E)
+
+            d_min = np.nanmin(dist, axis = 1, keepdims = True) # get the closest
+
+            ec = np.argmax(dist == d_min, axis = 1) # which edge
+
+            t_e = t_e[np.arange(ec.shape[0]), ec] # get only the t parameter for the closest points
+
+            fc_cand = -np.ones(ec.shape[0])
+            for i, ec_i in enumerate(ec):
+                verts = self.mesh.edges[ec_i]
+                for j, faces in enumerate(self.mesh.facets):
+                    fct_v = np.unique(self.mesh.faces[faces, :]) # get unique vertices
+                    if np.all(np.in1d(verts, fct_v)): # if both vertices of the edge are in the facet, they are part of the facet
+                        fc_cand[i] = j
+                        break
             
-    #     # plt.savefig('mesh_last.png')
-    #     plt.show()
-
-    #     plt.close(fig)
-
-    #     fig, ax = plt.subplots(nrows = 1, ncols = 1, dpi = 100, figsize = (10, 10), subplot_kw ={'projection':'3d'})
-
-    #     for f in range(len(self.mesh.facets)):
-    #         for e in self.mesh.facets_boundary[f]:
-    #             p = self.mesh.vertices[e, :]
-    #             ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'r')
-        
-    #     ax.scatter(self.subvol_center[:, 0], self.subvol_center[:, 1], self.subvol_center[:, 2], marker = 'o', c = 'b')
-
-    #     for rp in self.ridge_points:
-    #         p = self.subvol_center[rp, :]
-    #         ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'k')
+            edge_is_closer = d_min.squeeze() < tc # which particles are actually closer to an edge than to a face
             
-    #     # plt.savefig('mesh_first.png')
-    #     plt.show()
+            xc[edge_is_closer, :] = v1[ec[edge_is_closer], :]+t_e[edge_is_closer].reshape(-1, 1)*e[ec[edge_is_closer], :]
+            tc[edge_is_closer] = d_min[edge_is_closer, 0] # save tc (distance from collision point)
+            fc[edge_is_closer] = fc_cand[edge_is_closer]
 
-    #     quit()
+        return xc, tc, fc
+
+    def get_subvol_connections(self):
+        print('Getting subvol connections...')
+        
+        o = (self.subvol_center+np.expand_dims(self.subvol_center, 1))/2 # interface origins/midpoints (SV, SV, 3)
+        n = self.subvol_center-np.expand_dims(self.subvol_center, 1)     # interface normals/directions (SV, SV, 3)
+        c_d = np.linalg.norm(n, axis = -1)                               # distances (SV, SV)
+
+        psbl_con = np.ones((self.n_of_subvols, self.n_of_subvols), dtype = bool) # possible connections matrix
+        psbl_con[np.arange(self.n_of_subvols), np.arange(self.n_of_subvols)] = False
+
+        sv_con = np.vstack(psbl_con.nonzero()).T # get posible connections
+        sv_con = np.sort(sv_con, axis = 1) # remove repetitions
+        sv_con = sv_con[np.lexsort((sv_con[:,1], sv_con[:,0]))]
+        sv_con = np.unique(sv_con, axis = 0)
+        
+        # Obs: for some reason mesh.contains(points) fails too often, so I'm using signed_distance.
+        contains = tm.proximity.signed_distance(self.mesh, o[sv_con[:, 0], sv_con[:, 1], :]) > 0 
+
+        sv_con = sv_con[contains, :]
+        x_col = self.subvol_center[sv_con[:, 0], :]
+        v_col = n[sv_con[:, 0], sv_con[:, 1], :]
+        _, d, _ = self.find_boundary_naive(x = x_col, direction = v_col)
+
+        sv_con = sv_con[d>1, :]
+
+        confirmed = np.zeros(sv_con.shape[0], dtype = bool)
+        
+        remove = np.zeros(sv_con.shape[0], dtype = bool)
+        
+        order = np.argsort(c_d[sv_con[:, 0], sv_con[:, 1]]) # setting the order by proximity
+
+        for index, con in enumerate(sv_con[order, :]): # for each connection, in order of distance
+                            
+            if confirmed[order[index]]:
+                pass
+            else:
+                i_sv = con[0]
+                j_sv = con[1]
+
+                # check for i
+                i_con = np.any(sv_con == i_sv, axis = 1).nonzero()[0]             # index of possible connections
+                
+                if np.any(confirmed[i_con]):                                      # if any of these are already confirmed
+                    i_con_conf = i_con[confirmed[i_con]]                          # get which of them are
+                    end_sv = sv_con[i_con_conf, :][sv_con[i_con_conf, :] != i_sv] # get the confirmed connected subvols
+                    for k_sv in end_sv:                                           # for each extra sv
+                        d_p = np.sum((o[i_sv, j_sv, :] - o[i_sv, k_sv, :])*n[i_sv, k_sv, :]) # calculate the distance from origin to confirmed plane
+                        if d_p >= 0:                                              # if it is not in a proper position
+                            remove[order[index]] = True
+
+                # check for j
+                if not remove[order[index]]:
+                    # check for j
+                    j_con = np.any(sv_con == j_sv, axis = 1).nonzero()[0]   # index of possible connections
+                    if np.any(confirmed[j_con]):                                      # if any of these are already confirmed and was not already removed
+                        j_con_conf = j_con[confirmed[j_con]]                          # get which of them are
+                        end_sv = sv_con[j_con_conf, :][sv_con[j_con_conf, :] != j_sv] # get the confirmed connected subvols
+                        for k_sv in end_sv:                                           # for each extra sv
+                            d_p = np.sum((o[i_sv, j_sv, :] - o[j_sv, k_sv, :])*n[j_sv, k_sv, :]) # calculate the distance from origin to confirmed plane
+                            if d_p >= 0:                                              # if it is not in a proper position
+                                remove[order[index]] = True
+                
+                if not remove[order[index]]:
+                    confirmed[order[index]] = True
+            
+        sv_con = sv_con[~remove, :]
+
+        u_sv = np.unique(sv_con) # keep only the ones that are connected
+
+        self.subvol_center = self.subvol_center[u_sv, :]
+        
+        new_sv_con = np.zeros(sv_con.shape, dtype = int)
+        for i, sv in enumerate(u_sv):
+            new_sv_con = np.where(sv_con == sv, i, new_sv_con)
+
+        self.subvol_connections = np.copy(new_sv_con)
+
+        self.n_of_subvols = self.subvol_center.shape[0]
+
+        self.n_of_subvol_con = self.subvol_connections.shape[0]
+        
+        self.save_voronoi()
+        
+    def save_voronoi(self):
+        fig, ax = plt.subplots(nrows = 1, ncols = 1, dpi = 100, figsize = (10, 10), subplot_kw ={'projection':'3d'})
+        ax.set_box_aspect(self.bounds.ptp(axis = 0))
+
+        ax.scatter(self.subvol_center[:, 0], self.subvol_center[:, 1], self.subvol_center[:, 2], marker = 'o', c = 'b')
+
+        for rp in self.subvol_connections:
+            p = self.subvol_center[rp, :]
+            ax.plot(p[:, 0], p[:, 1], p[:, 2], ':', c = 'k')
+        
+        for f in range(len(self.mesh.facets)):
+            for e in self.mesh.facets_boundary[f]:
+                p = self.mesh.vertices[e, :]
+                ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'r')
+        
+        plt.savefig(self.args.results_folder + 'subvol_connections.png')
+        # plt.show()
+
+    def get_facet_centroid(self, f):
+        if type(f) == int:
+            c = np.zeros(3)
+            for tri in self.mesh.facets[f]:
+                v = self.mesh.vertices[self.mesh.faces[tri], :]
+                A = np.linalg.norm(np.cross(v[1, :]-v[0, :], v[2, :]-v[0, :])/2)
+                c += v.mean(axis = 0)*A
+        elif type(f) in [np.ndarray, list, tuple]:
+            c = np.zeros((f.shape[0], 3))
+            for i, i_f in enumerate(f):
+                for tri in self.mesh.facets[i_f]:
+                    v = self.mesh.vertices[self.mesh.faces[tri], :]
+                    A = np.linalg.norm(np.cross(v[1, :]-v[0, :], v[2, :]-v[0, :])/2)
+                    c[i, :] += v.mean(axis = 0)*A
+            
+        c /= self.mesh.facets_area[f]
+
+        return c
         
 class slice_classifier():
     def __init__(self, n, xc = None, a = None):

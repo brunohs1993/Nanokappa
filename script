@@ -12,9 +12,9 @@
 #SBATCH --mail-user=bruno.hartmann-da-silva@univ-lorraine.fr
 
 module purge                # closing all open modules
-module load anaconda/3/5.1  # opening the most recent anaconda
-
-
+module use -a /opt/modulefiles/shared/mcs_mod/
+module load mcs_mod/softwares/anaconda3/2022.05 # opening the most recent anaconda
+source $HOME_ANACONDA/anaconda.rc
 
 ## Creating temporary directory in $SCRATCHDIR
 WORKDIR=$SCRATCHDIR/job.$SLURM_JOB_ID.$USER
@@ -26,7 +26,7 @@ cp -rf '<FILES>'  $WORKDIR
 ## Moving to $WORKDIR
 cd $WORKDIR
 ## Calculation
-python main_program.py '<INPUTS>'
+python nanokappa.py '<INPUTS>'
 
 ## Copying back files to submit directory
 cp -rf * $SLURM_SUBMIT_DIR/.
