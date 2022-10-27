@@ -288,6 +288,9 @@ class Geometry:
             self.subvol_center = self.subvol_center[np.lexsort((self.subvol_center[:,2],
                                                                 self.subvol_center[:,1],
                                                                 self.subvol_center[:,0]))] # sort it
+            
+            self.get_subvol_connections()
+            
             self.subvol_classifier = slice_classifier(n  = self.n_of_subvols,
                                                   xc = self.scale_positions(self.subvol_center))
 
@@ -296,7 +299,7 @@ class Geometry:
             except: # if it gives an error, try with quasi monte carlo / sobol sampling
                 self.subvol_volume = self.calculate_subvol_volume(algorithm = 'qmc')
             
-            self.get_subvol_connections()
+            
         
         elif self.subvol_type == 'grid':
             nx = int(self.args.subvolumes[1])
