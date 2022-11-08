@@ -68,6 +68,9 @@ def initialise_parser():
     parser.add_argument('--offset'        , '-os' , default = [1e-3],
                         type = float, nargs = 1   , help    = 'The offset margin from facets to avoid problems with Trimesh collision detection. Default is 2*trimesh.tol.merge = 2e-8.')
 
+    parser.add_argument('--path_points'  , '-pp'  , default = [],
+                                      nargs = '*' , help    = 'Set the points where the path to calculate kappa should go through. Declared the same way as --bound_pos')
+
     parser.add_argument('--energy_normal' , '-en' , default = ['fixed'],
                         type = str  , nargs = 1   , help    = 'Set the energy normalisation in subvolume. "fixed" is divided by the expected number of particles in the subvolume (standard).'+
                                                              ' "mean" is the aritmetic mean.')
@@ -78,10 +81,9 @@ def initialise_parser():
                         type = str  , nargs = '*' , help    = 'Save figures with properties distributions. Standard is T, omega and energy.')
     parser.add_argument('--colormap'      , '-cm' , default = ['viridis'],
                         type = str  , nargs = 1   , help    = 'Set matplotlib colormap to be used on all plots. Standard is viridis.')
+    parser.add_argument('--n_mean'        , '-nm' , default  = [100], 
+                        type = int  , nargs = 1   , help    = 'The number of datapoints to consider when calculating mean and stdev values. Each datapoint = 10 iterations. Default is 100.')
 
-    parser.add_argument('--lookup'        , '-lu' , default = [False],
-                                      nargs = 1   , help    = 'Whether to use the occupation lookup table to calculate energy, temperature, heat flux and crystla momentum in each subvolume. \
-                                                               0 for False (no lookup) or any other value for True.')
     parser.add_argument('--conv_crit'     , '-cc' , default = [1e-6],
                         type = float, nargs = 1   , help    = 'Value of convergence criteria, calculated as the norm of phonon number variation.')
 
@@ -97,8 +99,6 @@ def initialise_parser():
     parser.add_argument('--results_folder'  , '-rf', default  = []     , type = str,nargs = '*', help     = 'Set the results folder name.'    ) # 
     parser.add_argument('--results_location', '-rl', default  = 'local', type = str, help     = 'Set the results folder location.') # 
     
-
-
     return parser
 
 def read_args():

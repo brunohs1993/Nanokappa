@@ -10,6 +10,7 @@ import matplotlib.cm as cm
 import matplotlib.gridspec as gridspec
 
 # other
+import copy
 # import os
 # from functools import partial
 
@@ -45,7 +46,35 @@ class Visualisation(Constants):
         self.dt         = self.args.timestep[0]
 
         self.unique_modes = np.stack(np.meshgrid( np.arange(phonon.number_of_qpoints), np.arange(phonon.number_of_branches) ), axis = -1 ).reshape(-1, 2).astype(int)
+
+        self.set_style_dicts()
     
+    def set_style_dicts(self):
+        if self.geometry.subvol_type == 'slice':
+            self.profile_plot_style = dict(linestyle   = ':',
+                                           color       = 'k',
+                                           marker = 'o',
+                                           markersize  = 5,
+                                           capsize = 5 )
+        else:
+            self.profile_plot_style = dict(linestyle   = 'None',
+                                           color       = 'k'   ,
+                                           marker = 'o'   ,
+                                           markersize  = 5    ,
+                                           capsize = 5)
+        
+        self.convergence_plot_style = dict(linestyle = '-')
+        
+        self.grid_style = dict(ls    = '--'       ,
+                               lw    = 1          ,
+                               color = 'slategray')
+        
+        self.mean_plot_style = dict(linestyle = '--',
+                                    color     = 'k' )
+        
+        self.stdev_plot_style = dict(color     = 'r' ,
+                                     linestyle = '--')
+        
     def preprocess(self):
         print('Generating preprocessing plots...')
         
@@ -60,20 +89,9 @@ class Visualisation(Constants):
         if verbose: print('Reading convergence data')
         self.read_convergence()
 
-        if verbose: print('Plotting temperature convergence...')
-        self.convergence_temperature()
-
-        if verbose: print('Plotting number of particles convergence...')
-        self.convergence_particles()
-
-        if verbose: print('Plotting heat flux convergence...')
-        self.convergence_heat_flux()
-
-        if verbose: print('Plotting kappa convergence...')
-        self.convergence_kappa()
-
-        if verbose: print('Plotting energy density convergence...')
-        self.convergence_energy()
+        if self.sim_time.shape[0] > 1:
+        #     if verbose: print('Plotting convergence...')
+            self.plot_convergence_general(property_list = ['T', 'Np', 'phi', 'kappa'], cmap = None)
 
         if self.n_of_reservoirs >0 :
             if verbose: print('Plotting energy balance convergence...')
@@ -84,8 +102,6 @@ class Visualisation(Constants):
         if self.n_of_reservoirs >0 :
             if verbose: print('Reading particle data...')
             self.read_particles(verbose)
-            if verbose: print('Reading mode data...')
-            self.read_modes()
         # self.mode_histogram()
         # print('Plotting group velocity histogram...')
         # self.velocity_histogram()
@@ -94,8 +110,7 @@ class Visualisation(Constants):
             if self.args.subvolumes[0] == 'slice':
                 if verbose: print('Plotting thermal conductivity with frequency...')
                 with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
-                    self.flux_contribution(data_source = 'particles')
-                    self.flux_contribution(data_source = 'modes')
+                    self.flux_contribution()
         # print('Plotting energy dispersion...')
         # self.energy_dispersion()
 
@@ -265,46 +280,45 @@ class Visualisation(Constants):
         self.sv_mtm   = data[:, 5+7*self.n_of_reservoirs+ 5*self.n_of_subvols: 5+7*self.n_of_reservoirs+ 8*self.n_of_subvols].astype(float)
         self.sv_Np    = data[:, 5+7*self.n_of_reservoirs+ 8*self.n_of_subvols: 5+7*self.n_of_reservoirs+ 9*self.n_of_subvols].astype(float)
         if self.geometry.subvol_type == 'slice':
-            self.k_pt     = data[:, 5+7*self.n_of_reservoirs+ 9*self.n_of_subvols                                               ].astype(float)
-            self.k_lu     = data[:, 6+7*self.n_of_reservoirs+ 9*self.n_of_subvols                                               ].astype(float)
-            self.sv_k_pt  = data[:, 7+7*self.n_of_reservoirs+ 9*self.n_of_subvols: 7+7*self.n_of_reservoirs+10*self.n_of_subvols].astype(float)
-            self.sv_k_lu  = data[:, 7+7*self.n_of_reservoirs+10*self.n_of_subvols: 7+7*self.n_of_reservoirs+11*self.n_of_subvols].astype(float)
+            self.sv_k = data[:, 5+7*self.n_of_reservoirs+ 9*self.n_of_subvols: 5+7*self.n_of_reservoirs+10*self.n_of_subvols].astype(float)
+            self.k    = data[:, 5+7*self.n_of_reservoirs+10*self.n_of_subvols                                               ].astype(float)
         else:
             self.con_k  = data[:, 5+7*self.n_of_reservoirs+ 9*self.n_of_subvols: 5+7*self.n_of_reservoirs+ 9*self.n_of_subvols+self.n_of_subvol_con].astype(float)
 
         del(data)
 
-        self.mean_total_en = self.total_en[-100:].mean(axis = 0)
-        self.mean_en_res   = self.en_res[-100:, :].mean(axis = 0)
-        self.mean_phi_res  = self.phi_res[-100:, :].mean(axis = 0)
-        self.mean_mtm_res  = self.mtm_res[-100:, :].mean(axis = 0)
-        self.mean_Np       = self.N_p[-100:].mean(axis = 0)
-        self.mean_T        = self.T[-100:, :].mean(axis = 0)
-        self.mean_sv_en    = self.sv_en[-100:, :].mean(axis = 0)
-        self.mean_sv_phi   = self.sv_phi[-100:, :].mean(axis = 0)
-        self.mean_sv_mtm   = self.sv_mtm[-100:, :].mean(axis = 0)
-        self.mean_sv_Np    = self.sv_Np[-100:, :].mean(axis = 0)
-        if self.geometry.subvol_type == 'slice':
-            self.mean_sv_k_pt  = np.nanmean(self.sv_k_pt[-100:, :], axis = 0)
-            self.mean_sv_k_lu  = np.nanmean(self.sv_k_lu[-100:, :], axis = 0)
-        else:
-            self.mean_con_k = np.nanmean(self.con_k[-100:, :], axis = 0)
+        # mean and stdev
+        N = int(self.args.n_mean[0])
 
-        self.std_total_en = self.total_en[-100:].std(axis = 0)
-        self.std_en_res   = self.en_res[-100:, :].std(axis = 0)
-        self.std_phi_res  = self.phi_res[-100:, :].std(axis = 0)
-        self.std_mtm_res  = self.mtm_res[-100:, :].std(axis = 0)
-        self.std_Np       = self.N_p[-100:].std(axis = 0)
-        self.std_T        = self.T[-100:, :].std(axis = 0)
-        self.std_sv_en    = self.sv_en[-100:, :].std(axis = 0)
-        self.std_sv_phi   = self.sv_phi[-100:, :].std(axis = 0)
-        self.std_sv_mtm   = self.sv_mtm[-100:, :].std(axis = 0)
-        self.std_sv_Np    = self.sv_Np[-100:, :].std(axis = 0)
+        self.mean_total_en = self.total_en[-N:].mean(axis = 0)
+        self.mean_en_res   = self.en_res[-N:, :].mean(axis = 0)
+        self.mean_phi_res  = self.phi_res[-N:, :].mean(axis = 0)
+        self.mean_mtm_res  = self.mtm_res[-N:, :].mean(axis = 0)
+        self.mean_Np       = self.N_p[-N:].mean(axis = 0)
+        self.mean_T        = self.T[-N:, :].mean(axis = 0)
+        self.mean_sv_en    = self.sv_en[-N:, :].mean(axis = 0)
+        self.mean_sv_phi   = self.sv_phi[-N:, :].mean(axis = 0)
+        self.mean_sv_mtm   = self.sv_mtm[-N:, :].mean(axis = 0)
+        self.mean_sv_Np    = self.sv_Np[-N:, :].mean(axis = 0)
         if self.geometry.subvol_type == 'slice':
-            self.std_sv_k_pt  = np.nanstd(self.sv_k_pt[-100:, :], axis = 0)
-            self.std_sv_k_lu  = np.nanstd(self.sv_k_lu[-100:, :], axis = 0)
+            self.mean_sv_k  = np.nanmean(self.sv_k[-N:, :], axis = 0)
         else:
-            self.std_con_k = np.nanstd(self.con_k[-100:, :], axis = 0)
+            self.mean_con_k = np.nanmean(self.con_k[-N:, :], axis = 0)
+
+        self.std_total_en = self.total_en[-N:].std(axis = 0)
+        self.std_en_res   = self.en_res[-N:, :].std(axis = 0)
+        self.std_phi_res  = self.phi_res[-N:, :].std(axis = 0)
+        self.std_mtm_res  = self.mtm_res[-N:, :].std(axis = 0)
+        self.std_Np       = self.N_p[-N:].std(axis = 0)
+        self.std_T        = self.T[-N:, :].std(axis = 0)
+        self.std_sv_en    = self.sv_en[-N:, :].std(axis = 0)
+        self.std_sv_phi   = self.sv_phi[-N:, :].std(axis = 0)
+        self.std_sv_mtm   = self.sv_mtm[-N:, :].std(axis = 0)
+        self.std_sv_Np    = self.sv_Np[-N:, :].std(axis = 0)
+        if self.geometry.subvol_type == 'slice':
+            self.std_sv_k  = np.nanstd(self.sv_k[-N:, :], axis = 0)
+        else:
+            self.std_con_k = np.nanstd(self.con_k[-N:, :], axis = 0)
 
     def read_particles(self, verbose = True):
 
@@ -325,13 +339,6 @@ class Visualisation(Constants):
 
         del(data)
 
-    def read_modes(self):
-
-        nq = self.phonon.omega.shape[0]
-        nj = self.phonon.omega.shape[1]
-
-        self.occupation_values = np.loadtxt(self.mode_file, delimiter = ',').reshape(self.n_of_subvols, nq, nj)
-    
     def read_subvols(self):
         print('Reading subvol data')
         
@@ -341,413 +348,250 @@ class Visualisation(Constants):
 
         del(data)
     
-    def convergence_temperature(self):
-        fig, ax = plt.subplots(nrows = 1, ncols = 2, sharey = True, figsize = (15, 5) )
-        sv_axis = np.arange(self.n_of_subvols)+1
-        x_axis = self.sim_time
-
-        # Temperature
-        for i in range(self.n_of_subvols):
-            y_axis = self.T[:, i]
-            ax[0].plot(x_axis, y_axis)
+    def adjust_style_dict(self, plot, dict):
+        if plot == 'profile':
+            a = copy.copy(self.profile_plot_style)
+        elif plot == 'convergence':
+            a = copy.copy(self.convergence_plot_style)
+        elif plot == 'grid':
+            a = copy.copy(self.grid_style)
+        elif plot == 'mean':
+            a = copy.copy(self.mean_plot_style)
+        elif plot == 'stdev':
+            a = copy.copy(self.stdev_plot_style)
         
-        ax[0].set_xlabel('Simulation time [ps]', fontsize = 12)
-        ax[0].set_ylabel('Temperature [K]', fontsize = 12)
-
-        ax[1].set_xlabel('Subvolume', fontsize = 12)
-        ax[1].set_xticks(sv_axis)
-        
-        labels = ['Sv {:d}'.format(i) for i in sv_axis]
-        if self.n_of_subvols <=10:
-            ax[0].legend(labels)
-
-        # Temperature profile
-        n_timesteps = self.T.shape[0]
-
-        labels = []
-
-        n = 5
-        color = 'royalblue'
-
-        alphas = np.linspace(0.2, 1.0, n)
-        rgba_colors = np.zeros((n, 4))
-        rgba_colors[:, :3] = matplotlib.colors.to_rgb(color)
-        rgba_colors[:,  3] = alphas
-
-        for i in range(n):
-            index = int(np.floor(i*n_timesteps/(n-1)))
-            if i == n-1:
-                labels.append('{:.2f} ps'.format(self.sim_time[-1]))
-                ax[1].plot( sv_axis, self.T[-1, :], '-+', color = rgba_colors[i, :])
-            else:
-                labels.append('{:.2f} ps'.format(self.sim_time[index]))
-                ax[1].plot( sv_axis, self.T[index, :], '-+', color = rgba_colors[i, :])
-            
-        ax[1].errorbar(sv_axis, self.mean_T, yerr = self.std_T, linestyle = '--', marker = 'o', color = 'k', capsize = 5)
-        labels.append(r'$\mu \pm \sigma$')
-        
-        ax[1].legend(labels)
-
-        ax[0].grid(True, ls = '--', lw = 1, color = 'slategray')
-        ax[1].grid(True, ls = '--', lw = 1, color = 'slategray')
-
-        ax[0].ticklabel_format(axis = 'y', style = 'plain', scilimits=(0,0), useOffset = False)
-
-        plt.suptitle('Temperatures for each subvolume: evolution over time and profiles.', fontsize = 'xx-large')
-
-        plt.tight_layout()
-        plt.savefig(self.folder+'convergence_T.png')
-        plt.close(fig)
-        
-    def convergence_particles(self):
-        fig, ax = plt.subplots(nrows = 1, ncols = 2, sharey = True, figsize = (15, 5) )
-        sv_axis = np.arange(self.n_of_subvols)+1
-        x_axis = self.sim_time
-
-        for i in range(self.n_of_subvols):
-            y_axis = self.sv_Np[:, i]
-            ax[0].plot(x_axis, y_axis)
-        
-        mean = self.sv_Np.mean(axis = 1)
-        std  = self.sv_Np.std(axis = 1)
-
-        ax[0].plot(x_axis, mean, '--', color = 'k')
-        ax[0].fill_between(x_axis, mean-std, mean+std, color = 'lightsteelblue')
-
-        labels = ['Sv {:d}'.format(i) for i in sv_axis]
-        labels.append('Mean')
-        labels.append(r'$\pm \sigma$')
-        if self.n_of_subvols <=10:
-            ax[0].legend(labels)
-
-        ax[0].set_xlabel('Simulation time [ps]', fontsize = 12)
-        ax[0].set_ylabel('Number of Particles in Slice', fontsize = 12)
-
-        ax[1].set_xlabel('Subvolume', fontsize = 12)
-        ax[1].set_xticks(sv_axis)
-
-        n_timesteps = self.sv_Np.shape[0]
-
-        labels = []
-
-        n = 5
-        color = 'royalblue'
-
-        alphas = np.linspace(0.1, 1.0, n)
-        rgba_colors = np.zeros((n, 4))
-        rgba_colors[:, :3] = matplotlib.colors.to_rgb(color)
-        rgba_colors[:,  3] = alphas
-
-        for i in range(n):
-            index = int(np.floor(i*n_timesteps/(n-1)))
-            if i == n-1:
-                labels.append('{:.2f} ps'.format(self.sim_time[-1]))
-                ax[1].plot( sv_axis, self.sv_Np[-1, :], '-+', color = rgba_colors[i, :])
-            else:
-                labels.append('{:.2f} ps'.format(self.sim_time[index]))
-                ax[1].plot( sv_axis, self.sv_Np[index, :], '-+', color = rgba_colors[i, :])
-
-        ax[1].errorbar(sv_axis, self.mean_sv_Np, yerr = self.std_sv_Np, linestyle = '--', marker = 'o', color = 'k', capsize = 5)
-        labels.append(r'$\mu \pm \sigma$')
-
-        ax[1].legend(labels)
-
-        ax[1].set_xlabel('Subvolume', fontsize = 12)
-        ax[1].set_xticks(sv_axis)
-
-        ax[0].grid(True, ls = '--', lw = 1, color = 'slategray')
-        ax[1].grid(True, ls = '--', lw = 1, color = 'slategray')
-
-        ax[0].ticklabel_format(axis = 'y', style = 'plain', scilimits=(0,0), useOffset = False)
-
-        plt.suptitle('Number of particles in each slice: evolution over time and profiles.', fontsize = 'xx-large')
-
-        plt.tight_layout()
-        plt.savefig(self.folder+'convergence_Np.png')
-
-        plt.close(fig)
-    
-    def convergence_heat_flux(self):
-        fig, ax = plt.subplots(nrows = 3, ncols = 2, figsize = (15, 15), sharey = 'all' )
-        sv_axis = np.arange(self.n_of_subvols)+1
-        x_axis = self.sim_time
-
-        # plot convergence in each dimensions
-        for i in range(self.n_of_subvols):
-            for d in range(3):
-                y_axis = self.sv_phi[:, i*3+d]
-                ax[d, 0].plot(x_axis, y_axis)
-        
-        for d in range(3):
-            dim_i = np.arange(self.n_of_subvols)*3+d
-            mean = self.sv_phi[:, dim_i].mean(axis = 1)
-            std  = self.sv_phi[:, dim_i].std(axis = 1)
-
-            ax[d, 0].plot(x_axis, mean, '--', color = 'k')
-            ax[d, 0].fill_between(x_axis, mean-std, mean+std, color = 'lightsteelblue')
-
-        labels = ['Sv {:d}'.format(i) for i in sv_axis]
-        labels.append('Mean')
-        labels.append(r'$\pm \sigma$')
-        for a in ax[:, 0]:
-            if self.n_of_subvols <=10:
-                a.legend(labels)
-            a.set_ylabel('Heat Flux for Subvolume [W/m²]', fontsize = 12)
-        
-        ax[-1, 0].set_xlabel('Simulation time [ps]', fontsize = 12)
-
-        # Flux profile
-        n_timesteps = self.sv_phi.shape[0]
-
-        labels = []
-
-        n = 5
-        color = 'royalblue'
-
-        alphas = np.linspace(0.1, 1.0, n)
-        rgba_colors = np.zeros((n, 4))
-        rgba_colors[:, :3] = matplotlib.colors.to_rgb(color)
-        rgba_colors[:,  3] = alphas
-
-        for d in range(3):
-            dim_i = np.arange(self.n_of_subvols)*3+d
-            for i in range(n):
-                index = int(np.floor(i*n_timesteps/(n-1)))
-                if i == n-1:
-                    labels.append('{:.2f} ps'.format(self.sim_time[-1]))
-                    ax[d, 1].plot( sv_axis, self.sv_phi[-1, dim_i], '-+', color = rgba_colors[i, :])
-                else:
-                    labels.append('{:.2f} ps'.format(self.sim_time[index]))
-                    ax[d, 1].plot( sv_axis, self.sv_phi[index, dim_i], '-+', color = rgba_colors[i, :])
-            
-            ax[d, 1].errorbar(sv_axis, self.mean_sv_phi[dim_i], yerr = self.std_sv_phi[dim_i], linestyle = '--', marker = 'o', color = 'k', capsize = 5)
-            labels.append(r'$\mu \pm \sigma$')
-
-        for a in ax[:, 1]:
-            a.legend(labels)
-            a.set_xticks(sv_axis)
-
-        ax[-1, 1].set_xlabel('Subvolume', fontsize = 12)
-
-        plt.suptitle('Heat flux x, y and z for each subvolume: evolution over time and profiles.', fontsize = 'xx-large')
-
-        for a in ax.ravel():
-            a.grid(True, ls = '--', lw = 1, color = 'slategray')
-            a.ticklabel_format(axis = 'y', style = 'sci', scilimits=(0,0), useOffset = False)
-
-        plt.tight_layout()
-        plt.savefig(self.folder+'convergence_heat_flux.png')
-
-        plt.close(fig)
-    
-    def convergence_energy(self):
-        fig, ax = plt.subplots(nrows = 1, ncols = 2, figsize = (15, 5), sharey = 'all' )
-        sv_axis = np.arange(self.n_of_subvols)+1
-        x_axis = self.sim_time
-
-        for i in range(self.n_of_subvols):
-            y_axis = self.sv_en[:, i]
-            ax[0].plot(x_axis, y_axis)
-        
-        mean = self.sv_en.mean(axis = 1)
-        std  = self.sv_en.std(axis = 1)
-
-        ax[0].plot(x_axis, mean, '--', color = 'k')
-        ax[0].fill_between(x_axis, mean-std, mean+std, color = 'lightsteelblue')
-
-        labels = ['Sv {:d}'.format(i) for i in sv_axis]
-        labels.append('Mean')
-        labels.append(r'$\pm \sigma$')
-        if self.n_of_subvols <=10:
-            ax[0].legend(labels)
-
-        ax[0].set_xlabel('Simulation time [ps]', fontsize = 12)
-        ax[0].set_ylabel('Energy density for subvolume [eV/angstrom³]', fontsize = 12)
-        
-        ax[1].set_xlabel('Subvolume', fontsize = 12)
-        ax[1].set_xticks(sv_axis)
-
-        # Temperature profile
-        n_timesteps = self.sv_en.shape[0]
-
-        labels = []
-
-        n = 5
-        color = 'royalblue'
-
-        alphas = np.linspace(0.1, 1.0, n)
-        rgba_colors = np.zeros((n, 4))
-        rgba_colors[:, :3] = matplotlib.colors.to_rgb(color)
-        rgba_colors[:,  3] = alphas
-
-        for i in range(n):
-            index = int(np.floor(i*n_timesteps/(n-1)))
-            if i == n-1:
-                labels.append('{:.2f} ps'.format(self.sim_time[-1]))
-                ax[1].plot( sv_axis, self.sv_en[-1, :], '-+', color = rgba_colors[i, :])
-            else:
-                labels.append('{:.2f} ps'.format(self.sim_time[index]))
-                ax[1].plot( sv_axis, self.sv_en[index, :], '-+', color = rgba_colors[i, :])
-
-        ax[1].errorbar(sv_axis, self.mean_sv_en, yerr = self.std_sv_en, linestyle = '--', marker = 'o', color = 'k', capsize = 5)
-        labels.append(r'$\mu \pm \sigma$')
-
-        ax[1].legend(labels)
-
-        ax[0].grid(True, ls = '--', lw = 1, color = 'slategray')
-        ax[1].grid(True, ls = '--', lw = 1, color = 'slategray')
-
-        ax[0].ticklabel_format(axis = 'y', style = 'plain', scilimits=(0,0), useOffset = False)
-
-        plt.suptitle('Energy density for each subvolume: evolution over time and profiles.', fontsize = 'xx-large')
-
-        plt.tight_layout()
-        plt.savefig(self.folder+'convergence_energy.png')
-
-        plt.close(fig)
-
-    def convergence_kappa(self):
-        if self.geometry.subvol_type == 'slice':
-            fig, ax = plt.subplots(nrows = 3, ncols = 2, figsize = (15, 15), sharey = 'all', sharex = 'col')
-            sv_axis = np.arange(self.n_of_subvols)+1
-            x_axis = self.sim_time
-
-            for i in range(self.n_of_subvols):
-                ax[0, 0].plot(x_axis, self.sv_k_pt[:, i]) # particle values
-                ax[1, 0].plot(x_axis, self.sv_k_lu[:, i]) #   lookup values
-            
-            labels = ['Sv {:d}'.format(i) for i in sv_axis]
-
-            ax[0, 0].plot(x_axis, self.k_pt, '--', color = 'k')
-            ax[1, 0].plot(x_axis, self.k_lu, '--', color = 'k')
-            
-            ax[2, 0].plot(x_axis, self.k_pt,  '-', color = 'r')
-            ax[2, 0].plot(x_axis, self.k_lu,  '-', color = 'b')
-
-            N = 100
-            rolling_mean_k_pt = np.convolve(self.k_pt, np.ones(N)/N, mode = 'full')[:-N+1]
-            rolling_mean_k_lu = np.convolve(self.k_lu, np.ones(N)/N, mode = 'full')[:-N+1]
-
-            dev_pt = (self.k_pt - rolling_mean_k_pt)**2
-            dev_lu = (self.k_lu - rolling_mean_k_lu)**2
-
-            rolling_std_k_pt = (np.convolve(dev_pt, np.ones(N)/N, mode = 'full')[:-N+1])**0.5
-            rolling_std_k_lu = (np.convolve(dev_lu, np.ones(N)/N, mode = 'full')[:-N+1])**0.5
-
-            labels.append(r'Total $\kappa$')
-
-            for a in ax[[0, 1], 0]:
-                if self.n_of_subvols <=10:
-                    a.legend(labels)
-
-            ax[2, 0].fill_between(x_axis, rolling_mean_k_pt-rolling_std_k_pt, rolling_mean_k_pt+rolling_std_k_pt, color = 'lightcoral'    , alpha = 0.5)
-            ax[2, 0].fill_between(x_axis, rolling_mean_k_lu-rolling_std_k_lu, rolling_mean_k_lu+rolling_std_k_lu, color = 'lightsteelblue', alpha = 0.5)
-            ax[2, 0].legend(['Particles', 'Modes', r'$\mu \pm \sigma$ - Particles', r'$\mu \pm \sigma$ - Modes'])
-            
-            ax[0, 0].set_ylabel(r'$\kappa$ for Subvolume [W/m²$\cdot$K] - Particle data', fontsize = 12)
-            ax[1, 0].set_ylabel(r'$\kappa$ for Subvolume [W/m²$\cdot$K] - Modes data'   , fontsize = 12)
-            ax[2, 0].set_ylabel(r'Total $\kappa$ for each method [W/m²$\cdot$K]'   , fontsize = 12)
-            
-            ax[-1, 0].set_xlabel('Simulation time [ps]', fontsize = 12)
-
-            # Kappa profile
-            n_timesteps = self.sv_k_pt.shape[0]
-
-            labels = []
-
-            n = 5
-            color = 'royalblue'
-
-            alphas = np.linspace(0.1, 1.0, n)
-            rgba_colors = np.zeros((n, 4))
-            rgba_colors[:, :3] = matplotlib.colors.to_rgb(color)
-            rgba_colors[:,  3] = alphas
-
-            for i in range(n):
-                index = int(np.floor(i*n_timesteps/(n-1)))
-                if i == n-1:
-                    labels.append('{:.2f} ps'.format(self.sim_time[-1]))
-                    ax[0, 1].plot( sv_axis, self.sv_k_pt[-1, :], '-+', color = rgba_colors[i, :])
-                    ax[1, 1].plot( sv_axis, self.sv_k_lu[-1, :], '-+', color = rgba_colors[i, :])
-                else:
-                    labels.append('{:.2f} ps'.format(self.sim_time[index]))
-                    ax[0, 1].plot( sv_axis, self.sv_k_pt[index, :], '-+', color = rgba_colors[i, :])
-                    ax[1, 1].plot( sv_axis, self.sv_k_lu[index, :], '-+', color = rgba_colors[i, :])
-
-            ax[0, 1].errorbar(sv_axis, self.mean_sv_k_pt, yerr = self.std_sv_k_pt, linestyle = '--', marker = 'o', color = 'k', capsize = 5)
-            ax[1, 1].errorbar(sv_axis, self.mean_sv_k_lu, yerr = self.std_sv_k_lu, linestyle = '--', marker = 'o', color = 'k', capsize = 5)
-            
-            labels.append(r'$\mu \pm \sigma$')
-
-            ax[2, 1].errorbar(sv_axis, self.mean_sv_k_pt, yerr = self.std_sv_k_pt, linestyle = '--', marker = 'o', color = 'r', capsize = 5)
-            ax[2, 1].errorbar(sv_axis, self.mean_sv_k_lu, yerr = self.std_sv_k_lu, linestyle = '--', marker = 'o', color = 'b', capsize = 5)
-            ax[2, 1].legend(['Particles', 'Modes'])
-
-            for a in ax[[0, 1], 1]:
-                a.legend(labels)
-            for a in ax[:, 1]:
-                a.set_xticks(sv_axis)
-
-            ax[-1, 1].set_xlabel('Subvolume', fontsize = 12)
-
-            max_k = max([self.k_pt.max(), self.k_lu.max()])
-            for a in ax[:, 0]:
-                a.set_ylim(0, max_k*1.5)
-
-            plt.suptitle('Thermal conductivity for each subvolume: evolution over time and profiles.', fontsize = 'xx-large')
-
-            for a in ax.ravel():
-                a.grid(True, ls = '--', lw = 1, color = 'slategray')
-                a.ticklabel_format(axis = 'y', style = 'sci', scilimits=(0,0), useOffset = False)
-
-            plt.tight_layout()
-            plt.savefig(self.folder+'convergence_kappa.png')
-
-            plt.close(fig)
-        
+        if dict is None:
+            return a
         else:
-            fig, ax = plt.subplots(nrows = 1, ncols = 2, figsize = (15, 5), sharey = 'all')
-            con_axis = ['{:d}-{:d}'.format(i[0], i[1]) for i in self.geometry.subvol_connections]
-            x_axis = self.sim_time
+            for k in dict.keys():
+                a[k] = dict[k]
+            return a
 
-            for i in range(self.n_of_subvol_con):
-                ax[0].plot(x_axis, self.con_k[:, i]) # connection values
+    def plot_convergence_general(self, property_list = [], cmap = None, conv_dict = None, prof_dict = None, grid_dict = None, mean_dict = None, stdev_dict = None):
+        
+        # adjust style dict
+        conv_dict  = self.adjust_style_dict('convergence', conv_dict )
+        prof_dict  = self.adjust_style_dict('profile'    , prof_dict )
+        grid_dict  = self.adjust_style_dict('grid'       , grid_dict )
+        mean_dict  = self.adjust_style_dict('mean'       , mean_dict )
+        stdev_dict = self.adjust_style_dict('stdev'      , stdev_dict)
+
+        # setting colormaps
+        if cmap is not None:
+            cmap = matplotlib.colormaps[cmap]
+
+        for prop in property_list:
+            # defining data
+            if prop in ['temperature', 'T']:
+                data             = self.T
+                n_plot           = data.shape[1]
+                mean_prof        = self.mean_T
+                std_prof         = self.std_T
+                filename         = 'convergence_T'
+                suptitle         = r'Temperatures for each subvolume: evolution over time and local $\mu$ and $\sigma$.'
+                ylabel           = ['Local T [K]']
+                nrows            = 1
+                sharey           = True
+                sharex           = False
+                prof_x           = np.arange(self.geometry.n_of_subvols)
+                prof_xlabel      = 'Subvolume'
+                prof_xticks      = np.arange(self.geometry.n_of_subvols)
+                prof_xticklabels = np.arange(self.geometry.n_of_subvols, dtype = int)
+                conv_labels      = ['Sv {:d}'.format(i) for i in np.arange(self.geometry.n_of_subvols, dtype = int)]
+            elif prop in ['flux', 'phi']:
+                data             = self.sv_phi
+                n_plot           = int(data.shape[1]/3)
+                mean_prof        = self.mean_sv_phi
+                std_prof         = self.std_sv_phi
+                filename         = 'convergence_phi'
+                suptitle         = r'Heat flux for each subvolume: evolution over time and local $\mu$ and $\sigma$.'
+                ylabel           = [r'Local $\phi_{{{}}}$ [W/m²]'.format(i) for i in ['x', 'y', 'z']]
+                nrows            = 3
+                sharey           = 'all'
+                sharex           = 'col'
+                prof_x           = np.arange(self.geometry.n_of_subvols)
+                prof_xlabel      = 'Subvolume'
+                prof_xticks      = np.arange(self.geometry.n_of_subvols)
+                prof_xticklabels = np.arange(self.geometry.n_of_subvols, dtype = int)
+                conv_labels      = ['Sv {:d}'.format(i) for i in np.arange(self.geometry.n_of_subvols, dtype = int)]
+            elif prop in ['particles', 'Np']:
+                data             = self.sv_Np
+                n_plot           = data.shape[1]
+                mean_prof        = self.mean_sv_Np
+                std_prof         = self.std_sv_Np
+                filename         = 'convergence_Np'
+                suptitle         = r'Number of particles for each subvolume: evolution over time and local $\mu$ and $\sigma$.'
+                ylabel           = [r'$N_p$ [-]']
+                nrows            = 1
+                sharey           = True
+                sharex           = False
+                prof_x           = np.arange(self.geometry.n_of_subvols)
+                prof_xlabel      = 'Subvolume'
+                prof_xticks      = np.arange(self.geometry.n_of_subvols)
+                prof_xticklabels = np.arange(self.geometry.n_of_subvols, dtype = int)
+                conv_labels      = ['Sv {:d}'.format(i) for i in np.arange(self.geometry.n_of_subvols, dtype = int)]
+            elif prop in ['energy', 'e']:
+                data             = self.sv_en
+                n_plot           = data.shape[1]
+                mean_prof        = self.mean_sv_en
+                std_prof         = self.std_sv_en
+                filename         = 'convergence_e'
+                suptitle         = r'Energy density for each subvolume: evolution over time and local $\mu$ and $\sigma$.'
+                ylabel           = [r'Local $e$ [eV/$\AA^3$]']
+                nrows            = 1
+                sharey           = True
+                prof_x           = np.arange(self.geometry.n_of_subvols)
+                prof_xlabel      = 'Subvolume'
+                prof_xticks      = np.arange(self.geometry.n_of_subvols)
+                prof_xticklabels = np.arange(self.geometry.n_of_subvols, dtype = int)
+                conv_labels      = ['Sv {:d}'.format(i) for i in np.arange(self.geometry.n_of_subvols, dtype = int)]
+            elif prop in ['conductivity', 'kappa']:
+                filename  = 'convergence_kappa'
+                suptitle  = r'Thermal conductivity: evolution over time and local $\mu$ and $\sigma$.'
+                if self.geometry.subvol_type == 'slice':
+                    data             = self.sv_k
+                    data_total       = self.k
+                    n_plot           = data.shape[1]
+                    mean_prof        = self.mean_sv_k
+                    std_prof         = self.std_sv_k
+                    ylabel           = [r'{} $\kappa$ [W/m$\cdot$K]'.format(i) for i in ['Local', 'Total']]
+                    nrows            = 2
+                    sharey           = 'all'
+                    sharex           = False
+                    prof_x           = np.arange(self.geometry.n_of_subvols)
+                    prof_xlabel      = 'Subvolume'
+                    prof_xticks      = np.arange(self.geometry.n_of_subvols)
+                    prof_xticklabels = np.arange(self.geometry.n_of_subvols, dtype = int)
+                    conv_labels      = ['Sv {:d}'.format(i) for i in np.arange(self.geometry.n_of_subvols, dtype = int)]
+                else:
+                    data             = self.con_k
+                    n_plot           = data.shape[1]
+                    mean_prof        = self.mean_con_k
+                    std_prof         = self.std_con_k
+                    ylabel           = [r'Local $\kappa$ [W/m$\cdot$K]']
+                    nrows            = 1
+                    sharey           = True
+                    sharex           = False
+                    prof_x           = np.arange(self.geometry.n_of_subvol_con)
+                    prof_xlabel      = 'Connection'
+                    prof_xticks      = np.arange(self.geometry.n_of_subvol_con)
+                    prof_xticklabels = ['{:d}-{:d}'.format(i[0], i[1]) for i in self.geometry.subvol_connections]
+                    conv_labels      = ['Con {:d}-{:d}'.format(i[0], i[1]) for i in self.geometry.subvol_connections]
+                                    
+            # parameters in common for all figures
+            dpi         = 200 # resolution in dots per inch
+            cell_length = 5   # the standard size is cell_length*1.5*ncols, cell_length*nrows
+            ncols       = 2
+            conv_x = self.sim_time
+            conv_xlabel = 'Time [ps]'
+
+            # generate axes and figure
+            if nrows == 2:
+                fig, ax = plt.subplot_mosaic([['left', 'right'],['bottom', 'bottom']], sharey = True,
+                                             dpi     = dpi  ,
+                                             figsize = (ncols*1.5*cell_length, nrows*cell_length))
+            else:
+                fig, ax = plt.subplots(nrows   = nrows,
+                                       ncols   = ncols,
+                                       dpi     = dpi  ,
+                                       figsize = (ncols*1.5*cell_length, nrows*cell_length),
+                                       sharey  = sharey,
+                                       sharex  = sharex)
+
+            if cmap is not None:
+                if nrows == 1:
+                    n_lines = data.shape[1]
+                    ax[0].set_prop_cycle(plt.cycler('color', cmap(np.linspace(0, 1, n_lines))))
+                elif nrows == 2:
+                    n_lines = data.shape[1]
+                    ax['left'].set_prop_cycle(plt.cycler('color', cmap(np.linspace(0, 1, n_lines))))
+                else:
+                    n_lines = int(data.shape[1]/3) # dimensional data
+                    for a in ax[:, 0]:
+                        a.set_prop_cycle(plt.cycler('color', cmap(np.linspace(0, 1, n_lines))))
+
+            # plotting data:
+            if nrows == 3:
+                for d in range(3):
+                    for i in range(n_plot):
+                        ax[d, 0].plot(conv_x, data[:, 3*i+d], **conv_dict)
+                        ax[d, 0].set_ylabel(ylabel[d])
+                    ax[d, 1].errorbar(prof_x, mean_prof[np.arange(n_plot)*3+d], yerr = std_prof[np.arange(n_plot)*3+d], **prof_dict)
+                ax[-1, 0].set_xlabel(conv_xlabel)
+                ax[-1, 1].set_xlabel(prof_xlabel)
+                ax[-1, 1].set_xticks(prof_xticks)
+                ax[-1, 1].set_xticklabels(prof_xticklabels)
+                for a in ax[:, 0]:
+                    a.legend(conv_labels, ncols = 1+len(conv_labels)//10)
+                
+            elif nrows == 2:
+                for i in range(n_plot):
+                    ax['left'].plot(conv_x, data[:, i], **conv_dict)
+                ax['right'].errorbar(prof_x, mean_prof, yerr = std_prof, **prof_dict)
+                ax['bottom'].plot(conv_x, data_total, **conv_dict)
+
+                N = 100
+                rol_mean = np.convolve(data_total                , np.ones(N)/N, mode = 'full')[:-N+1]
+                rol_std  = (np.convolve((data_total - rol_mean)**2, np.ones(N)/N, mode = 'full')[:-N+1])**0.5
+                
+                ax['bottom'].plot(conv_x, rol_mean, **mean_dict )
+                ax['bottom'].plot(conv_x, rol_std , **stdev_dict)
+                
+                ax['left'].legend(conv_labels, ncols = 1+len(conv_labels)//10)
+                ax['left'].set_xlabel(conv_xlabel)
+                ax['left'].set_ylabel(ylabel[0])
+
+                ax['right'].set_xticks(prof_xticks)
+                ax['right'].set_xlabel(prof_xlabel)
+                ax['right'].set_xticklabels(prof_xticklabels)
+
+                ax['bottom'].legend(['Instantaneous', r'Rolling $\mu$ ({} datapoints)'.format(N), r'Rolling $\sigma$ ({} datapoints)'.format(N)])
+                ax['bottom'].set_xlabel(conv_xlabel)
+                ax['bottom'].set_ylabel(ylabel[1])
+
+                text_y = min(0, mean_prof.min()*1.5) + (max(0, mean_prof.max()*1.5) - min(0, mean_prof.min()*1.5))*0.75
+                props = dict(boxstyle='round', facecolor='white', alpha=0.5)
+                
+                ax['bottom'].text(conv_x[-1], text_y, #rol_mean[-1]*1.05,
+                                  r'$\kappa$ = {:.2f}$\pm${:.2f} W/m$\cdot$K'.format(rol_mean[-1], rol_std[-1]),
+                                  ha = 'right', bbox = props)
+                
+            else:
+                for i in range(n_plot):
+                    ax[0].plot(conv_x, data[:, i], **conv_dict)
+                ax[0].set_xlabel(conv_xlabel)
+                ax[0].set_ylabel(ylabel[0])
+
+                ax[1].errorbar(prof_x, mean_prof, yerr = std_prof, **prof_dict)
+                ax[1].set_xlabel(prof_xlabel)
+                ax[1].set_xticks(prof_xticks)
+                ax[1].set_xticklabels(prof_xticklabels)
+
+                # ax[0].ticklabel_format(axis = 'y', style = 'plain', scilimits=(0,0), useOffset = False)
+                ax[0].set_xlabel(conv_xlabel)
+                ax[0].legend(conv_labels, ncols = 1+len(conv_labels)//10)
             
-            labels = ['Con. {:d}-{:d}'.format(i[0], i[1]) for i in self.geometry.subvol_connections]
-
-            if self.n_of_subvol_con <=10:
-                ax[0].legend(labels)
-
-            ax[0].set_ylabel(r'$\kappa$ for Connection [W/m²$\cdot$K] - Particle data', fontsize = 12)
-            ax[0].set_xlabel('Simulation time [ps]', fontsize = 12)
-
-            # Kappa profile
-
-            ax[1].errorbar(con_axis, self.mean_con_k, yerr = self.std_con_k, linestyle = 'None', marker = 'o', color = 'k', capsize = 5)
+            if prop in ['kappa', 'conductivity']:
+                y_max = max(0, 1.5*mean_prof.max())
+                y_min = min(0, 1.5*mean_prof.min())
+                if type(ax) == dict:
+                    for key in ax.keys():
+                        ax[key].set_ylim(y_min, y_max)
+                else:
+                    ax.ravel()[0].set_ylim(y_min, y_max)
             
-            labels = [r'$\mu \pm \sigma$']
-
-            ax[1].legend(labels)
-            ax[1].set_xticks(con_axis, rotation = 45)
-
-            ax[1].set_xlabel('Connections', fontsize = 12)
-
-            max_k = self.mean_con_k.max()
-            min_k = self.mean_con_k.min()
-            if min_k > 0:
-                min_k = 0
-            if min_k != max_k:
-                ax[0].set_ylim(min_k*1.5, max_k*1.5)
-
-            plt.suptitle('Thermal conductivity for each subvolume connection: evolution over time and mean values.', fontsize = 'xx-large')
-
-            for a in ax.ravel():
-                a.grid(True, ls = '--', lw = 1, color = 'slategray')
-                a.ticklabel_format(axis = 'y', style = 'sci', scilimits=(0,0), useOffset = False)
-
-            plt.tight_layout()
-            plt.savefig(self.folder+'convergence_kappa.png')
-
+            if type(ax) == dict:
+                for key in ax.keys():
+                    ax[key].grid(True, **grid_dict)
+                    ax[key].ticklabel_format(axis = 'y', style = 'sci', scilimits=(0,3), useOffset = False)
+            else:
+                for a in ax.ravel():
+                    a.grid(True, **grid_dict)
+                    a.ticklabel_format(axis = 'y', style = 'sci', scilimits=(0,3), useOffset = False)
+            
+            plt.suptitle(suptitle, fontsize = 'xx-large') # figure title
+            plt.tight_layout() # pack everything
+            plt.savefig(self.folder + filename) # save figure
             plt.close(fig)
 
     def mode_histogram(self):
@@ -908,20 +752,13 @@ class Visualisation(Constants):
 
         plt.close(fig)
     
-    def flux_contribution(self, data_source = 'modes'):
+    def flux_contribution(self):
         
-        if data_source == 'modes':
-            # getting mode data
-            omega      = self.phonon.omega # (Q, J)
-            velocity   = self.phonon.group_vel[:, :, self.geometry.slice_axis] # (Q, J)
-            occupation = self.occupation_values # (SV, Q, J)
-
-        elif data_source == 'particles':
-            # particle data
-            omega    = self.phonon.omega[self.q_point, self.branch]
-            velocity = self.phonon.group_vel[self.q_point, self.branch, self.geometry.slice_axis]
-            occupation = self.occupation
-            slice_id = np.argmax(self.geometry.subvol_classifier.predict(self.geometry.scale_positions(self.position)), axis = 1)
+        # particle data
+        omega    = self.phonon.omega[self.q_point, self.branch]
+        velocity = self.phonon.group_vel[self.q_point, self.branch, self.geometry.slice_axis]
+        occupation = self.occupation
+        slice_id = np.argmax(self.geometry.subvol_classifier.predict(self.geometry.scale_positions(self.position)), axis = 1)
         
         n_dt_to_conv = np.floor( np.log10( self.args.iterations[0] ) ) - 2    # number of timesteps for each convergence datapoints
         n_dt_to_conv = int(10**n_dt_to_conv)
@@ -944,10 +781,7 @@ class Visualisation(Constants):
 
         dT = slice_res_T[2:] - slice_res_T[:-2]  # K
 
-        if data_source == 'modes':
-            dT = dT.reshape(-1, 1, 1)
-        elif data_source == 'particles':
-            dT = dT[slice_id]
+        dT = dT[slice_id]
         
         mode_k = mode_flux*(-dX/dT) # (W/m²) * (m/K) = W/m K ; Central difference --> [T(+1) - T(-1)]/[x(+1) - x(-1)] - - (SV, Q, J)
 
@@ -955,8 +789,7 @@ class Visualisation(Constants):
         dX_total = self.geometry.slice_length*(self.n_of_subvols-1)*self.a_in_m # m
         dT_total = slice_res_T[-1] - slice_res_T[0]                             # K
 
-        if data_source == 'particles':
-            mode_k_total = mode_flux*(-dX_total/dT_total) # W/m² - (Q, J)
+        mode_k_total = mode_flux*(-dX_total/dT_total) # W/m² - (Q, J)
         
         # defining bins
 
@@ -978,16 +811,11 @@ class Visualisation(Constants):
         
             bin_mask = (omega >= omega_bins[b]) & (omega < omega_bins[b+1]) # identifying omega bin - (Q, J,)
 
-            if data_source == 'modes':
-                k_omega_total[b] = (mode_k.mean(axis = 0)*bin_mask).sum()
-                k_omega[:, b] = (mode_k*bin_mask).sum(axis = (1, 2))
-            
-            elif data_source == 'particles':
-                k_omega_total[b] = mode_k[bin_mask].sum()*self.phonon.number_of_modes/subvol_Np.sum()
-            
-                for sv in range(self.n_of_subvols):
-                    i = (slice_id == sv) & bin_mask
-                    k_omega[sv, b] = mode_k[i].sum()*self.phonon.number_of_modes/subvol_Np[sv]
+            k_omega_total[b] = mode_k[bin_mask].sum()*self.phonon.number_of_modes/subvol_Np.sum()
+        
+            for sv in range(self.n_of_subvols):
+                i = (slice_id == sv) & bin_mask
+                k_omega[sv, b] = mode_k[i].sum()*self.phonon.number_of_modes/subvol_Np[sv]
                 
         for sv in range(self.n_of_subvols):
             
@@ -1029,7 +857,7 @@ class Visualisation(Constants):
         plt.suptitle('Contribution of each frequency band to thermal conductivity. {:d} bands.'.format(n_bins), fontsize = 'xx-large')
 
         plt.tight_layout(pad = 3)
-        plt.savefig(self.folder + 'k_contribution_' + data_source + '.png')
+        plt.savefig(self.folder + 'k_contribution.png')
 
         plt.close(fig)
 

@@ -67,7 +67,7 @@ else:
 
 pop = Population(args, geo, phonons)
 
-while (pop.current_timestep < args.iterations[0]) and (pop.residue.max() >= pop.conv_crit):
+while pop.current_timestep < args.iterations[0]:
     
     pop.run_timestep(geo, phonons)
 

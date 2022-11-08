@@ -72,44 +72,45 @@ In order to define a study case and run a simulation, several parameters need to
 
 Here is a list of all parameters that can be set:
 
-| Parameter                | Keyword              | Reduced | Description                                                            | Types      | Default         |
-| ------------------------ | -------------------- | --------| ---------------------------------------------------------------------- | ---------- | --------------- |
-| Parameters file          | `--from_file`        | `-ff`   | File name with extension of a file containing all input parameters. Used to avoid inputing lots of parameters directly on terminal. Full path advised.       | String     |                 | 
-| Material folder          | `--mat_folder`       | `-mf`   | Path of the folders containing the material files. Full path advisable. | String     | |
-| hdf5 file                | `--hdf_file`         | `-hf`   | File names in each `-mf` with extensions.                                 | String     |                 | 
-| POSCAR file              | `--poscar_file`      | `-pf`   | File names in each `-mf` with extensions.                                 | String     |                 |
-| Material names           | `--mat_names`        | `-mn`   | Material name identifier.  | String | |
-| Pickled materials        | `--pickled_mat`      | `-pm`   | Material indexes as declared on `-mf` to check whether it is already processed and pickled or not. If it is not, it will be pickled for use next time. Useful to avoid redoing phonon calculations for the same reference temperature. | Integer | |
-| Results folder           | `--results_folder`   | `-rf`   | The name of the folder to be created containing all result files. If none is informed, no folder is created.                      | String     | `''`            |
-| Results location         | `--results_location` | `-rl`   | The path where the result folder will be created. It accepts `local` if the results should be saved in the current directory, `main` if they should be saved in the same directory as `nanokappa.py`, or a custom path.               | String     | `local`            |
-| Geometry                 | `--geometry`         | `-g`    | Standard geometry name or file name. Geometry coordinates in angstroms | String     | `cuboid`        |
-| Dimensions               | `--dimensions`       | `-d`    | Dimensions for standard base geometries as asked by [trimesh.creation](https://trimsh.org/trimesh.creation.html) primitives | Floats | `20e3 1e3 1e3` |
-| Scale                    | `--scale`            | `-s`    | Scale factors for the base geometry (x, y, z)                          | Float   x3 | `1 1 1`         |
-| Geometry rotation        | `--geo_rotation`     | `-gr`   | Euler angles to rotate the base geometry (see [scipy.rotation.from_euler](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.from_euler.html)) | Float x3 | `0 0 0`         |
-| Material rotation        | `--mat_rotation`     | `-mr`   | Euler angles to change crystal orientation (see [scipy.rotation.from_euler](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.from_euler.html)) | Float x3 | `0 0 0`         |
-| Boundary conditions      | `--bound_cond`       | `-bc`   | Type of boundary condition for each facet declared in `--bound_facets`. If one condition more is given, it is considered to be the same for all non informed facets. Accepts `T` for temperature, `P` for periodic, `R` for roughness/reflection, `F` for heat flux. | String     | `T T P`      |
-| Facets with imposed BC   | `--bound_facets`     | `-bf`   | The facets to imposed the boundary conditions on. | Integer | `0 3` | 
-| Boundary condition values| `--bound_values`     | `-bv`   | Values for each imposed boundary conditions. Temperatures in Kelvin, heat fluxes in W/m<sup>2</sup>, Roughness in angstroms.                 | Float   | `303 297`       |
-| Connected faces          | `--connect_facets`   | `-cf`   | Indexes of the connected facets to apply the periodic boundary condition. They are grouped in pairs (first with second, third with fourth, and so on). They must: 1. Have vertices with the same coordinates in relation to their centroids; 2. Have the same area; 3. Have their normals parallel to each other and in opposite directions. | Integer | `1 5 2 4` |
-| Collision offset         | `--offset`           | `-os`   | Offset of the collision detection from the wall to avoid errors in the reflection procedure. Usually unnecessary to change, but useful to have as an option. | Float | `2e-8` |
-| Temperature distribution | `--temp_dist`        | `-td`   | Shape of the initial temperature profile. Accepts `cold`, `hot`, `mean`, `random`, `custom`.    | String     | `cold` |
-| Subvolume temperature    | `--subvol_temp`      | `-st`   | Initial temperature of each subvolume when `custom` is informed in `-td`, in Kelvin. | Float | |
-| Reference temperature    | `--reference_temp`   | `-rt`   | The temperature at which the occupation number for every mode will be considered zero, in Kelvin. | Float | `0` |
-| N° of particles          | `--particles`        | `-p`    | Number of particles given as `keyword number`. Can be given as the total number (keyworld `total`), the number per-mode-per-subvolume (keyworld `pmps`) and the number per cubic angstom (keyworld `pv`).                               | String, Integer    | `pmps 1`             |
-| Particle distribution    | `--part_dist`        | `-pd`   | How to distribute particles at the beginning of the simulation. Composed of two keywords: `random/center_subvol/domain`. | String | `random_subvol` |
-| Reservoir generation     | `--reservoir_gen`    | `-rg`   | How to generate particles on the reservoirs. `fixed_rate` means the particles are generated in an approximately fixed rate independently of the leaving particles. `one_to_one` means that the number of particles generated is the same of particles leaving in order to keep the number of particles stable. | String | `fixed_rate` | 
-| Timestep                 | `--timestep`         | `-ts`   | Timestep of each iteration in picoseconds                                  | Float      | `1`         |
-| Iterations               | `--iterations`       | `-i`    | Number of iterations to be performed                                   | Integer    | `10000`         |
-| Subvolumes               | `--subvolumes`       | `-sv`   | Type of subvolumes, number of subvolumes and slicing axis when the case (x = 0, y = 1, z = 2). Accepts `slice`, `grid` and `voronoi` as subvolume types.                | String Integer (Integer Integer) | `slice 10 0`          |
-| Empty subvols            | `--empty_subvols`    | `-es`   | Index of subvolumes that are to be initialised as empty (no particles). | Integer |   |
-| Subvol material          | `--subvol_material`  | `-sm`   | Material index of each subvolume, according to the order given at `-pf` and `-hf`. | Integer |  |
-| Energy normalisation     | `--energy_normal`    | `-en`   | The way to normalise energy to energy density. Choose between `fixed` (according to the expected number of particles in the subvolume) and `mean` (arithmetic mean of the particles inside). | String | `fixed`
-| Real time plot           | `--rt_plot`          | `-rp`   | Property to plot particles in real time (frequency, occupation, etc.)  | String     | `random`        |
-| Figure plot              | `--fig_plot`         | `-fp`   | Property to plot particles at end of run (frequency, occupation, etc.) | Strings    | `T omega e`     |
-| Colormap                 | `--colormap`         | `-cm`   | Colormap to use in every plot                                          | String     | `viridis`       |
-| Convergence criteria     | `--conv_crit`        | `-cc`   | Criteria for convergence and stop simulation. | Float | 1e-6 |
-| Use lookup table         | `--lookup`           | `-lu`   | Whether temperature should be calculated from particles or from the updated solution for the BTE (solution table).| Bool or Int| `False` or `0` | 
-
+| Parameter                 | Keyword              | Reduced | Description | Types | Default |
+| ------------------------- | -------------------- | --------| ----------- | ----- | ------- |
+| Parameters file           | `--from_file`        | `-ff`   | File name with extension of a file containing all input parameters. Used to avoid inputing lots of parameters directly on terminal. Full path advised. | String | | 
+| Material folder           | `--mat_folder`       | `-mf`   | Path of the folders containing the material files. Full path advisable. | String | |
+| hdf5 file                 | `--hdf_file`         | `-hf`   | File names in each `-mf` with extensions. | String | | 
+| POSCAR file               | `--poscar_file`      | `-pf`   | File names in each `-mf` with extensions. | String | |
+| Material names            | `--mat_names`        | `-mn`   | Material name identifier. | String | |
+| Pickled materials         | `--pickled_mat`      | `-pm`   | Material indexes as declared on `-mf` to check whether it is already processed and pickled or not. If it is not, it will be pickled for use next time. Useful to avoid redoing phonon calculations for the same reference temperature. | Integer | |
+| Results folder            | `--results_folder`   | `-rf`   | The name of the folder to be created containing all result files. If none is informed, no folder is created. | String | `''` |
+| Results location          | `--results_location` | `-rl`   | The path where the result folder will be created. It accepts `local` if the results should be saved in the current directory, `main` if they should be saved in the same directory as `nanokappa.py`, or a custom path. | String | `local` |
+| Geometry                  | `--geometry`         | `-g`    | Standard geometry name or file name. Geometry coordinates in angstroms | String | `cuboid` |
+| Dimensions                | `--dimensions`       | `-d`    | Dimensions for standard base geometries as asked by [trimesh.creation](https://trimsh.org/trimesh.creation.html) primitives | Floats | `20e3 1e3 1e3` |
+| Scale                     | `--scale`            | `-s`    | Scale factors for the base geometry (x, y, z) | Float x3 | `1 1 1` |
+| Geometry rotation         | `--geo_rotation`     | `-gr`   | Euler angles to rotate the base geometry (see [scipy.rotation.from_euler](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.from_euler.html)) | Float x3 | `0 0 0` |
+| Material rotation         | `--mat_rotation`     | `-mr`   | Euler angles to change crystal orientation (see [scipy.rotation.from_euler](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.from_euler.html)) | Float x3 | `0 0 0` |
+| Boundary conditions       | `--bound_cond`       | `-bc`   | Type of boundary condition for each facet declared in `--bound_facets`. If one condition more is given, it is considered to be the same for all non informed facets. Accepts `T` for temperature, `P` for periodic, `R` for roughness/reflection, `F` for heat flux. | String | `T T P` |
+| Facets with imposed BC    | `--bound_facets`     | `-bf`   | The facets to imposed the boundary conditions on. | Integer | `0 3` | 
+| Positions with imposed BC | `--bound_pos`        | `-bp`   | Set the POSITIONS from which to find the closest facet to apply the specific boundary conditions. First value is a keyword `relative` - considers all points in the mesh between 0 and 1 - or `absolute` - direct positions. | String Float | | 
+| Boundary condition values | `--bound_values`     | `-bv`   | Values for each imposed boundary conditions. Temperatures in Kelvin, heat fluxes in W/m<sup>2</sup>, Roughness in angstroms. | Float | `303 297` |
+| Connected faces           | `--connect_facets`   | `-cf`   | Indexes of the connected facets to apply the periodic boundary condition. They are grouped in pairs (first with second, third with fourth, and so on). They must: 1. Have vertices with the same coordinates in relation to their centroids; 2. Have the same area; 3. Have their normals parallel to each other and in opposite directions. | Integer | `1 5 2 4` |
+| Collision offset          | `--offset`           | `-os`   | Offset of the collision detection from the wall to avoid errors in the reflection procedure. Usually unnecessary to change, but useful to have as an option. | Float | `2e-8` |
+| Temperature distribution  | `--temp_dist`        | `-td`   | Shape of the initial temperature profile. Accepts `cold`, `hot`, `mean`, `linear`, `random`, `custom`.    | String     | `cold` |
+| Subvolume temperature     | `--subvol_temp`      | `-st`   | Initial temperature of each subvolume when `custom` is informed in `-td`, in Kelvin. | Float | |
+| Reference temperature     | `--reference_temp`   | `-rt`   | The temperature at which the occupation number for every mode will be considered zero, in Kelvin. | Float | `0` |
+| N° of particles           | `--particles`        | `-p`    | Number of particles given as `keyword number`. Can be given as the total number (keyworld `total`), the number per-mode-per-subvolume (keyworld `pmps`) and the number per cubic angstom (keyworld `pv`). | String Integer | `pmps 1` |
+| Particle distribution     | `--part_dist`        | `-pd`   | How to distribute particles at the beginning of the simulation. Composed of two keywords: `random/center_subvol/domain`. | String | `random_subvol` |
+| Reservoir generation      | `--reservoir_gen`    | `-rg`   | How to generate particles on the reservoirs. `fixed_rate` means the particles are generated in an approximately fixed rate independently of the leaving particles. `one_to_one` means that the number of particles generated is the same of particles leaving in order to keep the number of particles stable. | String | `fixed_rate` | 
+| Timestep                  | `--timestep`         | `-ts`   | Timestep of each iteration in picoseconds | Float | `1` |
+| Iterations                | `--iterations`       | `-i`    | Number of iterations to be performed | Integer | `10000` |
+| Subvolumes                | `--subvolumes`       | `-sv`   | Type of subvolumes, number of subvolumes and slicing axis when the case (x = 0, y = 1, z = 2). Accepts `slice`, `grid` and `voronoi` as subvolume types. | String Integer (Integer Integer) | `slice 10 0` |
+| Empty subvols             | `--empty_subvols`    | `-es`   | Index of subvolumes that are to be initialised as empty (no particles). | Integer | |
+| Energy normalisation      | `--energy_normal`    | `-en`   | The way to normalise energy to energy density. Choose between `fixed` (according to the expected number of particles in the subvolume) and `mean` (arithmetic mean of the particles inside). | String | `fixed`
+| Path points               | `--path_points`      | `-pp`   | Set the approximate points where the path to calculate $\kappa_{path}$ will go through. Declared the same way as `--bound_pos`.| String Float | `relative 0 0.5 0.5 1 0.5 0.5` |
+| Number of datapoints      | `--n_mean`           | `-nm`   | Number of datapoints considered to calculated $\mu$ and $\sigma$ values. | Int | `100` |
+| Real time plot            | `--rt_plot`          | `-rp`   | Property to plot particles in real time (frequency, occupation, etc.)  | String | `random` |
+| Figure plot               | `--fig_plot`         | `-fp`   | Property to plot particles at end of run (frequency, occupation, etc.) | Strings | `T omega e` |
+| Colormap                  | `--colormap`         | `-cm`   | Colormap to use in every plot | String | `viridis` |
+| Convergence criteria      | `--conv_crit`        | `-cc`   | Criteria for convergence and stop simulation. | Float | 1e-6 |
+<!-- | Subvol material          | `--subvol_material`  | `-sm`   | Material index of each subvolume, according to the order given at `-pf` and `-hf`. | Integer |  | -->
 
 <p>&nbsp</p>
 

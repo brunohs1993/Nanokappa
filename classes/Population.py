@@ -51,7 +51,6 @@ class Population(Constants):
         self.args = arguments
         self.results_folder_name = self.args.results_folder
         
-        self.lookup    = bool(int(self.args.lookup[0]))
         self.conv_crit = float(self.args.conv_crit[0])
 
         self.norm = self.args.energy_normal[0]
@@ -126,8 +125,6 @@ class Population(Constants):
 
         self.initialise_all_particles(geometry, phonon) # initialising particles
         
-        self.residue   = np.ones(self.occupation_lookup.shape)*2*self.conv_crit
-
         self.plot_figures(geometry, property_plot = self.args.fig_plot, colormap = self.args.colormap[0])
 
         print('Creating convergence file...')
@@ -296,9 +293,6 @@ class Population(Constants):
         self.temperatures, self.subvol_temperature = self.assign_temperatures(self.positions, geometry)
 
         # occupation considering reference
-        self.initialise_occupation_lookup(phonon) # BTE solution lookup table
-        # self.initialise_unique_sv_col(geometry)   # tracking of collisions
-        
         self.occupation        = phonon.calculate_occupation(self.temperatures, self.omega, reference = True)
         self.energies          = self.hbar*self.omega*self.occupation
         self.momentum          = self.hbar*self.wavevectors*self.occupation.reshape(-1, 1)
@@ -314,10 +308,10 @@ class Population(Constants):
         self.collision_cond = self.get_collision_condition(self.collision_facets)
 
         print('Initialising local quantities...')
-        self.calculate_energy(geometry, phonon, lookup = self.lookup)
-        self.subvol_heat_flux = self.calculate_heat_flux(geometry, phonon, lookup = self.lookup)
-        self.calculate_kappa(geometry, phonon, lookup = self.lookup)
-        self.calculate_momentum(geometry, phonon, lookup = self.lookup)
+        self.calculate_energy(geometry, phonon)
+        self.subvol_heat_flux = self.calculate_heat_flux(geometry, phonon)
+        self.calculate_kappa(geometry)
+        self.calculate_momentum(geometry, phonon)
 
     def initialise_reservoirs(self, geometry, phonon):
         
@@ -658,104 +652,56 @@ class Population(Constants):
 
         return subvol_id
 
-    def initialise_occupation_lookup(self, phonon):
-        
-        print('Initialising BTE solution table...')
-
-        T = self.subvol_temperature.reshape(-1, 1, 1)
-
-        self.occupation_lookup = phonon.calculate_occupation(T, phonon.omega, reference = True)
-        
-    def save_occupation_lookup(self, phonon):
-
-        old_occ = copy.copy(self.occupation_lookup)
-
-        # c = np.zeros((self.n_of_subvols, phonon.number_of_qpoints, phonon.number_of_branches))
-        for sv in range(self.n_of_subvols):
-
-            i = np.nonzero(self.subvol_id == sv)[0] # get with particles in the subvolume
-            data = self.modes[i, :]                 # and their modes
-
-            u, count = np.unique(data, axis = 0, return_counts = True) # unique modes in sv and where they are located in data
-
-            # c[sv, u[:, 0], u[:, 1]] = count
-            
-            occ_sum = np.zeros(phonon.omega.shape) # initialise the new occupation matrix
-            for p in range(len(i)):
-                occ_sum[data[p, 0], data[p, 1]] += self.occupation[i[p]] # sum for each present mode
-            
-            occ_sum[u[:, 0], u[:, 1]] /= count # average them
-
-            occ_sum = np.where(occ_sum == 0, old_occ[sv, :, :], occ_sum)
-
-            self.occupation_lookup[sv, :, :] = occ_sum
-
-            for deg in phonon.degenerate_modes:
-                    self.occupation_lookup[sv, deg[:, 0], deg[:, 1]] = self.occupation_lookup[sv, deg[:, 0], deg[:, 1]].mean()
-
-        diff = np.absolute(self.occupation_lookup - old_occ)
-
-        self.residue = np.linalg.norm(diff, axis = (1, 2))
-
     def refresh_temperatures(self, geometry, phonon):
         '''Refresh energies and temperatures while enforcing boundary conditions as given by geometry.'''
         self.energies = self.occupation*self.omega*self.hbar    # eV
         
         self.subvol_id = self.get_subvol_id(self.positions, geometry)
 
-        self.calculate_energy(geometry, phonon, lookup = self.lookup)
+        self.calculate_energy(geometry, phonon)
 
         self.subvol_temperature = phonon.temperature_function(self.subvol_energy)
 
         self.temperatures = self.subvol_temperature[self.subvol_id]
 
-    def calculate_energy(self, geometry, phonon, lookup = False):
+    def calculate_energy(self, geometry, phonon):
 
-        if lookup:
-            self.subvol_energy = np.sum(self.occupation_lookup*phonon.omega*self.hbar, axis = (1, 2))
-        else:
-            self.subvol_energy = np.zeros(self.n_of_subvols)
-            for sv in range(self.n_of_subvols):
-                i = np.nonzero(self.subvol_id == sv)[0]
-                self.subvol_energy[sv] = self.energies[i].sum()
+        self.subvol_energy = np.zeros(self.n_of_subvols)
+        for sv in range(self.n_of_subvols):
+            i = np.nonzero(self.subvol_id == sv)[0]
+            self.subvol_energy[sv] = self.energies[i].sum()
 
-            if self.norm == 'fixed':
-                normalisation = phonon.number_of_active_modes/(self.particle_density*geometry.subvol_volume)
-            elif self.norm == 'mean':
-                normalisation = phonon.number_of_active_modes/self.subvol_N_p
-                normalisation = np.where(np.isnan(normalisation), 0, normalisation)
-            self.subvol_energy = self.subvol_energy*normalisation
+        if self.norm == 'fixed':
+            normalisation = phonon.number_of_active_modes/(self.particle_density*geometry.subvol_volume)
+        elif self.norm == 'mean':
+            normalisation = phonon.number_of_active_modes/self.subvol_N_p
+            normalisation = np.where(np.isnan(normalisation), 0, normalisation)
+        self.subvol_energy = self.subvol_energy*normalisation
         
         self.subvol_energy = phonon.normalise_to_density(self.subvol_energy)
 
         self.subvol_energy += phonon.reference_energy
 
-    def calculate_heat_flux(self, geometry, phonon, lookup = False):
+    def calculate_heat_flux(self, geometry, phonon):
         
-        if lookup:
-            energy = self.occupation_lookup*self.hbar*phonon.omega # (SV, Q, J)
-            heat_flux = phonon.group_vel*energy.reshape(energy.shape[0], energy.shape[1], energy.shape[2], 1) # (SV, Q, J, 3)
-            heat_flux = np.sum(heat_flux, axis = (1, 2)) # SV, 3
+        heat_flux = np.zeros((self.n_of_subvols, 3))
 
-        else:
-            heat_flux = np.zeros((self.n_of_subvols, 3))
+        for i in range(self.n_of_subvols):
+            ind = np.nonzero(self.subvol_id == i)[0] # 1d subvol id
+            heat_flux[i, :] = np.sum(self.group_vel[ind, :]*self.energies[ind].reshape(-1, 1), axis = 0)
 
-            for i in range(self.n_of_subvols):
-                ind = np.nonzero(self.subvol_id == i)[0] # 1d subvol id
-                heat_flux[i, :] = np.sum(self.group_vel[ind, :]*self.energies[ind].reshape(-1, 1), axis = 0)
-
-            if self.norm == 'fixed':
-                normalisation = phonon.number_of_active_modes/(self.particle_density*geometry.subvol_volume.reshape(-1, 1))
-            elif self.norm == 'mean':
-                normalisation = phonon.number_of_active_modes/self.subvol_N_p.reshape(-1, 1)
-            
-            heat_flux = heat_flux*normalisation
+        if self.norm == 'fixed':
+            normalisation = phonon.number_of_active_modes/(self.particle_density*geometry.subvol_volume.reshape(-1, 1))
+        elif self.norm == 'mean':
+            normalisation = phonon.number_of_active_modes/self.subvol_N_p.reshape(-1, 1)
+        
+        heat_flux = heat_flux*normalisation
         
         heat_flux = phonon.normalise_to_density(heat_flux)
         
         return heat_flux*self.eVpsa2_in_Wm2 # subvol heat flux
         
-    def calculate_kappa(self, geometry, phonon, lookup = False):
+    def calculate_kappa(self, geometry):
         if geometry.subvol_type == 'slice':
             # if the subvol type is slice, the simulation is basically 1d and
             # kappa can be calculated the usual way
@@ -774,25 +720,10 @@ class Population(Constants):
             DT = T[-1] - T[0]
             
             with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
-                if lookup:
-                    phi_extra = self.calculate_heat_flux(geometry, phonon, False)[:, geometry.slice_axis]
-
-                    self.subvol_kappa_particles = -phi_extra*dx/dT
-                    self.kappa_particles        = -np.sum(phi_extra*self.subvol_N_p)*(DX/DT)/self.N_p
-                    
-                    self.subvol_kappa_lookup    = -phi*dx/dT
-                    self.kappa_lookup           = -np.sum(phi*self.subvol_volume)*(DX/DT)/geometry.volume
-                else:
-                    phi_extra = self.calculate_heat_flux(geometry, phonon, True)[:, geometry.slice_axis]
-
-                    self.subvol_kappa_particles = -phi*dx/dT
-                    self.kappa_particles        = -np.sum(phi*self.subvol_N_p)*(DX/DT)/self.N_p
-                    
-                    self.subvol_kappa_lookup    = -phi_extra*dx/dT
-                    self.kappa_lookup           = -np.sum(phi_extra*self.subvol_volume)*(DX/DT)/geometry.volume
-            
-            self.subvol_kappa_lookup[np.absolute(self.subvol_kappa_lookup) == np.inf] = 0
-            self.subvol_kappa_particles[np.absolute(self.subvol_kappa_particles) == np.inf] = 0
+                self.subvol_kappa = -phi*dx/dT
+                self.kappa        = -np.sum(phi*self.subvol_N_p)*(DX/DT)/self.N_p
+                
+            self.subvol_kappa[np.absolute(self.subvol_kappa) == np.inf] = 0
 
         else:
             # renaming the indices to keep the code readable
@@ -811,25 +742,19 @@ class Population(Constants):
             with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
                 self.svcon_kappa = np.where(dT == 0, 0, -phi_dot_n*np.linalg.norm(dx, axis = 1)*self.a_in_m/dT)
 
-    def calculate_momentum(self, geometry, phonon, lookup = False):
+    def calculate_momentum(self, geometry, phonon):
         
-        if lookup:
-            n = self.occupation_lookup.reshape(self.occupation_lookup.shape[0], self.occupation_lookup.shape[1], self.occupation_lookup.shape[2], 1) # (SV, Q, J, 1)
-            k = phonon.wavevectors.reshape(-1, 1, 3) # (Q, 1, 3)
-            momentum = n*self.hbar*k # (SV, Q, J, 3)
-            momentum = np.sum(momentum, axis = (1, 2)) # (SV, 3)
-        else:
-            momentum = np.zeros((self.n_of_subvols, 3))
-            for i in range(self.n_of_subvols):
-                ind = np.nonzero(self.subvol_id == i)[0] # 1d subvol id
-                momentum[i, :] = np.sum(self.hbar*self.wavevectors[ind, :]*self.occupation[ind].reshape(-1, 1), axis = 0)
+        momentum = np.zeros((self.n_of_subvols, 3))
+        for i in range(self.n_of_subvols):
+            ind = np.nonzero(self.subvol_id == i)[0] # 1d subvol id
+            momentum[i, :] = np.sum(self.hbar*self.wavevectors[ind, :]*self.occupation[ind].reshape(-1, 1), axis = 0)
 
-            if self.norm == 'fixed':
-                normalisation = phonon.number_of_active_modes/(self.particle_density*geometry.subvol_volume.reshape(-1, 1))
-            elif self.norm == 'mean':
-                normalisation = phonon.number_of_active_modes/self.subvol_N_p.reshape(-1, 1)
-            
-            momentum = momentum*normalisation
+        if self.norm == 'fixed':
+            normalisation = phonon.number_of_active_modes/(self.particle_density*geometry.subvol_volume.reshape(-1, 1))
+        elif self.norm == 'mean':
+            normalisation = phonon.number_of_active_modes/self.subvol_N_p.reshape(-1, 1)
+        
+        momentum = momentum*normalisation
 
         momentum = phonon.normalise_to_density(momentum)
 
@@ -926,7 +851,7 @@ class Population(Constants):
         _, close_distance, facets = geo.find_boundary_naive(collision_pos)
 
         too_close = np.absolute(self.offset - close_distance) > 1e-8 # check if there is any too close
-        
+
         while np.any(too_close):
             extra_offset = np.where(too_close, self.offset - close_distance, 0).reshape(-1, 1) # calculate extra displacement
 
@@ -935,7 +860,7 @@ class Population(Constants):
             _, close_distance, facets = geo.find_boundary_naive(collision_pos)
 
             too_close = np.absolute(self.offset - close_distance) > 1e-8 # check again if there is any too close
-
+            
         return collision_pos, facets
 
     def delete_particles(self, indexes):
@@ -1449,7 +1374,7 @@ class Population(Constants):
 
         if (self.current_timestep % 100) == 0:
             # start = time.time()
-            self.write_final_state(geometry, phonon)
+            self.write_final_state(geometry)
             self.view.postprocess(verbose = False)
             # print('Plots & save data, Time:', time.time() - start)
 
@@ -1464,10 +1389,6 @@ class Population(Constants):
             self.add_reservoir_particles(geometry)  # add reservoir particles that come in the domain
             # print('Filled reservoirs, Time:', time.time() - start)
         
-        # start = time.time()
-        self.save_occupation_lookup(phonon)
-        # print('Save Lookup, Time:', time.time() - start)
-
         # start = time.time()
         self.boundary_scattering(geometry, phonon)      # perform boundary scattering/periodicity and particle deletion
         # print('Boundary scatter, Time:', time.time() - start)
@@ -1485,7 +1406,7 @@ class Population(Constants):
         self.t = self.current_timestep*self.dt          # 1 dt passed
         
         if  ( self.current_timestep % 100) == 0:
-            info ='Timestep {:>5d}, Residue = {:5.3e} ['.format( int(self.current_timestep), self.residue.max())
+            info ='Timestep {:>5d} ['.format(int(self.current_timestep))
             for sv in range(self.n_of_subvols):
                 info += ' {:>7.3f}'.format(self.subvol_temperature[sv])
             
@@ -1495,10 +1416,9 @@ class Population(Constants):
         
         if ( self.current_timestep % self.n_dt_to_conv) == 0:
             
-            
-            self.subvol_heat_flux = self.calculate_heat_flux(geometry, phonon, lookup = self.lookup)
-            self.calculate_kappa(geometry, phonon, lookup = self.lookup)
-            self.calculate_momentum(geometry, phonon, lookup = self.lookup)
+            self.subvol_heat_flux = self.calculate_heat_flux(geometry, phonon)
+            self.calculate_kappa(geometry)
+            self.calculate_momentum(geometry, phonon)
 
             self.write_convergence(geometry)      # write data on file
 
@@ -1775,12 +1695,9 @@ class Population(Constants):
         for i in range(self.n_of_subvols):
             line += ' Np Sv {:>3d} '.format(i)
         if geometry.subvol_type == 'slice':
-            line += ' Kappa partic '
-            line += ' Kappa lookup '
+            line += ' Kappa total  '
             for i in range(self.n_of_subvols):
-                line += ' K Pt Sv {:>3d} '.format(i)
-            for i in range(self.n_of_subvols):
-                line += ' K Lu Sv {:>3d} '.format(i)
+                line += ' Kappa Sv {:>2d} '.format(i)
         else:
             for _, svc in enumerate(geometry.subvol_connections):
                 line += ' K Con {:>3d}-{:>3d} '.format(svc[0], svc[1])
@@ -1822,11 +1739,9 @@ class Population(Constants):
 
         if geometry.subvol_type == 'slice':
 
-            line += np.array2string(self.subvol_kappa_particles, formatter = {'float_kind':'{:>12.5e}'.format}  ).strip('[]') + ' '
-            line += np.array2string(self.subvol_kappa_lookup   , formatter = {'float_kind':'{:>12.5e}'.format}  ).strip('[]') + ' '
+            line += np.array2string(self.subvol_kappa, formatter = {'float_kind':'{:>12.5e}'.format}  ).strip('[]') + ' '
 
-            line += '{:>13.6e} '.format(self.kappa_particles)
-            line += '{:>13.6e} '.format(self.kappa_lookup)
+            line += '{:>13.6e} '.format(self.kappa)
         else:
             line += np.array2string(self.svcon_kappa, formatter = {'float_kind':'{:>14.7e}'.format}  ).strip('[]') + ' '
 
@@ -1840,7 +1755,7 @@ class Population(Constants):
 
         self.f.close()
 
-    def write_final_state(self, geometry, phonon):
+    def write_final_state(self, geometry):
         
         time = datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f')
         
@@ -1862,19 +1777,6 @@ class Population(Constants):
         # comma separated
         np.savetxt(filename, data, '%d, %d, %.3f, %.3f, %.3f, %.6e', delimiter = ',', header = header)
         
-        #### MODE DATA ####
-        filename = self.results_folder_name + 'modes_data.txt'
-        
-        header ='Occupation data for each subvolume \n' + \
-                'Date and time: {}\n'.format(time) + \
-                'hdf file = {}, POSCAR file = {}\n'.format(self.args.hdf_file, self.args.poscar_file) + \
-                'T_ref = {} K \n'.format(self.T_reference) + \
-                'Reshape data to proper shape when analysing (SV, Q, J).'
-        
-        data = self.occupation_lookup.reshape(-1, phonon.number_of_branches)
-
-        np.savetxt(filename, data, '%.6e', delimiter = ',', header = header)
-
         #### MEAN AND STDEV QUANTITIES ####
         if self.current_timestep > 0:
             filename = self.results_folder_name + 'mean_and_sigma.txt'
@@ -1887,19 +1789,17 @@ class Population(Constants):
                         'subvol id, subvol position, subvol volume, T [K], sigma T [K], HF x [W/m^2], sigma HF [W/m^2], HF y [W/m^2], sigma HF [W/m^2], HF z [W/m^2], sigma HF [W/m^2], k mean pt, k std pt, k mean lu, k std lu'
 
                 data = np.hstack((np.arange(self.n_of_subvols).reshape(-1, 1),
-                                geometry.subvol_center,
-                                self.subvol_volume.reshape(-1, 1),
-                                self.view.mean_T.reshape(-1, 1),
-                                self.view.std_T.reshape(-1, 1),
-                                self.view.mean_sv_phi.reshape(-1, 3) ,
-                                self.view.std_sv_phi.reshape(-1, 3)  ,
-                                self.view.mean_sv_k_pt.reshape(-1, 1),
-                                self.view.std_sv_k_pt.reshape(-1, 1) ,
-                                self.view.mean_sv_k_lu.reshape(-1, 1),
-                                self.view.std_sv_k_lu.reshape(-1, 1) ))
+                                  geometry.subvol_center                     ,
+                                  self.subvol_volume.reshape(-1, 1)          ,
+                                  self.view.mean_T.reshape(-1, 1)            ,
+                                  self.view.std_T.reshape(-1, 1)             ,
+                                  self.view.mean_sv_phi.reshape(-1, 3)       ,
+                                  self.view.std_sv_phi.reshape(-1, 3)        ,
+                                  self.view.mean_sv_k.reshape(-1, 1)         ,
+                                  self.view.std_sv_k.reshape(-1, 1)          ))
                 
                 # comma separated
-                np.savetxt(filename, data, '%d, %.3e, %.3e, %.3e, %.3e, %.3f, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e', delimiter = ',', header = header)
+                np.savetxt(filename, data, '%d, %.3e, %.3e, %.3e, %.3e, %.3f, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e', delimiter = ',', header = header)
             
             else:
                 header ='subvols final state data \n' + \

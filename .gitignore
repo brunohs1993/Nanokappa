@@ -1,0 +1,6 @@
+ignore/
+__pycache__/
+classes/__pycache__/
+routines/__pycache__/
+test_results/
+set_env/__pycache__/
