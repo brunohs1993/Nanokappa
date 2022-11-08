@@ -1053,9 +1053,9 @@ class Geometry:
         # contains = np.array(list(map(self.contains_naive_single, x)))
         contains = np.zeros(x.shape[0], dtype = bool)
         for i, p in enumerate(x):
-            start = time.time()
+            # start = time.time()
             contains[i] = self.contains_naive_single(p)
-            print(time.time() - start)
+            # print(time.time() - start)
         
         return contains
 
