@@ -72,7 +72,7 @@ while pop.current_timestep < args.iterations[0]:
     pop.run_timestep(geo, phonons)
 
 print('Saving end of run particle data...')
-pop.write_final_state(geo, phonons)
+pop.write_final_state(geo)
 
 pop.f.close()
 

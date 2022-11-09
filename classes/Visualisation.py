@@ -530,7 +530,7 @@ class Visualisation(Constants):
                 ax['right'].errorbar(prof_x, mean_prof, yerr = std_prof, **prof_dict)
                 ax['bottom'].plot(conv_x, data_total, **conv_dict)
 
-                N = 100
+                N = int(self.args.n_mean[0])
                 rol_mean = np.convolve(data_total                , np.ones(N)/N, mode = 'full')[:-N+1]
                 rol_std  = (np.convolve((data_total - rol_mean)**2, np.ones(N)/N, mode = 'full')[:-N+1])**0.5
                 

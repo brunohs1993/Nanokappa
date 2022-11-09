@@ -1455,12 +1455,15 @@ class Geometry:
         return c
 
     def get_path(self):
-        if self.args.path_points[0] == 'relative':
-            self.path_points = self.scale_positions(self.path_points, inv = True)
-        elif self.args.path_points[0] == 'absolute':
-            pass
+        if len(self.args.path_points) > 0:
+            if self.args.path_points[0] == 'relative':
+                self.path_points = self.scale_positions(self.path_points, inv = True)
+            elif self.args.path_points[0] == 'absolute':
+                pass
+            else:
+                raise Warning('Wrong --path_points keyword. Path will be ignored.')
+                self.path_points = None
         else:
-            raise Warning('Wrong --path_points keyword. Path will be ignored.')
             self.path_points = None
         
         if self.path_points is not None:
