@@ -1,10 +1,11 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from classes.Geometry import Geometry
 from classes.Phonon import Phonon
 from classes.Population import Population
 from classes.Visualisation import Visualisation
 from argument_parser import *
 import sys
+import re
 
 print('\n'+
       ' nonano          no   onanonan        onanon          on nonanonan              anon    anona\n'+
@@ -34,6 +35,14 @@ for key in vars(args).keys():
     f.write( '{} = {} \n'.format(key, vars(args)[key]) )
 
 f.close()
+
+# getting maximum sim time
+max_time = re.split('-|:', args.max_sim_time[0])
+max_time = [int(i) for i in max_time]
+max_time = timedelta(days    = max_time[0],
+                     hours   = max_time[1],
+                     minutes = max_time[2],
+                     seconds = max_time[3])
 
 # getting start time
 start_time = datetime.now()
@@ -67,9 +76,14 @@ else:
 
 pop = Population(args, geo, phonons)
 
-while pop.current_timestep < args.iterations[0]:
-    
+flag = True
+while flag:
     pop.run_timestep(geo, phonons)
+    
+    if max_time.total_seconds() > 0:
+        flag = pop.current_timestep < args.iterations[0] and datetime.now()-start_time < max_time
+    else:
+        flag = pop.current_timestep < args.iterations[0]
 
 print('Saving end of run particle data...')
 pop.write_final_state(geo)

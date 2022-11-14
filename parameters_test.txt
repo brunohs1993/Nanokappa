@@ -32,3 +32,4 @@
 --fig_plot         subvol omega energy
 --rt_plot          
 --output           file
+--max_sim_time     0-00:00:00

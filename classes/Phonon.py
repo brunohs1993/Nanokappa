@@ -40,7 +40,11 @@ class Phonon(Constants):
         self.mat_index = int(mat_index)
         self.name = self.args.mat_names[mat_index]
         
-        self.mat_folder = self.args.mat_folder[mat_index]
+        if len(self.args.mat_folder) > 0:
+            self.mat_folder = self.args.mat_folder[mat_index]
+        else:
+            self.mat_folder = ''
+        
         if not os.path.isabs(self.mat_folder):
             self.mat_folder = os.getcwd() + '\\' + self.mat_folder
         if sys.platform == 'win32':

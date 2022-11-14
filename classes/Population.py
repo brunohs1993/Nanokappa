@@ -1786,7 +1786,7 @@ class Population(Constants):
                 header ='subvols final state data \n' + \
                         'Date and time: {}\n'.format(time) + \
                         'hdf file = {}, POSCAR file = {}\n'.format(self.args.hdf_file, self.args.poscar_file) + \
-                        'subvol id, subvol position, subvol volume, T [K], sigma T [K], HF x [W/m^2], sigma HF [W/m^2], HF y [W/m^2], sigma HF [W/m^2], HF z [W/m^2], sigma HF [W/m^2], k mean pt, k std pt, k mean lu, k std lu'
+                        'subvol id, subvol x, subvol y, subvol z, subvol volume, T [K], sigma T [K], HF x [W/m^2], HF y [W/m^2], HF z [W/m^2], sigma HF x [W/m^2], sigma HF y [W/m^2], sigma HF z [W/m^2], kappa [W/m K], sigma kappa [W/m K]'
 
                 data = np.hstack((np.arange(self.n_of_subvols).reshape(-1, 1),
                                   geometry.subvol_center                     ,

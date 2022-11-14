@@ -38,6 +38,9 @@ def initialise_parser():
                         type = float, nargs = 1   , help    = 'Timestep size in picoseconds')
     parser.add_argument('--iterations'     , '-i' , default = [10000],
                         type = int  , nargs = 1   , help    = 'Number of timesteps (iterations) to be run')
+    parser.add_argument('--max_sim_time'   , '-mt', default = ['1-00:00:00'],
+                        type = str  , nargs = 1   , help    = 'Maximum simulation time. If the iterations are not done when -mt is reached, simulation stops and final data is saved. ' +
+                                                              ' Declared as D-HH:MM:SS. Useful to avoid losing data in cluster simulations.')
     parser.add_argument('--subvolumes'     , '-sv', default = ['slice', 10, 0],
                                       nargs = '*' , help    = 'Type of subvolumes, number of subvolumes and slicing axis when the case (x = 0, y = 1, z = 2). ' +
                                                               'Accepts "slice", "grid" and "voronoi" as subvolume types.')
@@ -153,8 +156,6 @@ def generate_results_folder(args):
         args.results_location = loc
 
     # get results folder name
-    
-
     if len(args.results_folder)>0:    # if a folder name is specified
 
         folder = args.results_folder[0]

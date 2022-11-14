@@ -1,6 +1,8 @@
-ignore/
+ignore
 __pycache__/
-classes/__pycache__/
-routines/__pycache__/
+*/__pycache__
 test_results/
-set_env/__pycache__/
+test_material/*.pickle
+test_material/FBZ.png
+optimise/simulations.csv
+optimise/simulations.xlsx

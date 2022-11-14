@@ -12,3 +12,4 @@ phonopy
 imageio
 pyqt
 pyglet
+pandas
