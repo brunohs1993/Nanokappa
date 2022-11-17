@@ -4,5 +4,5 @@ __pycache__/
 test_results/
 test_material/*.pickle
 test_material/FBZ.png
-optimise/simulations.csv
-optimise/simulations.xlsx
+optimiser/simulations.csv
+optimiser/simulations.xlsx
