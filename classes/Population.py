@@ -51,8 +51,6 @@ class Population(Constants):
         self.args = arguments
         self.results_folder_name = self.args.results_folder
         
-        self.conv_crit = float(self.args.conv_crit[0])
-
         self.norm = self.args.energy_normal[0]
         
         self.n_of_subvols   = geometry.n_of_subvols
@@ -124,6 +122,9 @@ class Population(Constants):
         print('Initialising population...')
 
         self.initialise_all_particles(geometry, phonon) # initialising particles
+
+        self.conv_crit = float(self.args.conv_crit[0])
+        self.initialise_residue(geometry)
         
         self.plot_figures(geometry, property_plot = self.args.fig_plot, colormap = self.args.colormap[0])
 
@@ -1373,59 +1374,100 @@ class Population(Constants):
             print('Simulating...')
 
         if (self.current_timestep % 100) == 0:
-            # start = time.time()
             self.write_final_state(geometry)
             self.view.postprocess(verbose = False)
-            # print('Plots & save data, Time:', time.time() - start)
+            self.update_residue(geometry)
+
+            info ='Timestep {:>5d} - max residue: {:>10.3e} ({:<12s}) ['.format(int(self.current_timestep), self.max_residue, self.max_residue_qt)
+            for sv in range(self.n_of_subvols):
+                info += ' {:>7.3f}'.format(self.subvol_temperature[sv])
+            info += ' ]'
+            print(info)
 
         self.drift()                                    # drift particles
-        
+
         if self.n_of_reservoirs > 0:
-            # start = time.time()
             if self.res_gen == 'fixed_rate':
                 self.fill_reservoirs(geometry, phonon)          # refill reservoirs
             elif self.res_gen == 'one_to_one':
                 self.fill_reservoirs(geometry, phonon, n_leaving = self.N_leaving)          # refill reservoirs
             self.add_reservoir_particles(geometry)  # add reservoir particles that come in the domain
-            # print('Filled reservoirs, Time:', time.time() - start)
-        
-        # start = time.time()
+
         self.boundary_scattering(geometry, phonon)      # perform boundary scattering/periodicity and particle deletion
-        # print('Boundary scatter, Time:', time.time() - start)
-
-        # start = time.time()
         self.refresh_temperatures(geometry, phonon)     # refresh cell temperatures
-        # print('Update T, Time:', time.time() - start)
-
-        # start = time.time()
         self.lifetime_scattering(phonon)                # perform lifetime scattering
-        # print('Phonon-phonon scatter, Time:', time.time() - start)
 
         self.current_timestep += 1                      # +1 timestep index
 
         self.t = self.current_timestep*self.dt          # 1 dt passed
         
-        if  ( self.current_timestep % 100) == 0:
-            info ='Timestep {:>5d} ['.format(int(self.current_timestep))
-            for sv in range(self.n_of_subvols):
-                info += ' {:>7.3f}'.format(self.subvol_temperature[sv])
-            
-            info += ' ]'
-
-            print(info)
-        
         if ( self.current_timestep % self.n_dt_to_conv) == 0:
-            
             self.subvol_heat_flux = self.calculate_heat_flux(geometry, phonon)
             self.calculate_kappa(geometry)
             self.calculate_momentum(geometry, phonon)
-
             self.write_convergence(geometry)      # write data on file
 
         if (len(self.rt_plot) > 0) and (self.current_timestep % self.n_dt_to_plot == 0):
             self.plot_real_time()
         
         gc.collect() # garbage collector
+
+    def initialise_residue(self, geo):
+        if geo.subvol_type == 'slice':
+            self.old_mean_large = np.ones(5*self.n_of_subvols+self.n_of_reservoirs)
+            self.old_std_large  = np.ones(5*self.n_of_subvols+self.n_of_reservoirs)
+        else:
+            self.old_mean_large = np.ones(4*self.n_of_subvols+self.n_of_reservoirs+geo.n_of_subvol_con)
+            self.old_std_large  = np.ones(4*self.n_of_subvols+self.n_of_reservoirs+geo.n_of_subvol_con)
+
+        self.residue_all = np.ones(8)
+        self.convergence_flag = False
+        self.max_residue    = 1
+        self.max_residue_qt = 'none'
+
+        self.residue_qts   = ['T_{:d}'.format(i) for i in range(self.n_of_subvols)] + \
+                ['phi_{:s}_{:d}'.format(i, j) for j in range(self.n_of_subvols) for i in ['x', 'y', 'z']] + \
+                ['en_res_{:d}'.format(i) for i in range(self.n_of_reservoirs)]
+        if geo.subvol_type == 'slice':
+            self.residue_qts += ['k_{:d}'.format(i) for i in range(self.n_of_subvols)]
+        else:
+            self.residue_qts += ['k_{:d}'.format(i) for i in range(geo.n_of_subvol_con)]
+
+    def update_residue(self, geo):
+        
+        with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
+
+            if geo.subvol_type == 'slice':
+                new_mean_large = np.concatenate((self.view.mean_T, self.view.mean_sv_phi, self.view.mean_en_res, self.view.mean_sv_k))
+                new_std_large  = np.concatenate((self.view.std_T , self.view.std_sv_phi , self.view.std_en_res , self.view.std_sv_k ))
+            else:
+                new_mean_large = np.concatenate((self.view.mean_T, self.view.mean_sv_phi, self.view.mean_en_res, self.view.mean_con_k))
+                new_std_large  = np.concatenate((self.view.std_T , self.view.std_sv_phi , self.view.std_en_res , self.view.std_con_k ))
+            
+            residue_mean = np.absolute((new_mean_large - self.old_mean_large)/self.old_mean_large)
+
+            residue_std = np.absolute((new_std_large - self.old_std_large)/self.old_std_large)
+        
+        self.residue_all = np.where(new_std_large > new_mean_large, residue_std, residue_mean)
+
+        self.max_residue = self.residue_all.max()
+        
+        index = np.nonzero(self.residue_all == self.max_residue)[0][0]
+        self.max_residue_qt = self.residue_qts[index]
+
+        self.convergence_flag = np.any(self.max_residue > self.conv_crit) # if any is larger than criterion, not converged
+
+        # update previous values
+        self.old_mean_large = new_mean_large
+        self.old_std_large = new_std_large
+
+        s = ''
+        for i in np.concatenate((residue_mean, residue_std)):
+            s+= '{:9.3e} '.format(i)
+        s += '\n'
+
+        with open(self.results_folder_name + 'residue.txt', 'a+') as f:
+            f.writelines(s)
 
     def init_plot_real_time(self, geometry, phonon):
         '''Initialises the real time plot to be updated for each timestep.'''

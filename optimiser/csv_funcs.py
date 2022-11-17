@@ -4,6 +4,25 @@ from multiprocessing import Pool
 import pandas as pd
 from time import sleep
 
+def get_exec_params(file):
+    with open(file, 'r') as f:
+        a = f.readlines()               # read options file
+
+    a = [i.splitlines()  for i in a] # remove break line characters
+    a = [i[0].split(' ') for i in a]   # split keys and values
+
+    for i in a:
+        while '' in i:
+            i.remove('')
+
+    options = {}
+    for i in range(len(a)):
+        try:
+            options[a[i][0]] = int(a[i][1])
+        except:
+            options[a[i][0]] = a[i][1]
+    
+    return options
 
 def import_params(file):
     params = pd.read_csv(file)                       # read simulation parameters from csv data

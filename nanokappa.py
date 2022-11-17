@@ -79,11 +79,11 @@ pop = Population(args, geo, phonons)
 flag = True
 while flag:
     pop.run_timestep(geo, phonons)
+
+    flag = (pop.current_timestep < args.iterations[0]) or pop.convergence_flag
     
     if max_time.total_seconds() > 0:
-        flag = pop.current_timestep < args.iterations[0] and datetime.now()-start_time < max_time
-    else:
-        flag = pop.current_timestep < args.iterations[0]
+         flag = flag and datetime.now()-start_time < max_time
 
 print('Saving end of run particle data...')
 pop.write_final_state(geo)

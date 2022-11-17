@@ -1,0 +1,8 @@
+mail_user        bruno.hartmann-da-silva@univ-lorraine.fr
+job_name         nanokappa
+partition        std
+n_of_nodes       1
+n_of_tasks       1
+mail_type        ALL
+nanokappa_folder /home/dcc70/tmr51/Nanokappa
+conda_env        nanokappa
