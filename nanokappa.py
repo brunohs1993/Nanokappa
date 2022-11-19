@@ -80,7 +80,7 @@ flag = True
 while flag:
     pop.run_timestep(geo, phonons)
 
-    flag = (pop.current_timestep < args.iterations[0]) or pop.convergence_flag
+    flag = (pop.current_timestep < args.iterations[0]) and not pop.finish_sim
     
     if max_time.total_seconds() > 0:
          flag = flag and datetime.now()-start_time < max_time

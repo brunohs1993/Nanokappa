@@ -71,26 +71,10 @@ class Geometry:
         self.check_connections(args)   # check if all connections are valid and adjust vertices
         self.get_plane_k()
         self.save_reservoir_meshes(engine = 'earcut')   # save meshes of each reservoir after adjust vertices
+        self.plot_mesh_bc()
         self.set_subvolumes()          # define subvolumes and save their meshes and properties
 
         self.get_path()
-
-        
-
-        # xc, tc, fc = self.find_boundary_naive(self.subvol_center)
-
-        # fig, ax = self.plot_facet_boundaries(self.mesh)
-        # ax.scatter(xc[:, 0], xc[:, 1], xc[:, 2], s = 1, c = 'r')
-        # ax.scatter(self.subvol_center[:, 0], self.subvol_center[:, 1], self.subvol_center[:, 2], s = 1, c = 'b')
-        # for i, d in enumerate(tc):
-        #     ax.plot([xc[i, 0], self.subvol_center[i, 0]],
-        #             [xc[i, 1], self.subvol_center[i, 1]],
-        #             [xc[i, 2], self.subvol_center[i, 2]], ':', c = 'k', linewidth = 1)
-        #     ax.text(xc[i, 0], xc[i, 1], xc[i, 2], s = int(fc[i]), fontdict={'fontsize':5})
-
-        # plt.show()
-
-        # quit()
 
         print('Geometry processing done!')
 
@@ -280,7 +264,7 @@ class Geometry:
 
             self.get_subvol_connections()
 
-            self.subvol_classifier = subvol_classifier(n  = self.n_of_subvols,
+            self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
                                                       xc = self.scale_positions(self.subvol_center))
             
             try: # try slicing the mesh first
@@ -304,7 +288,7 @@ class Geometry:
             
             self.get_subvol_connections()
 
-            self.subvol_classifier = subvol_classifier(n  = self.n_of_subvols,
+            self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
                                                   xc = self.scale_positions(self.subvol_center))
 
             try: # try slicing the mesh first
@@ -345,7 +329,7 @@ class Geometry:
 
             self.get_subvol_connections()
 
-            self.subvol_classifier = subvol_classifier(n  = self.n_of_subvols,
+            self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
                                                       xc = self.scale_positions(self.subvol_center))
 
             try: # try slicing the mesh first
@@ -472,16 +456,14 @@ class Geometry:
             try:
                 self.bound_pos = np.array(args.bound_pos[1:]).reshape(-1, 3).astype(float)
             except:
-                print('Boundary positions ill defined. Check input parameters.')
-                quit()
+                Exception('Boundary positions ill defined. Check input parameters.')
             
             if   args.bound_pos[0] == 'relative':
-                    self.bound_pos = self.bound_pos*self.bounds.ptp(axis = 0)+self.bounds[0, :]
+                    self.bound_pos = self.scale_positions(self.bound_pos, True)
             elif args.bound_pos[0] == 'absolute':
                 pass
             else:
-                print('Please specify the type of position for BC with the keyword "absolute" or "relative".')
-                quit()
+                Exception('Please specify the type of position for BC with the keyword "absolute" or "relative".')
 
             _, _, close_tri = tm.proximity.closest_point(self.mesh, self.bound_pos)
             
@@ -538,6 +520,18 @@ class Geometry:
     def check_connections(self, args):
 
         print('Checking connected faces...')
+
+        if len(args.connect_facets) == 0:
+            points = np.array(args.connect_pos[1:], dtype = float).reshape(-1, 3)
+            if args.connect_pos[0] == 'relative':
+                points = self.scale_positions(points, True)
+            elif args.connect_pos[0] == 'absolute':
+                pass
+            else:
+                raise Exception("Wrong option in --connect_pos. Choose between 'relative' or 'absolute'.")
+            
+            self.get_plane_k()
+            args.connect_facets = self.find_boundary_naive(points)[2]
 
         connections = np.array(args.connect_facets).reshape(-1, 2)
 
@@ -704,11 +698,23 @@ class Geometry:
 
             self.res_meshes[r] = tm.base.Trimesh(vertices = v_3d, faces = faces).process() # save mesh
 
-        fig, ax = self.plot_facet_boundaries(self.mesh, number_facets = True)
-        for r in self.res_meshes:
-            fig, ax = self.plot_facet_boundaries(r, fig, ax, l_color = 'b', linestyle='--')
+    def plot_mesh_bc(self):
         
-        plt.savefig(self.args.results_folder + 'reservoir_meshes.png')
+        fig, ax = self.plot_facet_boundaries(self.mesh, l_color = 'lightgrey', number_facets = False)
+
+        fcts = np.arange(self.n_of_facets)[self.bound_cond == 'R']
+        if fcts.shape[0] > 0:
+            fig, ax = self.plot_facet_boundaries(self.mesh, fig, ax, facets = fcts, l_color = 'k', linestyle='-', m_color = 'k', number_facets=True)
+
+        fcts = np.arange(self.n_of_facets)[self.bound_cond == 'T']
+        if fcts.shape[0] > 0:
+            fig, ax = self.plot_facet_boundaries(self.mesh, fig, ax, facets = fcts, l_color = 'b', linestyle='-', m_color = 'b', number_facets=True)
+        
+        fcts = np.arange(self.n_of_facets)[self.bound_cond == 'P']
+        if fcts.shape[0] > 0:
+            fig, ax = self.plot_facet_boundaries(self.mesh, fig, ax, facets = fcts, l_color = 'r', linestyle=':', m_color = 'r', number_facets=True)
+
+        plt.savefig(self.args.results_folder + 'BC_plot.png')
         plt.close(fig)
 
     def transform_3d_to_2d(self, mesh, normal, origin):
@@ -963,7 +969,7 @@ class Geometry:
        
         return fig, ax
 
-    def plot_facet_boundaries(self, mesh, fig = None, ax = None, l_color = 'k', linestyle = '-', number_facets = False, m_color = 'r', markerstyle = 'o'):
+    def plot_facet_boundaries(self, mesh, fig = None, ax = None, facets = None, l_color = 'k', linestyle = '-', number_facets = False, m_color = 'r', markerstyle = 'o'):
 
         if ax is None or fig is None:
             fig, ax = plt.subplots(nrows = 1, ncols = 1, dpi = 200, subplot_kw={'projection':'3d'})
@@ -973,13 +979,14 @@ class Geometry:
             ax.set_ylabel('y')
             ax.set_zlabel('z')
 
-        for fct in range(len(mesh.facets)):
+        if facets is None:
+            facets = np.arange(len(mesh.facets))
+        
+        for fct in facets:
             for e in mesh.facets_boundary[fct]:
                 ax.plot(mesh.vertices[e, 0], mesh.vertices[e, 1], mesh.vertices[e, 2], linestyle = linestyle, color = l_color)
             if number_facets:
-                ue = np.unique(mesh.facets_boundary[fct]) # unique vertices
-                # c  = mesh.vertices[ue, :].mean(axis = 0)  # mean of the vertices
-                c = self.get_facet_centroid(fct)
+                c = self.get_facet_centroid(int(fct))
                 ax.scatter(c[0], c[1], c[2], marker = markerstyle, c = m_color)
                 ax.text(c[0], c[1], c[2], s = fct)
         
@@ -1012,6 +1019,7 @@ class Geometry:
         '''Method to scale positions x to the bounding box coordinates.
             
             x = positions to be scaled;
+            inv = True if relative -> absolute. False if absolute -> relative. Standard is False.
             
             Returns:
             x_s = scaled positions.'''
@@ -1063,9 +1071,18 @@ class Geometry:
         '''Finds the boundary in relation to a point. If v is informed, the
            the boundary is searched along the path in v direction. If not,
            it looks for the closest point to the mesh. This may be a better
-           alternative for small meshes with not many faces than the Trimesh.
+           alternative than the Trimesh function if the mesh does not have
+           many faces.
            
-           Obs: THIS WORKS ONLY FOR POINTS INSIDE THE MESH (for now).'''
+           Arguments:
+           x = origin points
+           directions (optional) = directions to evaluate the mesh.
+           
+           Returns:
+           final_xc = position of the collision
+           final_tc = distance of the collision. If direction is given, d = t/||direction||. Else, d = t.
+           final_fc = the facet where the particle hits.
+           '''
 
         # if direction is None:
         #     xc, tc, fc = zip(*map(self.find_boundary_single, x))
@@ -1572,15 +1589,7 @@ class Geometry:
 
             return path
 
-
-
-
-
-
-
-
-
-class subvol_classifier():
+class SubvolClassifier():
     def __init__(self, n, xc = None, a = None):
         
         self.n  = n                                  # number of subvolumes

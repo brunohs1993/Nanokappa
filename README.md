@@ -98,9 +98,10 @@ Here is a list of all parameters that can be set:
 | Reference temperature     | `--reference_temp`   | `-rt`   | The temperature at which the occupation number for every mode will be considered zero, in Kelvin. | Float | `0` |
 | N° of particles           | `--particles`        | `-p`    | Number of particles given as `keyword number`. Can be given as the total number (keyworld `total`), the number per-mode-per-subvolume (keyworld `pmps`) and the number per cubic angstom (keyworld `pv`). | String Integer | `pmps 1` |
 | Particle distribution     | `--part_dist`        | `-pd`   | How to distribute particles at the beginning of the simulation. Composed of two keywords: `random/center_subvol/domain`. | String | `random_subvol` |
-| Reservoir generation      | `--reservoir_gen`    | `-rg`   | How to generate particles on the reservoirs. `fixed_rate` means the particles are generated in an approximately fixed rate independently of the leaving particles. `one_to_one` means that the number of particles generated is the same of particles leaving in order to keep the number of particles stable. | String | `fixed_rate` | 
+| Reservoir generation      | `--reservoir_gen`    | `-rg`   | How to generate particles on the reservoirs. `fixed_rate` means the particles are generated in an approximately fixed rate independently of the leaving particles. `one_to_one` means that the number of particles generated is the same of particles leaving in order to keep the number of particles stable. | String | `fixed_rate` |
 | Timestep                  | `--timestep`         | `-ts`   | Timestep of each iteration in picoseconds | Float | `1` |
 | Iterations                | `--iterations`       | `-i`    | Number of iterations to be performed | Integer | `10000` |
+| Maximum simulation time   | `--max_sim_time`     | `-mt`   | Maximum time the simulation will run. Declared as `D-HH:MM:SS`. If the simulation arrives to this time, the calculation is finished and post processing is executed. If `0-00:00:00` is informed, no time limit is imposed. | String |`0-00:00:00`|
 | Subvolumes                | `--subvolumes`       | `-sv`   | Type of subvolumes, number of subvolumes and slicing axis when the case (x = 0, y = 1, z = 2). Accepts `slice`, `grid` and `voronoi` as subvolume types. | String Integer (Integer Integer) | `slice 10 0` |
 | Empty subvols             | `--empty_subvols`    | `-es`   | Index of subvolumes that are to be initialised as empty (no particles). | Integer | |
 | Energy normalisation      | `--energy_normal`    | `-en`   | The way to normalise energy to energy density. Choose between `fixed` (according to the expected number of particles in the subvolume) and `mean` (arithmetic mean of the particles inside). | String | `fixed`
@@ -151,8 +152,9 @@ All inputs (besides `-ff`, of course) can be given in form of a text file. The f
     --colormap         jet
     --fig_plot         subvolumes
     --rt_plot          
+    --max_sim_time     0-01:00:00
 
-This file defines a simulation of Silicon, with the material being defined by the material folder, hdf and poscar files being informed. The geometry is a box (cuboid) with dimensions 10e3 ang x 1e3 ang x 1e3 ang. Temperatures (302 K and 298 K) are imposed on facets 0 and 3, and a roughness is set to facets 2 and 4 as being 10 ang. Facets 1 and 5 are conected as periodic. A reference temperature of 300 K is used. The result files will be stored in `D:\Results\box_wire\`. Besides the usual convergence plots, the subvolumes plot will be generated at the beginning using the jet colormap.
+This file defines a simulation of Silicon, with the material being defined by the material folder, hdf and poscar files being informed. The geometry is a box (cuboid) with dimensions 10e3 ang x 1e3 ang x 1e3 ang. Temperatures (302 K and 298 K) are imposed on facets 0 and 3, and a roughness is set to facets 2 and 4 as being 10 ang. Facets 1 and 5 are conected as periodic. A reference temperature of 300 K is used. The result files will be stored in `D:\Results\box_wire\`. Besides the usual convergence plots, the subvolumes plot will be generated at the beginning using the jet colormap. The simulation will last 1 hour. If the number of iterations is not reached, after 1 hour of calculation it will be shut down and the results will be processed, safely exiting the run.
 
 Any non-necessary arguments can be left empty. In this example, `--subvol_temp` is left empty since the temperature profile is completely defined by the `constant_cold` keyword used as argument for `--temp_dist`. Since there is no inputs for `--rt_plot`, no real time plots will be produced. It is important to note, however, that passing an empty argument in the file will override the standard values and pass an empty list to the parser. If the user wishes to use standard input value for a given argument, the argument should be omitted in the txt file altogether.
 
@@ -172,7 +174,7 @@ The geometry can be defined from an standard geometry or an external file. The s
 | -------- | -------------------- | --------------------------------------------------------------------- | ------------------------------------- |
 | Cuboid   | `cuboid`             | `trimesh.creation.box`                                                | x, y and z lengths                    |
 | Sphere   | `sphere`             | `trimesh.creation.icosphere`                                          | Radius and subdivisions               |
-| Cylinder | `cylinder`           | `trimesh.creation.cylinder`                                           | Radius, height and sides              |
+| Cylinder | `cylinder`           | `trimesh.creation.cylinder`                                           | Height, radius and sides              |
 
 <p>&nbsp</p>
 

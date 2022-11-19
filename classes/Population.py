@@ -1378,7 +1378,7 @@ class Population(Constants):
             self.view.postprocess(verbose = False)
             self.update_residue(geometry)
 
-            info ='Timestep {:>5d} - max residue: {:>10.3e} ({:<12s}) ['.format(int(self.current_timestep), self.max_residue, self.max_residue_qt)
+            info ='Timestep {:>5d} - max residue: {:>9.3e} ({:<9s}) ['.format(int(self.current_timestep), self.max_residue, self.max_residue_qt)
             for sv in range(self.n_of_subvols):
                 info += ' {:>7.3f}'.format(self.subvol_temperature[sv])
             info += ' ]'
@@ -1421,7 +1421,8 @@ class Population(Constants):
             self.old_std_large  = np.ones(4*self.n_of_subvols+self.n_of_reservoirs+geo.n_of_subvol_con)
 
         self.residue_all = np.ones(8)
-        self.convergence_flag = False
+        self.conv_count = 0
+        self.finish_sim = False
         self.max_residue    = 1
         self.max_residue_qt = 'none'
 
@@ -1446,23 +1447,31 @@ class Population(Constants):
             
             residue_mean = np.absolute((new_mean_large - self.old_mean_large)/self.old_mean_large)
 
-            residue_std = np.absolute((new_std_large - self.old_std_large)/self.old_std_large)
+            # residue_std = np.absolute((new_std_large - self.old_std_large)/self.old_std_large)
         
-        self.residue_all = np.where(new_std_large > new_mean_large, residue_std, residue_mean)
+        self.residue_all = np.where(new_std_large > np.absolute(new_mean_large), 0, residue_mean)
 
         self.max_residue = self.residue_all.max()
         
         index = np.nonzero(self.residue_all == self.max_residue)[0][0]
         self.max_residue_qt = self.residue_qts[index]
 
-        self.convergence_flag = np.any(self.max_residue > self.conv_crit) # if any is larger than criterion, not converged
+         # if any is larger than criterion, not converged
+        if self.max_residue < self.conv_crit:
+            self.conv_count += 1
+        else:
+            self.conv_count = 0
+
+        if self.conv_count >= 10:
+            self.finish_sim = True
 
         # update previous values
         self.old_mean_large = new_mean_large
         self.old_std_large = new_std_large
 
         s = ''
-        for i in np.concatenate((residue_mean, residue_std)):
+        # for i in np.concatenate((residue_mean, residue_std)):
+        for i in self.residue_all:
             s+= '{:9.3e} '.format(i)
         s += '\n'
 
