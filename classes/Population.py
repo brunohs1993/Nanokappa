@@ -723,7 +723,7 @@ class Population(Constants):
             with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
                 self.subvol_kappa = -phi*dx/dT
                 self.kappa        = -np.sum(phi*self.subvol_N_p)*(DX/DT)/self.N_p
-                
+            
             self.subvol_kappa[np.absolute(self.subvol_kappa) == np.inf] = 0
 
         else:

@@ -247,12 +247,62 @@ This algorithm has shown to be flexible, but can cause some problems depending o
 
 The user can specify the name of a folder to save all simulation results into by inputing it to the `--results_folder` parameter. The default is no folder (an empty string `''`), so all files are saved in the folder where the user is located.
 
+<p>&nbsp</p>
 
-### Future enhancements
+# Executing multiple simulations in parallel
+
+If the user wishes to simulate several cases in order to do, for example, a parametric analysis, it is possible to do it with the help of a CSV file. This file should have in the first line the name of each parameter separated by commas **without spaces** i.e. `particles,poscar_file,hdf_file,...` and so on. The subsequent lines contain the desired parameters in the same order as declared in the first line. This file will be read an treated as a Pandas dataframe, and each line will be passed as arguments to call `nanokappa.py` as a subprocess. The parallel processing can be done locally or on a cluster that uses Slurm for job scheduling.
+
+## Running locally
+
+To run multiple simulations locally, write on terminal the following command:
+
+    $ python <Nanokappa-folder>/optimiser/run_csv.py --mode local --parameters <csv_file.csv> --options <options_file.txt>
+
+The `--mode` (or `-m`) argument says that the run will be local; the `--parameters` (or `-p`) argument informs the CSV file with the simulation parameters; and the `--options`  (or `-o`) argument passes the options to be given to the Python multiprocessing funcions. The options file for local run should contain the number of processes and the Nanokappa folder that contains the desired version of `nanokappa.py`. This should be written in the file in the following way:
+
+    processes        3
+    nanokappa_folder d:/LEMTA/Code/Nanokappa
+
+In the local run, the results are stored according to the names and paths given as arguments, in the same way it happens when running a single simulation.
+
+**Obs.:** on Windows, the new terminal subprocesses are spawned as independent from the parent terminal, and the subprocess returns its exit code as concluded as soon as the new terminal windows is opened. This causes all simulations to run simultaneously. To avoid that, a waiting time is imposed so that the number of concurrent simulations is kept safely as intended. The waiting time is the time informed in `--max_sim_time` plus an 10 minutes margin for postprocessing. This does not happen on Linux and was not yet tested on MacOS.
+
+## Running on a cluster
+
+The command to run it on the cluster is given by:
+
+    $ python <Nanokappa-folder>/optimiser/run_csv.py --mode cluster --parameters <csv_file.csv> --options <options_file.txt>
+
+The options file for this needs more parameters. These will be informed to Slurm at the beginning of the bash script submitted to the job:
+
+    mail_user        <user_email@email.com>
+    mail_type        ALL
+    job_name         nanokappa
+    partition        <partition_name>
+    n_of_nodes       1
+    n_of_tasks       1
+    nanokappa_folder <path_to_nanokappa>/Nanokappa
+    conda_env        nanokappa
+
+This informs the user email and the events about which the user should be notified; the name of the job; the partition to be used; the number of nodes and tasks; the folder where `nanokappa.py` is located; and the name of the conda environment where the necessary modules are installed.
+
+In the cluster run, the user should run the command from the folder where they want the results to be saved. So for example, the user can create a folder called `Results` and run the command previously shown from inside this folder:
+
+    $ mkdir Results
+    $ cd Results
+    $ python <Nanokappa-folder>/optimiser/run_csv.py -m cluster -p <csv_file.csv> -o <options_file.txt>
+
+The code will create, for each line in the CSV file, a result folder called `params_<line>_<try>`, where `<line>` is the line number and `<try>` is the number of the try for those parameters (for example, if the line 3 of the csv is run twice from the `Results` folder, there would be the folders `Results/params_3_0` and `Results/params_3_1`). Every time one of these folders are created, the code generates the parameter file and the batch script that will be submited to Slurm. In this script, the code generates a work directory in the partition and copies all relevant files (material, geometry and Nanokappa source code itself). It then runs Nanokappa in the work directory and copies back the result files to the `params` folder in the submitting directory. This makes thus each run independent and leaves the queue under Slurm's responsibility.
+
+# Optimisation
+
+
+
+# Future enhancements
 
 Ideas for next developments are welcome and will be developed as time allows it. Some of our ideas for next implementations include:
 
-- Convergence detection;
 - Heat flux as boundary condition;
 - Different reflection models;
 - Interface between materials as boundary condition;
@@ -264,4 +314,6 @@ Ideas for next developments are welcome and will be developed as time allows it.
 - Different calculation methods;
 - And more.
 
-<!-- XXXXXXXX KEEP GOING xxxxxxxxxxxxxxxx -->
+# Aknowledgements
+
+This code was written by Bruno Hartmann da Silva as part of his PhD, under supervision of Dr. Prof. Laurent Chaput and Dr. Prof. David Lacroix at the Laboratoire Énergies et Mécanique Théorique et Appliquée (LEMTA), Université de Lorraine, Vandoeuvre-lès-Nancy, France. The PhD was funded by the Agence National de la Recherche (ANR).

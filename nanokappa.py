@@ -8,12 +8,12 @@ import sys
 import re
 
 print('\n'+
-      ' nonano          no   onanonan        onanon          on nonanonan              anon    anona\n'+
-      'ano   ona       ano  nona   anon     non  onan       nonano     anon            ano   ona\n'+
-      'ano    nano     anonano      nona    non    anon     nonan       non    anona   anonano\n'+
-      'ano     anon    anonan         nan   non     nona    nonan       non   nanon    nano anon\n'+
-      'ano       onan  anona           anonanon      onan   nonano     anon           nan   nona\n'+
-      'an         nanonano               nonanon      nanonano  nonanonan            onan    onano')
+    ' nonano          no   onanonan        onanon          on nonanonan              anon    anona\n'+
+    'ano   ona       ano  nona   anon     non  onan       nonano     anon            ano   ona\n'+
+    'ano    nano     anonano      nona    non    anon     nonan       non    anona   anonano\n'+
+    'ano     anon    anonan         nan   non     nona    nonan       non   nanon    nano anon\n'+
+    'ano       onan  anona           anonanon      onan   nonano     anon           nan   nona\n'+
+    'an         nanonano               nonanon      nanonano  nonanonan            onan    onano')
 
 print('\n'+'Running simulation, please wait. Check the results folder for the current status.')
 
@@ -40,9 +40,9 @@ f.close()
 max_time = re.split('-|:', args.max_sim_time[0])
 max_time = [int(i) for i in max_time]
 max_time = timedelta(days    = max_time[0],
-                     hours   = max_time[1],
-                     minutes = max_time[2],
-                     seconds = max_time[3])
+                    hours   = max_time[1],
+                    minutes = max_time[2],
+                    seconds = max_time[3])
 
 # getting start time
 start_time = datetime.now()
@@ -54,6 +54,7 @@ print("Simulation name: " + args.results_folder)
 print('---------- o ----------- o ------------- o ------------')
 
 # initialising geometry
+
 geo = Geometry(args)
 
 # opening file
@@ -83,7 +84,7 @@ while flag:
     flag = (pop.current_timestep < args.iterations[0]) and not pop.finish_sim
     
     if max_time.total_seconds() > 0:
-         flag = flag and datetime.now()-start_time < max_time
+        flag = flag and datetime.now()-start_time < max_time
 
 print('Saving end of run particle data...')
 pop.write_final_state(geo)

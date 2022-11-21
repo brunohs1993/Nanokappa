@@ -7,11 +7,11 @@ import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as rot
 from scipy.interpolate import NearestNDInterpolator
 from scipy.stats.qmc import Sobol
-from scipy.spatial import Delaunay
+# from scipy.spatial import Delaunay
 
 # geometry
 import trimesh as tm
-from trimesh.ray.ray_pyembree import RayMeshIntersector # FASTER
+# from trimesh.ray.ray_pyembree import RayMeshIntersector # FASTER
 import routines.subvolumes as subvolumes
 from shapely.geometry import Polygon, Point
 from mapbox_earcut import triangulate_float32 as triangulate_earcut
@@ -20,8 +20,7 @@ try:
     # soft dependency, not really needed. Maybe add it as an option, like trimesh?
     # I tested both earcut and triangle and I don't see much difference, but I'll keep it for now. 
 except: pass
-from trimesh.proximity import ProximityQuery
-
+# from trimesh.proximity import ProximityQuery
 
 # other
 import sys
@@ -57,10 +56,8 @@ class Geometry:
         self.offset          = float(args.offset[0])
         
         self.path_points     = np.array(self.args.path_points[1:]).astype(float).reshape(-1, 3)
-        
-        
-        # Processing mesh
 
+        # Processing mesh
         self.tol_decimals = 1
 
         self.load_geo_file(self.shape) # loading
@@ -272,8 +269,6 @@ class Geometry:
             except: # if it gives an error, try with quasi monte carlo / sobol sampling
                 self.subvol_volume = self.calculate_subvol_volume(algorithm = 'qmc')
             
-            
-
         elif self.subvol_type == 'voronoi':
             self.n_of_subvols    = int(self.args.subvolumes[1])
             self.subvol_center = subvolumes.distribute(self.mesh, self.n_of_subvols, self.folder, view = True)
@@ -295,8 +290,6 @@ class Geometry:
                 self.subvol_volume = self.calculate_subvol_volume()
             except: # if it gives an error, try with quasi monte carlo / sobol sampling
                 self.subvol_volume = self.calculate_subvol_volume(algorithm = 'qmc')
-            
-            
         
         elif self.subvol_type == 'grid':
             nx = int(self.args.subvolumes[1])
@@ -1057,13 +1050,20 @@ class Geometry:
     def contains_naive(self, x):
         if len(x.shape) == 1:
             x = x.reshape(1, 3)
+
+        print('call contains')
         
         # contains = np.array(list(map(self.contains_naive_single, x)))
-        contains = np.zeros(x.shape[0], dtype = bool)
-        for i, p in enumerate(x):
-            # start = time.time()
-            contains[i] = self.contains_naive_single(p)
+        # contains = np.zeros(x.shape[0], dtype = bool)
+        # for i, p in enumerate(x):
+        #     # start = time.time()
+        #     contains[i] = self.contains_naive_single(p)
             # print(time.time() - start)
+        
+        start = time.time()
+        contains = self.pool.map(self.contains_naive_single, x)
+        contains = np.array(contains)
+        print(x.shape[0], 'particles', time.time() - start)
         
         return contains
 
@@ -1085,9 +1085,11 @@ class Geometry:
            '''
 
         # if direction is None:
-        #     xc, tc, fc = zip(*map(self.find_boundary_single, x))
+        #     res = self.pool.starmap(self.find_boundary_single, x)
+        #     xc, tc, fc = zip(*res)
         # else:
-        #     xc, tc, fc = zip(*map(self.find_boundary_single, x, direction))
+        #     args = ((x[i, :], direction[i, :]) for i in range(x.shape[0]))
+        #     xc, tc, fc = zip(*list(self.pool.starmap(self.find_boundary_single, args)))
         
         # xc = np.array(xc)
         # tc = np.array(tc)

@@ -142,7 +142,7 @@ def exec_sim(sim_params, mode, exec_params):
 
         wait_time = time_for_cluster(sim_params['max_sim_time'], return_timedelta = True, margin = '0-00:01:00')
         
-        cmd = 'conda run -n nanokappa python {}/{}/nanokappa.py'.format(exec_params['nanokappa_path'], exec_params['nanokappa_folder'])
+        cmd = 'conda run -n nanokappa python {}/nanokappa.py'.format(exec_params['nanokappa_folder'])
         for k in sim_params.keys():
             cmd += ' --{} {}'.format(k, sim_params[k])
 
