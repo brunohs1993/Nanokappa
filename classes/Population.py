@@ -1451,7 +1451,7 @@ class Population(Constants):
         
         self.residue_all = np.where(new_std_large > np.absolute(new_mean_large), 0, residue_mean)
 
-        self.max_residue = self.residue_all.max()
+        self.max_residue = np.nanmax(self.residue_all)
         
         index = np.nonzero(self.residue_all == self.max_residue)[0][0]
         self.max_residue_qt = self.residue_qts[index]
@@ -1830,7 +1830,7 @@ class Population(Constants):
         
         #### MEAN AND STDEV QUANTITIES ####
         if self.current_timestep > 0:
-            filename = self.results_folder_name + 'mean_and_sigma.txt'
+            filename = self.results_folder_name + 'subvolumes.txt'
 
             if geometry.subvol_type == 'slice':
 
@@ -1856,7 +1856,7 @@ class Population(Constants):
                 header ='subvols final state data \n' + \
                         'Date and time: {}\n'.format(time) + \
                         'hdf file = {}, POSCAR file = {}\n'.format(self.args.hdf_file, self.args.poscar_file) + \
-                        'subvol id, subvol position, subvol volume, T [K], sigma T [K], HF x [W/m^2], sigma HF [W/m^2], HF y [W/m^2], sigma HF [W/m^2], HF z [W/m^2], sigma HF [W/m^2]'
+                        'subvol id, subvol position, subvol volume, T [K], sigma T [K], HF x [W/m^2], HF y [W/m^2], HF z [W/m^2], sigma HF x [W/m^2], sigma HF y [W/m^2], sigma HF z [W/m^2]'
 
                 data = np.hstack((np.arange(self.n_of_subvols).reshape(-1, 1),
                                 geometry.subvol_center,
@@ -1868,3 +1868,24 @@ class Population(Constants):
                 
                 # comma separated
                 np.savetxt(filename, data, '%d, %.3e, %.3e, %.3e, %.3e, %.3f, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e', delimiter = ',', header = header)
+
+                # connections data
+                filename = self.results_folder_name + 'subvol_connections.txt'
+
+                header ='connections final state data \n' + \
+                        'Date and time: {}\n'.format(time) + \
+                        'hdf file = {}, POSCAR file = {}\n'.format(self.args.hdf_file, self.args.poscar_file) + \
+                        'connection id, sv 1, sv 2, con dx, con dy, con dz, dT [K], sigma dT [K], HF [W/m^2], sigma HF [W/m^2], kappa [W/m K], sigma kappa [W/m K]'
+
+                data = np.hstack((np.arange(geometry.n_of_subvol_con).reshape(-1, 1),
+                                  geometry.subvol_connections,
+                                  geometry.subvol_con_vectors,
+                                  self.view.mean_con_dT.reshape(-1, 1),
+                                  self.view.std_con_dT.reshape(-1, 1),
+                                  self.view.mean_con_phi.reshape(-1, 1),
+                                  self.view.std_con_phi.reshape(-1, 1),
+                                  self.view.mean_con_k.reshape(-1, 1),
+                                  self.view.std_con_k.reshape(-1, 1)))
+                np.savetxt(filename, data, '%d, %d, %d, %.3e, %.3e, %.3e, %.3f, %.3e, %.3e, %.3e, %.3e, %.3e', delimiter = ',', header = header)
+
+                

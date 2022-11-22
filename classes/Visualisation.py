@@ -303,7 +303,15 @@ class Visualisation(Constants):
         if self.geometry.subvol_type == 'slice':
             self.mean_sv_k  = np.nanmean(self.sv_k[-N:, :], axis = 0)
         else:
-            self.mean_con_k = np.nanmean(self.con_k[-N:, :], axis = 0)
+            self.mean_con_k  = np.nanmean(self.con_k[-N:, :], axis = 0)
+            self.mean_con_dT = np.nanmean(self.T[-N:, self.geometry.subvol_connections[:, 1]] - self.T[-N:, self.geometry.subvol_connections[:, 0]], axis = 0)
+            
+            self.mean_con_phi = np.zeros(self.geometry.n_of_subvol_con)
+            for i, con in enumerate(self.geometry.subvol_connections):
+                phi = (self.sv_phi[-N:, 3*con[0]:3*(con[0]+1)] + self.sv_phi[-N:, 3*con[1]:3*(con[1]+1)])/2
+                dx  = np.copy(self.geometry.subvol_con_vectors[i, :])
+                dx /= np.linalg.norm(dx)
+                self.mean_con_phi[i] = np.nanmean(np.sum(phi*dx, axis = 1))
 
         self.std_total_en = self.total_en[-N:].std(axis = 0)
         self.std_en_res   = self.en_res[-N:, :].std(axis = 0)
@@ -319,6 +327,19 @@ class Visualisation(Constants):
             self.std_sv_k  = np.nanstd(self.sv_k[-N:, :], axis = 0)
         else:
             self.std_con_k = np.nanstd(self.con_k[-N:, :], axis = 0)
+            self.std_con_dT = np.nanstd(self.T[-N:, self.geometry.subvol_connections[:, 1]] - self.T[-N:, self.geometry.subvol_connections[:, 0]], axis = 0)
+            
+            self.std_con_phi = np.zeros(self.geometry.n_of_subvol_con)
+            for i, con in enumerate(self.geometry.subvol_connections):
+                phi = (self.sv_phi[-N:, 3*con[0]:3*(con[0]+1)] + self.sv_phi[-N:, 3*con[1]:3*(con[1]+1)])/2
+                dx  = np.copy(self.geometry.subvol_con_vectors[i, :])
+                dx /= np.linalg.norm(dx)
+                self.std_con_phi[i] = np.nanstd(np.sum(phi*dx, axis = 1))
+
+        if self.geometry.subvol_type != 'slice':
+            i = np.absolute(self.mean_con_k) < self.std_con_k
+            self.mean_con_k[i] = np.nan
+            self.std_con_k[i]  = np.nan
 
     def read_particles(self, verbose = True):
 
@@ -464,7 +485,7 @@ class Visualisation(Constants):
                     prof_xticklabels = np.arange(self.geometry.n_of_subvols, dtype = int)
                     conv_labels      = ['Sv {:d}'.format(i) for i in np.arange(self.geometry.n_of_subvols, dtype = int)]
                 else:
-                    data             = self.con_k
+                    data             = self.con_k*np.where(np.isnan(self.mean_con_k), 0, 1)
                     n_plot           = data.shape[1]
                     mean_prof        = self.mean_con_k
                     std_prof         = self.std_con_k
@@ -484,6 +505,16 @@ class Visualisation(Constants):
             ncols       = 2
             conv_x = self.sim_time
             conv_xlabel = 'Time [ps]'
+
+            if len(conv_labels) > 20 and len(conv_labels) <= 30:
+                legend_fontsize = 'small'
+                prof_xtick_fontdict = {'fontsize': 'small', 'rotation':45}
+            elif len(conv_labels) > 30:
+                legend_fontsize = 'x-small'
+                prof_xtick_fontdict = {'fontsize': 'x-small', 'rotation':90}
+            else:
+                legend_fontsize = 'medium'
+                prof_xtick_fontdict = {'fontsize': 'medium', 'rotation':0}
 
             # generate axes and figure
             if nrows == 2:
@@ -520,9 +551,9 @@ class Visualisation(Constants):
                 ax[-1, 0].set_xlabel(conv_xlabel)
                 ax[-1, 1].set_xlabel(prof_xlabel)
                 ax[-1, 1].set_xticks(prof_xticks)
-                ax[-1, 1].set_xticklabels(prof_xticklabels)
+                ax[-1, 1].set_xticklabels(prof_xticklabels, fontdict = prof_xtick_fontdict)
                 for a in ax[:, 0]:
-                    a.legend(conv_labels, ncols = 1+len(conv_labels)//10)
+                    a.legend(conv_labels, ncols = 1+len(conv_labels)//10, fontsize = legend_fontsize)
                 
             elif nrows == 2:
                 for i in range(n_plot):
@@ -536,20 +567,20 @@ class Visualisation(Constants):
                 
                 ax['bottom'].plot(conv_x, rol_mean, **mean_dict )
                 ax['bottom'].plot(conv_x, rol_std , **stdev_dict)
-                
-                ax['left'].legend(conv_labels, ncols = 1+len(conv_labels)//10)
+
+                ax['left'].legend(conv_labels, ncols = 1+len(conv_labels)//10, fontsize = legend_fontsize)
                 ax['left'].set_xlabel(conv_xlabel)
                 ax['left'].set_ylabel(ylabel[0])
 
                 ax['right'].set_xticks(prof_xticks)
                 ax['right'].set_xlabel(prof_xlabel)
-                ax['right'].set_xticklabels(prof_xticklabels)
+                ax['right'].set_xticklabels(prof_xticklabels, fontdict = prof_xtick_fontdict)
 
                 ax['bottom'].legend(['Instantaneous', r'Rolling $\mu$ ({} datapoints)'.format(N), r'Rolling $\sigma$ ({} datapoints)'.format(N)])
                 ax['bottom'].set_xlabel(conv_xlabel)
                 ax['bottom'].set_ylabel(ylabel[1])
 
-                text_y = min(0, mean_prof.min()*1.5) + (max(0, mean_prof.max()*1.5) - min(0, mean_prof.min()*1.5))*0.75
+                text_y = min(0, np.nanmin(mean_prof)*1.5) + (max(0, np.nanmax(mean_prof)*1.5) - min(0, np.nanmin(mean_prof)*1.5))*0.75
                 props = dict(boxstyle='round', facecolor='white', alpha=0.5)
                 
                 ax['bottom'].text(conv_x[-1], text_y, #rol_mean[-1]*1.05,
@@ -565,15 +596,15 @@ class Visualisation(Constants):
                 ax[1].errorbar(prof_x, mean_prof, yerr = std_prof, **prof_dict)
                 ax[1].set_xlabel(prof_xlabel)
                 ax[1].set_xticks(prof_xticks)
-                ax[1].set_xticklabels(prof_xticklabels)
+                ax[1].set_xticklabels(prof_xticklabels, fontdict = prof_xtick_fontdict)
 
                 # ax[0].ticklabel_format(axis = 'y', style = 'plain', scilimits=(0,0), useOffset = False)
                 ax[0].set_xlabel(conv_xlabel)
-                ax[0].legend(conv_labels, ncols = 1+len(conv_labels)//10)
+                ax[0].legend(conv_labels, ncols = 1+len(conv_labels)//10, fontsize = legend_fontsize)
             
             if prop in ['kappa', 'conductivity']:
-                y_max = max(0, 1.5*mean_prof.max())
-                y_min = min(0, 1.5*mean_prof.min())
+                y_max = max(0, 1.5*np.nanmax(mean_prof))
+                y_min = min(0, 1.5*np.nanmin(mean_prof))
                 if type(ax) == dict:
                     for key in ax.keys():
                         ax[key].set_ylim(y_min, y_max)

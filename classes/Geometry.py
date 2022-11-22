@@ -335,12 +335,6 @@ class Geometry:
             print('Stopping simulation...')
             quit()
         
-        # saving subvol data
-        np.savetxt(fname = self.folder + 'subvolumes.txt',
-               X = np.hstack((self.subvol_center, self.subvol_volume.reshape(-1, 1))),
-               fmt = '%.3f', delimiter = ',',
-               header = 'Distribution of subvolumes. \n Center x, Center y, Center z')
-
     def calculate_subvol_volume(self, algorithm = 'submesh', tol = 1e-5, verbose = False):
         if verbose:
             print('Calculating volumes... Algorithm:', algorithm)
@@ -1051,19 +1045,19 @@ class Geometry:
         if len(x.shape) == 1:
             x = x.reshape(1, 3)
 
-        print('call contains')
+        # print('call contains')
         
-        # contains = np.array(list(map(self.contains_naive_single, x)))
-        # contains = np.zeros(x.shape[0], dtype = bool)
-        # for i, p in enumerate(x):
-        #     # start = time.time()
-        #     contains[i] = self.contains_naive_single(p)
+        contains = np.array(list(map(self.contains_naive_single, x)))
+        contains = np.zeros(x.shape[0], dtype = bool)
+        for i, p in enumerate(x):
+            # start = time.time()
+            contains[i] = self.contains_naive_single(p)
             # print(time.time() - start)
         
-        start = time.time()
-        contains = self.pool.map(self.contains_naive_single, x)
-        contains = np.array(contains)
-        print(x.shape[0], 'particles', time.time() - start)
+        # start = time.time()
+        # contains = self.pool.map(self.contains_naive_single, x)
+        # contains = np.array(contains)
+        # print(x.shape[0], 'particles', time.time() - start)
         
         return contains
 
@@ -1436,6 +1430,8 @@ class Geometry:
         self.n_of_subvols = self.subvol_center.shape[0]
 
         self.n_of_subvol_con = self.subvol_connections.shape[0]
+
+        self.subvol_con_vectors = self.subvol_center[self.subvol_connections[:, 1], :] - self.subvol_center[self.subvol_connections[:, 0], :]
         
         self.save_connections()
         
