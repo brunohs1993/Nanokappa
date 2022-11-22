@@ -197,7 +197,7 @@ Whatever is the geometry, it is always rezeroed so that all vertices are in the 
 
 ### Boundary conditions
 
-The boundary conditions (BC) consist of heat transfer restrictions (such as imposed temperatures) and boundary surfaces properties (roughness or periodic). The user sets the desired facets on which to apply the BC by passing their indices to `--bound_facets`, the BC type to `--bound_cond` and their respective values to `--bound_values`. For instance, in the previously given example we have:
+The boundary conditions (BC) consist of heat transfer restrictions (such as imposed temperatures) and boundary surfaces properties (roughness or periodic). The user sets the desired facets on which to apply the BC by passing their indices to `--bound_facets` or `--bound_pos`, the BC type to `--bound_cond` and their respective values to `--bound_values`. For instance, in the previously given example we have:
 
     --bound_facets     0 3 4 2
     --bound_cond       T T R R P
@@ -209,9 +209,9 @@ So, in order:
 - Facet 0 has an imposed temperature of 302 K;
 - Facet 3 has an imposed temperature of 298 K;
 - Facets 4 and 2 both have a roughness of 10 angstroms;
-- Facets 1 and 5 are not mentioned, hence they pick the last informed boundary condition, which is periodic. To complete, their connection needs to be informed to `--connect_facets`.
+- Facets 1 and 5 are not mentioned in `--bound_facets`, hence they pick the last informed boundary condition, which is periodic (`P`). To complete, their connection needs to be informed to `--connect_facets` (alternatively, in `--connect_pos`).
 
-The `periodic` BC can only be applied to facets that have vertices in the same relative position, and their normal must be parallel and pointing in opposite directions. This is of vital importance, since crystal orientation is relevant to the phonon properties: an interface between crystals of the same material but in different orientations (such as grain boundaries) _cannot_ be periodic. In this configuration, whenever a particle crosses a boundary (that is not with a fixed temperature or heat flux) it is transported to the same position as it entered on the opposite boundary, as the solid was composed by several cuboid domains side by side (hence, periodic).
+The `periodic` BC can only be applied to facets that have vertices in the same relative position, and their normal must be parallel and pointing in opposite directions. This is of vital importance, since crystal orientation is relevant to the phonon properties: an interface between crystals of the same material but in different orientations (such as grain boundaries) _cannot_ be considered periodic. In this configuration, whenever a particle crosses a boundary (that is not with a fixed temperature) it is transported to the same position as it entered on the opposite boundary, as the solid was composed by several cuboid domains side by side (hence, periodic).
 
 ### Subvolumes
 
@@ -245,7 +245,22 @@ This algorithm has shown to be flexible, but can cause some problems depending o
 
 ### Result files
 
-The user can specify the name of a folder to save all simulation results into by inputing it to the `--results_folder` parameter. The default is no folder (an empty string `''`), so all files are saved in the folder where the user is located.
+The user can specify where they want to save the results of the simulation using the `--results_location` and `--results_folder` parameters. For example:
+
+    --results_location D:/Documents/Results
+    --results_folder   test
+
+Here a folder called `test_0` will be created in D:/Documents/Results and all results will be stored inside. If there is already a `test_<N>` folder in that location, it will create a `test_<N+1>` folder. The `--results_location` parameter also accepts `local` and `main` as arguments. In the former, the `--results_folder` is created from the directory Nanokappa was called from. In the latter, the folder is created in the Nanokappa root folder.
+
+The results files are comprised of:
+- List of the arguments used in the simulastion (`arguments.txt`);
+- Plot of the geometry with the facets color coded by boundary condition (`BC_plot.png`);
+- Plots of particles at the beginning of the simulation, as demanded in `--fig_plot`;
+- Convergence plots of relevant quantities (temperature, energy density, heat flux, number of particles, thermal conductivity);
+- Convergence data (`convergence.txt` and `residue.txt`);
+- Particle and subvolume data (`particle_data.txt` and `subvolumes.txt`);
+- Modes related by specular reflection (`specular_correspondences.txt`);
+- The animation of the simulation if demanded in `--rt_plot` (`simulation.gif`).
 
 <p>&nbsp</p>
 
