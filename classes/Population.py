@@ -126,7 +126,7 @@ class Population(Constants):
         self.conv_crit = float(self.args.conv_crit[0])
         self.initialise_residue(geometry)
         
-        self.plot_figures(geometry, property_plot = self.args.fig_plot, colormap = self.args.colormap[0])
+        self.plot_figures(geometry, phonon, property_plot = self.args.fig_plot, colormap = self.args.colormap[0])
 
         print('Creating convergence file...')
         self.open_convergence(geometry)
@@ -649,7 +649,7 @@ class Population(Constants):
 
             self.N_p = self.subvol_N_p.sum()
 
-        subvol_id = np.argmax(subvol_id, axis = 1)
+        subvol_id = np.argmax(subvol_id, axis = 1).astype(int)
 
         return subvol_id
 
@@ -1495,6 +1495,8 @@ class Population(Constants):
                 T = self.subvol_temperature
             vmin = np.floor(T.min()-1)
             vmax = np.ceil(T.max()+1)
+            label = 'Temperature [K]'
+            format = '{:.1f}'
         elif self.rt_plot[0] in ['e', 'energy']:
             colors = self.energies
             if self.n_of_reservoirs > 0:
@@ -1503,62 +1505,75 @@ class Population(Constants):
                 T = self.subvol_temperature
             vmin = phonon.calculate_energy(T.min()-1, phonon.omega, reference = True).min()
             vmax = phonon.calculate_energy(T.max()+1, phonon.omega, reference = True).max()
+            label = r'Energy density deviation $\hbar \omega \delta n$ [eV/angstrom$^3$]'
+            format = '{:.2e}'
         elif self.rt_plot[0] in ['omega', 'angular_frequency']:
             colors = self.omega
             vmin = phonon.omega[phonon.omega>0].min()
             vmax = phonon.omega.max()
+            label = r'Angular frequency $\omega$ [THz$\cdot$rad]'
+            format = '{:.2e}'
         elif self.rt_plot[0] in ['n', 'occupation']:
             colors = self.occupation
             order = [np.floor( np.log10( self.occupation.min()) ), np.floor( np.log10( self.occupation.max()) )]
             vmin = (10**order[0])*np.ceil(self.occupation.min()/(10**order[0]))
             vmax = (10**order[1])*np.ceil(self.occupation.max()/(10**order[1]))
+            label = r'Occupation number deviation $\delta n$ [phonons/angstrom$^3$]'
+            format = '{:.2e}'
         elif self.rt_plot[0] in ['qpoint']:
             colors = self.modes[:, 0]
             vmin = 0
             vmax = phonon.number_of_qpoints
+            label = 'Q-point index [-]'
+            format = '{:d}'
         elif self.rt_plot[0] in ['branch']:
             colors = self.modes[:, 1]
             vmin = 0
             vmax = phonon.number_of_branches
+            label = 'Branch index [-]'
+            format = '{:d}'
         elif self.rt_plot[0] in ['ts_to_boundary']:
             colors = self.n_timesteps
-
             vel  = np.sqrt( (phonon.group_vel**2).sum(axis = 2) )
-            min_vel = vel[vel>0].min()
-            max_path = np.sqrt( (geometry.bounds[1, :]**2).sum() ).min()
-            
+            # min_vel = vel[vel>0].min()
+            # max_path = np.sqrt( (geometry.bounds[1, :]**2).sum() ).min()
             vmin = 0
             vmax = 100 # max_path/(min_vel*self.dt)
+            label = 'Timesteps to collision [timesteps]'
+            format = '{:d}'
         elif self.rt_plot[0] in ['subvol']:
             colors = self.subvol_id
             vmin = 0
             vmax = self.n_of_subvols
+            label = 'Subvolume index [-]'
+            format = '{:d}'
 
         # plt.ion()
         
-        # Think about a way to make the animation "pretty" with a proper aspect ratio depending on dimensions of the domain
-
         # box_size = np.ptp(geometry.bounds, axis = 0)
         # figsize = np.array([box_size.max()/2, box_size.min()])
         # figsize = figsize*8/(box_size.max()/2)
 
         figsize = (15,15)
 
-        fig = plt.figure(figsize = figsize, dpi = 100)
-        ax = fig.add_subplot(111, projection='3d')
+        # fig = plt.figure(figsize = figsize, dpi = 100)
+        # ax = fig.add_subplot(111, projection='3d')
+
+        fig, ax = geometry.plot_facet_boundaries(geometry.mesh, l_color = 'grey')
+        
         ax.set_box_aspect( np.ptp(geometry.bounds, axis = 0) )
         ax.set_xlim(geometry.bounds[:, 0])
         ax.set_ylim(geometry.bounds[:, 1])
         ax.set_zlim(geometry.bounds[:, 2])
 
-        for f in range(len(geometry.mesh.facets)):
-            for e in geometry.mesh.facets_boundary[f]:
-                p = geometry.mesh.vertices[e, :]
-                # ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'gray')
-                # testing in a geometry with straight lines, so this makes sense in this case:
-                equal_coord = p[0, :] == p[1, :]
-                if np.any(np.isin(p[0, equal_coord], self.bounds[0, :])):
-                    ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'gray')
+        # for f in range(len(geometry.mesh.facets)):
+        #     for e in geometry.mesh.facets_boundary[f]:
+        #         p = geometry.mesh.vertices[e, :]
+        #         # ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'gray')
+        #         # testing in a geometry with straight lines, so this makes sense in this case:
+        #         equal_coord = p[0, :] == p[1, :]
+        #         if np.any(np.isin(p[0, equal_coord], geometry.bounds[0, :])):
+        #             ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'gray')
 
         graph = ax.scatter(self.positions[:, 0],
                            self.positions[:, 1],
@@ -1569,16 +1584,28 @@ class Population(Constants):
                            c    = colors       ,
                            cmap = self.colormap)
         
-        for f in range(len(geometry.mesh.facets)):
-            for e in geometry.mesh.facets_boundary[f]:
-                p = geometry.mesh.vertices[e, :]
-                # ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'gray')
-                # testing in a geometry with straight lines, so this makes sense in this case:
-                equal_coord = p[0, :] == p[1, :]
-                if np.any(np.isin(p[0, equal_coord], self.bounds[1, :])):
-                    ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'gray')
+        # for f in range(len(geometry.mesh.facets)):
+        #     for e in geometry.mesh.facets_boundary[f]:
+        #         p = geometry.mesh.vertices[e, :]
+        #         # ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'gray')
+        #         # testing in a geometry with straight lines, so this makes sense in this case:
+        #         equal_coord = p[0, :] == p[1, :]
+        #         if np.any(np.isin(p[0, equal_coord], geometry.bounds[1, :])):
+        #             ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'gray')
         
-        # fig.colorbar(graph)
+        norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+        cb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap = self.colormap),
+                     ax = ax,
+                     location = 'bottom',
+                     orientation = 'horizontal',
+                     fraction = 0.05,
+                     aspect = 30,
+                     shrink = 0.8,
+                     pad = -0.1,
+                     format = format)
+
+        cb.set_label(label = label, size = 'small')
+        cb.set_ticklabels([format.format(i) for i in cb.get_ticks()], size = 'small')
 
         # graph.set_animated(True)
 
@@ -1645,18 +1672,12 @@ class Population(Constants):
             imageio.mimsave(self.results_folder_name+'simulation.gif', self.plot_images, fps=10)
             print('Saved!')
 
-    def plot_figures(self, geometry, property_plot=['temperature'], colormap = 'viridis'):
-
-        fig = plt.figure( figsize = (8, 8), dpi = 150 )
+    def plot_figures(self, geometry, phonon, property_plot=['temperature'], colormap = 'viridis'):
+        
+        fig, ax = geometry.plot_facet_boundaries(geometry.mesh, l_color = 'grey')
         n = len(property_plot)
 
-        ax = fig.add_subplot(111, projection='3d')
         ax.set_box_aspect( np.ptp(geometry.bounds, axis = 0) )
-        
-        for f in range(len(geometry.mesh.facets)):
-            for e in geometry.mesh.facets_boundary[f]:
-                p = geometry.mesh.vertices[e, :]
-                ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'k')
         
         graph = ax.scatter(self.positions[:, 0],
                            self.positions[:, 1],
@@ -1667,33 +1688,69 @@ class Population(Constants):
 
         for i in range(n):
             if property_plot[i] in ['T', 'temperature', 'temperatures']:
-                data = self.temperatures
-                figname = 'temperature'
-                title = 'Temperature [K]'
+                figname = 'init_temperature'
+                colors = self.temperatures
+                if self.n_of_reservoirs > 0:
+                    T = np.concatenate((self.res_bound_values[self.res_bound_cond == 'T'], self.subvol_temperature))
+                else:
+                    T = self.subvol_temperature
+                vmin = np.floor(T.min()-1)
+                vmax = np.ceil(T.max()+1)
+                label = 'Temperature [K]'
+                format = '{:.1f}'
             elif property_plot[i] in ['omega', 'angular_frequency', 'frequency']:
-                data = self.omega
-                figname = 'angular_frequency'
-                title = 'Angular Frequency [rad/s]'
+                figname = 'init_omega'
+                colors = self.omega
+                vmin = phonon.omega[phonon.omega>0].min()
+                vmax = phonon.omega.max()
+                label = r'Angular frequency $\omega$ [THz$\cdot$rad]'
+                format = '{:.2e}'
             elif property_plot[i] in ['n', 'occupation']:
-                data = np.log(self.occupation)
-                figname = 'occupation'
-                title = 'Occupation Number'
+                figname = 'init_occupation'
+                colors = self.occupation
+                order = [np.floor( np.log10( self.occupation.min()) ), np.floor( np.log10( self.occupation.max()) )]
+                vmin = (10**order[0])*np.ceil(self.occupation.min()/(10**order[0]))
+                vmax = (10**order[1])*np.ceil(self.occupation.max()/(10**order[1]))
+                label = r'Occupation number deviation $\delta n$ [phonons/angstrom$^3$]'
+                format = '{:.2e}'
             elif property_plot[i] in ['e', 'energy', 'energies']:
-                data = self.energies
-                figname = 'energy'
-                title = 'Energy [eV]'
+                figname = 'init_energy'
+                colors = self.energies
+                if self.n_of_reservoirs > 0:
+                    T = np.concatenate((self.res_bound_values[self.res_bound_cond == 'T'], self.subvol_temperature))
+                else:
+                    T = self.subvol_temperature
+                vmin = phonon.calculate_energy(T.min()-1, phonon.omega, reference = True).min()
+                vmax = phonon.calculate_energy(T.max()+1, phonon.omega, reference = True).max()
+                label = r'Energy density deviation $\hbar \omega \delta n$ [eV/angstrom$^3$]'
+                format = '{:.2e}'
             elif property_plot[i] in ['sv', 'subvolumes', 'subvolume', 'subvol', 'subvols']:
-                data = self.subvol_id
-                figname = 'subvolume'
-                title = 'Subvolumes'
+                figname = 'subvolumes'
+                colors = self.subvol_id
+                vmin = 0
+                vmax = self.n_of_subvols
+                label = 'Subvolume index [-]'
+                format = '{:d}'
 
-            graph.set_array(data)
-            if data.shape[0] > 0:
+            graph.set_array(colors)
+            if colors.shape[0] > 0:
                 graph.autoscale()
             if i > 0:
-                cbar.remove()
-            cbar = fig.colorbar(graph, orientation='horizontal')
-            plt.title(title, {'size': 15} )
+                cb.remove()
+
+            norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+            cb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap = self.colormap),
+                              ax = ax,
+                              location = 'bottom',
+                              orientation = 'horizontal',
+                              fraction = 0.05,
+                              aspect = 30,
+                              shrink = 0.8,
+                              pad = -0.1,
+                              format = format)
+
+            cb.set_label(label = label, size = 'small')
+            cb.set_ticklabels([format.format(i) for i in cb.get_ticks()], size = 'small')
 
             plt.tight_layout()
             

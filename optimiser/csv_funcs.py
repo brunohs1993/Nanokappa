@@ -175,6 +175,7 @@ def generate_script(job_name,
     '''THIS HAS BEEN TESTED ON UNIVERSITÉ DE LORRAINE'S CLUSTER EXPLOR ONLY.'''
 
     s = '#!/bin/bash\n' + \
+        '#SBATCH -C NOPREEMPT' + \
         '#SBATCH -p {:s}\n'.format(partition) + \
         '#SBATCH -N {:d}\n'.format(n_of_nodes) + \
         '#SBATCH -J {:s}\n'.format(job_name) + \
