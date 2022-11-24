@@ -508,7 +508,7 @@ class Geometry:
 
         print('Checking connected faces...')
 
-        if len(args.connect_facets) == 0:
+        if len(args.connect_pos) > 0:
             points = np.array(args.connect_pos[1:], dtype = float).reshape(-1, 3)
             if args.connect_pos[0] == 'relative':
                 points = self.scale_positions(points, True)
@@ -1502,7 +1502,8 @@ class Geometry:
                 path = np.array([sv_start, sv_end])
 
                 total_v = self.subvol_center[sv_end, :] - self.subvol_center[sv_start, :]
-                total_v /=  np.linalg.norm(total_v)
+                with np.errstate(divide = 'ignore', invalid = 'ignore', over = 'ignore'):
+                    total_v /=  np.linalg.norm(total_v)
 
                 local_start = sv_start
                 local_end   = sv_end
