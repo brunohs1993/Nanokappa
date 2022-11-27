@@ -65,7 +65,7 @@ class Geometry:
         self.get_outer_hull(args)      # getting the outer hull, making it watertight and correcting bound_facets
         self.get_mesh_properties()     # defining useful properties
         self.get_bound_facets(args)    # get boundary conditions facets
-        self.check_connections(args)   # check if all connections are valid and adjust vertices
+        self.check_facet_connections(args)   # check if all connections are valid and adjust vertices
         self.get_plane_k()
         self.save_reservoir_meshes(engine = 'earcut')   # save meshes of each reservoir after adjust vertices
         self.plot_mesh_bc()
@@ -91,6 +91,7 @@ class Geometry:
             self.mesh = tm.creation.capsule( self.dimensions[0], self.dimensions[1] )
         else:
             self.mesh = tm.load(shape)
+            self.mesh.fix_normals()
 
     def transform_mesh(self):
         '''Builds transformation matrix and aplies it to the mesh.'''
@@ -499,12 +500,14 @@ class Geometry:
         coords   = [self.mesh.vertices[i, :] for i in vertices                    ] # vertices coordinates contained by the boundary facet
 
         self.facet_vertices = [np.unique(np.vstack((v[0, :, :], v[1, :, :])), axis = 0) for v in coords]
+        self.facet_bound_vertices = [self.mesh.vertices[np.unique(self.mesh.facets_boundary[i]), :] for i in range(len(self.mesh.facets))]
 
         # calculation of the centroid of each facet as the mean of vertex coordinates, weighted by how many faces they are connected to.
         # this is equal to the mean of triangles centroids.
-        self.facet_centroid = np.array([vertices.mean(axis = 0) for vertices in self.facet_vertices])
+
+        self.facet_centroid = np.array([self.get_facet_centroid(i) for i in range(self.n_of_facets)])
         
-    def check_connections(self, args):
+    def check_facet_connections(self, args):
 
         print('Checking connected faces...')
 
@@ -527,36 +530,45 @@ class Geometry:
             normal_2 = self.mesh.facets_normal[connections[i, 1], :]
             normal_check = np.all(np.absolute(normal_1+normal_2) < 10**-self.tol_decimals)
 
-            vertices_1 = self.facet_vertices[connections[i, 0]] - self.facet_centroid[connections[i, 0], :]
-            index_1 = np.lexsort(vertices_1.T)
-            vertices_1 = vertices_1[index_1, :]
+            if normal_check:
 
-            vertices_2 = self.facet_vertices[connections[i, 1]] - self.facet_centroid[connections[i, 1], :]
-            index_2 = np.lexsort(vertices_2.T)
-            vertices_2 = vertices_2[index_2, :]
+                faces_1 = self.mesh.facets[connections[i, 0]]
+                faces_2 = self.mesh.facets[connections[i, 1]]
 
-            vertex_check = np.all(np.absolute(vertices_1-vertices_2) < 10**-self.tol_decimals)
+                mesh_1 = self.mesh.submesh(faces_sequence = [faces_1], append = True)
+                mesh_2 = self.mesh.submesh(faces_sequence = [faces_2], append = True)
 
-            check = np.all([vertex_check, normal_check])
+                mesh_1.rezero()
+                mesh_2.rezero()
+                
+                ring_1 = self.get_boundary_rings(mesh_1)
+                ring_2 = self.get_boundary_rings(mesh_2)
 
-            if check:
-                print('Connection {:d} OK!'.format(i))
+                vertices_1_2d, b1, b2 = self.transform_3d_to_2d(mesh_1.vertices, normal_1, np.zeros(3))
+                vertices_2_2d, _, _ = self.transform_3d_to_2d(mesh_2.vertices, normal_1, np.zeros(3), b1 = b1, b2 = b2)
+
+                vertices_1_2d, ring_1 = self.remove_midpoints_from_ring(vertices_1_2d, ring_1)
+                vertices_2_2d, ring_2 = self.remove_midpoints_from_ring(vertices_2_2d, ring_2)
+
+                poly_1 = self.save_polygon(vertices_1_2d, ring_1)
+                poly_2 = self.save_polygon(vertices_2_2d, ring_2)
+
+                poly_1.simplify(1)
+                poly_2.simplify(1)
+
+                vertex_check = poly_1.equals(poly_2)
+
+                if vertex_check:
+                    print('Connection {:d} OK!'.format(i))
+                else:
+                    Exception('Connection {:d} is wrong! Check arguments!'.format(i))
             else:
-                print('Connection {:d} is wrong! Check arguments!'.format(i))
-                print('#####')
-                print('Normals', normal_1, normal_2)
-                print('Vertices')
-                print(vertices_1)
-                print(vertices_2)
-                print('#####')
-
-                print('Stopping simulation...')
-                quit()
+                Exception('Connected facets normals do not agree!!')
         
-        print('Adjusting mesh.')
-        self.adjust_connections(connections)
+        # print('Adjusting mesh.')
+        # self.adjust_facet_connections(connections)
 
-    def adjust_connections(self, connections):
+    def adjust_facet_connections(self, connections):
         
         n_connections = connections.shape[0]
 
@@ -621,7 +633,7 @@ class Geometry:
                 
                 # calculation of the centroid of each facet as the mean of vertex coordinates, weighted by how many faces they are connected to.
                 # this is equal to the mean of triangles centroids.
-                self.facet_centroid = np.array([vertices.mean(axis = 0) for vertices in self.facet_vertices])
+                self.facet_centroid = np.array([self.get_facet_centroid(i) for i in range(self.n_of_facets)])
 
             check = np.all(check_array)
             count += 1
@@ -631,10 +643,11 @@ class Geometry:
         
     def save_reservoir_meshes(self, engine = 'earcut'):
 
-        faces    = [self.mesh.facets[i] for i in range(self.n_of_facets)] # indexes of the faces that define each facet
+        # faces    = [self.mesh.facets[i] for i in range(self.n_of_facets)] # indexes of the faces that define each facet
 
         # facets of reservoirs
-        self.res_faces = [faces[i] for i in self.res_facets]
+        # self.res_faces = [faces[i] for i in self.res_facets]
+        self.res_faces = [self.mesh.facets[i] for i in self.res_facets]
 
         # meshes of the boundary facets to be used for sampling
         self.res_meshes = self.mesh.submesh(faces_sequence = self.res_faces, append = False)
@@ -649,7 +662,7 @@ class Geometry:
             normal = mesh.facets_normal[0, :]   # plane normal
             origin = mesh.vertices[0, :]        # plane origin
             
-            plane_coord, b1, b2 = self.transform_3d_to_2d(mesh, normal, origin)
+            plane_coord, b1, b2 = self.transform_3d_to_2d(mesh.vertices, normal, origin)
 
             ring_list = self.get_boundary_rings(mesh)
 
@@ -704,21 +717,28 @@ class Geometry:
         plt.savefig(self.args.results_folder + 'BC_plot.png')
         plt.close(fig)
 
-    def transform_3d_to_2d(self, mesh, normal, origin):
-        '''Transform the 3d vertices of a mesh to the 2d projection on a plane
-        defined by normal and origin. The other two base vectors are generated randomly and
-        orthogonal to the normal and between themselves.
+    def transform_3d_to_2d(self, vertices, normal, origin, b1 = None, b2 = None):
+        '''Transform 3d vertices to the 2d projection on a plane
+        defined by normal and origin. The other two base vectors are chosen as
+        the projection of unit x (or unit y if the normal is already equal to
+        unit x) in the plane and the cross product between normal and b1.
         
         Returns the coordinates of the mesh vertices projected onto the plane and the base vectors.
         '''
-        b1 = np.random.rand(3)              # generate random vector
-        b1 = b1 - normal*np.sum(normal*b1)  # make b1 orthogonal to the normal
-        b1 = b1/np.sum(b1**2)**0.5          # normalise b1
-        b2 = np.cross(normal, b1)           # generate b2 = n x b1
+
+        if b1 is None or b2 is None:
+            if np.absolute(np.sum(normal*np.array([1, 0, 0]))) == 1: # if b1 is parallel to b1
+                b1 = np.array([0, 1, 0])
+            else:
+                b1 = np.array([1, 0, 0])
+            b1 = b1 - normal*np.sum(normal*b1)  # make b1 orthogonal to the normal
+            b1 = b1/np.sum(b1**2)**0.5          # normalise b1
+            b2 = np.cross(normal, b1)           # generate b2 = n x b1
+
         A = np.vstack((b1, b2, normal)).T   # get x and y bases coefficients
         
         plane_coord = np.zeros((0, 2))
-        for v in mesh.vertices:             # for each vertex
+        for v in vertices:             # for each vertex
 
             B = np.expand_dims((v - origin), 1)     # get relative coord
             
@@ -729,6 +749,36 @@ class Geometry:
     def transform_2d_to_3d(self, v, b1, b2, o):
         return np.expand_dims(v[:, 0], 1)*b1 + np.expand_dims(v[:, 1], 1)*b2 + o 
 
+    def remove_midpoints_from_ring(self, v, r, tol = 1e-3, close_ring = False):
+        '''From a list of vertices (any dimension), removes midpoints
+           by comparing the cosine of the angle between previous and
+           next vertices in the sequence to a tolerance, and adjust
+           ring sequence.'''
+
+        d = v.shape[1]
+        new_v = np.zeros((0, d))
+        new_r = []
+
+        for ring in r:
+            v_ord = v[ring, :]
+
+            diff = v_ord[1:, :] - v_ord[:-1, :]
+            diff /= np.linalg.norm(diff, axis = 1, keepdims = True)
+            diff = np.vstack((diff[-1, :], diff))
+
+            dot = np.sum(diff[:-1, :]*diff[1:, :], axis = 1)
+            
+            v_ord = v_ord[:-1, :][1-dot > tol, :]
+
+            rr = [i+new_v.shape[0] for i in range(v_ord.shape[0])]
+            rr += [new_v.shape[0]]
+
+            new_r.append(rr)
+
+            new_v = np.vstack((new_v, v_ord))
+        
+        return new_v, new_r
+
     def get_boundary_rings(self, mesh, fct = 0):
         '''Returns a list of lists, where each inner list is a ring.
         For each ring, the correspondent list contains the indexes of
@@ -738,8 +788,8 @@ class Geometry:
         If fct is not informed, the first facet of the mesh is considered.'''
         
         # ordering the vertices for line string
-        boundary_vertices = np.unique(mesh.facets_boundary[fct])
         bound_edges = mesh.facets_boundary[fct]
+        boundary_vertices = np.unique(bound_edges)
 
         active = np.ones(bound_edges.shape[0], dtype = bool)
         v = boundary_vertices[0]
@@ -1032,7 +1082,7 @@ class Geometry:
 
         self.facet_k = -np.sum(n*ref_vert, axis = 1) # k for each facet
 
-    def contains_naive_single(self, x):
+    def contains_single(self, x):
         v = tm.creation.icosphere(subdivisions = 0).vertices # 12 rays
         
         _, t, _ = self.find_boundary_naive(np.ones(v.shape)*x, direction = v)
@@ -1045,19 +1095,10 @@ class Geometry:
         if len(x.shape) == 1:
             x = x.reshape(1, 3)
 
-        # print('call contains')
-        
-        contains = np.array(list(map(self.contains_naive_single, x)))
+        contains = np.array(list(map(self.contains_single, x)))
         contains = np.zeros(x.shape[0], dtype = bool)
         for i, p in enumerate(x):
-            # start = time.time()
-            contains[i] = self.contains_naive_single(p)
-            # print(time.time() - start)
-        
-        # start = time.time()
-        # contains = self.pool.map(self.contains_naive_single, x)
-        # contains = np.array(contains)
-        # print(x.shape[0], 'particles', time.time() - start)
+            contains[i] = self.contains_single(p)
         
         return contains
 
@@ -1433,9 +1474,9 @@ class Geometry:
 
         self.subvol_con_vectors = self.subvol_center[self.subvol_connections[:, 1], :] - self.subvol_center[self.subvol_connections[:, 0], :]
         
-        self.save_connections()
+        self.save_subvol_connections()
         
-    def save_connections(self):
+    def save_subvol_connections(self):
         fig, ax = self.plot_facet_boundaries(self.mesh, l_color = 'r')
 
         ax.scatter(self.subvol_center[:, 0], self.subvol_center[:, 1], self.subvol_center[:, 2], marker = 'o', c = 'b', s = 5)
@@ -1451,6 +1492,9 @@ class Geometry:
         plt.close(fig)
 
     def get_facet_centroid(self, f):
+        '''Calculates the centroid of facet f by the sum
+           of the triangles centroids weighted by their areas.'''
+
         if type(f) == int:
             c = np.zeros(3)
             for tri in self.mesh.facets[f]:
