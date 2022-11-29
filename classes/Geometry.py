@@ -260,16 +260,19 @@ class Geometry:
             
             self.slice_length = np.ptp(self.bounds[:, self.slice_axis])/self.n_of_subvols
 
-            self.get_subvol_connections()
-
             self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
                                                       xc = self.scale_positions(self.subvol_center))
             
             try: # try slicing the mesh first
-                self.subvol_volume = self.calculate_subvol_volume()
+                self.subvol_volume, self.subvol_center = self.calculate_subvol_volume(return_centers = True)
             except: # if it gives an error, try with quasi monte carlo / sobol sampling
-                self.subvol_volume = self.calculate_subvol_volume(algorithm = 'qmc')
+                self.subvol_volume, self.subvol_center = self.calculate_subvol_volume(algorithm = 'qmc', return_centers = True)
+
+            self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
+                                                      xc = self.scale_positions(self.subvol_center))
             
+            self.get_subvol_connections()
+
         elif self.subvol_type == 'voronoi':
             self.n_of_subvols    = int(self.args.subvolumes[1])
             self.subvol_center = subvolumes.distribute(self.mesh, self.n_of_subvols, self.folder, view = True)
@@ -336,7 +339,7 @@ class Geometry:
             print('Stopping simulation...')
             quit()
         
-    def calculate_subvol_volume(self, algorithm = 'submesh', tol = 1e-5, verbose = False):
+    def calculate_subvol_volume(self, algorithm = 'submesh', tol = 1e-4, return_centers = False, verbose = False):
         if verbose:
             print('Calculating volumes... Algorithm:', algorithm)
         # calculating subvol cover and volume
@@ -347,6 +350,8 @@ class Geometry:
             normals = self.subvol_center-np.expand_dims(self.subvol_center, axis = 1)
 
             subvol_volume = np.zeros(self.n_of_subvols)
+            if return_centers:
+                subvol_center = np.zeros((self.n_of_subvols, 3))
 
             for sv in range(self.n_of_subvols):
                 sv_mesh = copy.copy(self.mesh)
@@ -356,6 +361,8 @@ class Geometry:
                         sv_mesh = tm.intersections.slice_mesh_plane(sv_mesh, normals[sv_p, sv, :], origins[sv, sv_p, :], cap = True)
                 
                 subvol_volume[sv] = sv_mesh.volume # trimesh estimation
+                if return_centers:
+                    subvol_center[sv, :] = sv_mesh.center_mass
             
             if algorithm == 'submesh_qmc':
                 # submesh quasi monte carlo estimation
@@ -392,27 +399,33 @@ class Geometry:
             n_t  = 0
             n_sv = np.zeros(self.n_of_subvols)
 
-            ns = int(2**7)
+            ns = int(2**10)
             gen = Sobol(3)
 
             cnt = 1
+            samples        = np.zeros((0, 3))
+            scaled_samples = np.zeros((0, 3))
             while err.max() > tol:
                 
-                samples = gen.random(ns)*self.bounds.ptp(axis = 0)+self.bounds[0, :]
+                new_samples = gen.random(ns)*self.bounds.ptp(axis = 0)+self.bounds[0, :]
 
-                samples_in = np.nonzero(self.mesh.contains(samples))[0]
+                # new_samples_in = np.nonzero(self.contains_naive(new_samples))[0]
+                new_samples_in = np.nonzero(self.mesh.contains(new_samples))[0]
 
-                samples = samples[samples_in, :]
+                new_samples = new_samples[new_samples_in, :]
 
-                n_t += samples_in.shape[0]
+                samples = np.vstack((samples, new_samples))
+                scaled_samples = np.vstack((scaled_samples, self.scale_positions(new_samples)))
 
-                samples = self.scale_positions(samples)
-                r = np.argmax(self.subvol_classifier.predict(samples), axis = 1)
+                n_t = samples.shape[0]
                 
-                for i in range(self.n_of_subvols):
-                    n_sv[i] += (r == i).sum()
+                r = self.subvol_classifier.predict(scaled_samples)
+
+                # for i in range(self.n_of_subvols):
+                #     n_sv[i] = (r == i).sum()
                 
-                new_cover = n_sv/n_t
+                # new_cover = n_sv/n_t
+                new_cover = np.mean(r, axis = 0)
 
                 with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
                     err = np.absolute((new_cover - cover)/cover)
@@ -425,9 +438,16 @@ class Geometry:
 
             subvol_volume = cover*self.mesh.volume
 
-        ##############################################################
-        
-        return subvol_volume
+            if return_centers:
+                r = np.argmax(self.subvol_classifier.predict(scaled_samples), axis = 1)
+                subvol_center = np.zeros((self.n_of_subvols, 3))
+                for sv in range(self.n_of_subvols):
+                    subvol_center[sv, :] = np.mean(samples[ r == sv, :], axis = 0)
+
+        if return_centers:
+            return subvol_volume, subvol_center
+        else:
+            return subvol_volume
 
     def get_bound_facets(self, args):
 
@@ -643,10 +663,7 @@ class Geometry:
         
     def save_reservoir_meshes(self, engine = 'earcut'):
 
-        # faces    = [self.mesh.facets[i] for i in range(self.n_of_facets)] # indexes of the faces that define each facet
-
         # facets of reservoirs
-        # self.res_faces = [faces[i] for i in self.res_facets]
         self.res_faces = [self.mesh.facets[i] for i in self.res_facets]
 
         # meshes of the boundary facets to be used for sampling
@@ -1520,8 +1537,8 @@ class Geometry:
             elif self.args.path_points[0] == 'absolute':
                 pass
             else:
-                raise Warning('Wrong --path_points keyword. Path will be ignored.')
                 self.path_points = None
+                raise Warning('Wrong --path_points keyword. Path will be ignored.')
         else:
             self.path_points = None
         
@@ -1532,6 +1549,7 @@ class Geometry:
 
         sv_points = np.argmax(self.subvol_classifier.predict(self.scale_positions(points)), axis = 1)
 
+        
         if np.unique(sv_points).shape[0] == 1:
             raise Warning('Invalid path points. Path conductivity will be turned off.')
         else:
@@ -1551,8 +1569,14 @@ class Geometry:
 
                 local_start = sv_start
                 local_end   = sv_end
-
+                
+                start = time.time()
+                warn_flag = True
                 while local_start != local_end: # while both points do not meet
+
+                    if time.time() - start > 10 and warn_flag:
+                        print('Path is taking too long to be found. Please try again with another points.')
+                        warn_flag = False
 
                     v = self.subvol_center[local_end, :] - self.subvol_center[local_start, :]
                     v /=  np.linalg.norm(v)
