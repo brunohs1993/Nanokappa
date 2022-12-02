@@ -47,8 +47,12 @@ class Geometry:
         self.standard_shapes = ['cuboid', 'cillinder', 'sphere']
         self.scale           = args.scale
         self.dimensions      = args.dimensions             # angstrom
-        self.rotation        = np.array(args.geo_rotation[:-1]).astype(float)
-        self.rot_order       = args.geo_rotation[-1]
+        if len(args.geo_rotation) > 0:
+            self.rotation  = np.array(args.geo_rotation[:-1]).astype(float)
+            self.rot_order = args.geo_rotation[-1]
+        else:
+            self.rotation = None
+            self.rot_order = None
         self.shape           = args.geometry[0]
         self.subvol_type     = args.subvolumes[0]
         
@@ -103,16 +107,16 @@ class Geometry:
         scale_matrix = np.identity(4)*np.append(self.scale, 1)
 
         self.mesh.apply_transform(scale_matrix) # scale mesh
+        if self.rotation is not None or self.rot_order is not None:
+            rotation_matrix       = np.zeros( (4, 4) ) # initialising transformation matrix
+            rotation_matrix[3, 3] = 1
 
-        rotation_matrix       = np.zeros( (4, 4) ) # initialising transformation matrix
-        rotation_matrix[3, 3] = 1
+            rotation_matrix[0:3, 0:3] = rot.from_euler(self.rot_order, self.rotation, degrees = True).as_matrix() # building rotation terms
 
-        rotation_matrix[0:3, 0:3] = rot.from_euler(self.rot_order, self.rotation, degrees = True).as_matrix() # building rotation terms
+            self.mesh.apply_transform(rotation_matrix) # rotate mesh
 
-        self.mesh.apply_transform(rotation_matrix) # rotate mesh
-
-        self.mesh.rezero() # brings mesh to origin back again to avoid negative coordinates
-
+            self.mesh.rezero() # brings mesh to origin back again to avoid negative coordinates
+            
         # THIS IS TO TRY AVOID PROBLEMS WITH PERIODIC BOUNDARY CONDITION
         # DUE TO ROUNDING ERRORS
         self.mesh.vertices = np.around(self.mesh.vertices, decimals = self.tol_decimals)
@@ -584,7 +588,7 @@ class Geometry:
                     Exception('Connection {:d} is wrong! Check arguments!'.format(i))
             else:
                 Exception('Connected facets normals do not agree!!')
-        
+
         # print('Adjusting mesh.')
         # self.adjust_facet_connections(connections)
 
@@ -663,11 +667,19 @@ class Geometry:
         
     def save_reservoir_meshes(self, engine = 'earcut'):
 
-        # facets of reservoirs
+        # faces of reservoirs
         self.res_faces = [self.mesh.facets[i] for i in self.res_facets]
 
         # meshes of the boundary facets to be used for sampling
         self.res_meshes = self.mesh.submesh(faces_sequence = self.res_faces, append = False)
+        
+        # for some reason, trimesh creates extra triangles for 3 or 4 sided cylinders. This is to fix that:
+        for mesh in self.res_meshes:
+            if mesh.facets_boundary[0].shape[0] == 0:
+                if mesh.vertices.shape[0] - 1 == 3:
+                    mesh.faces = mesh.faces[:-1, :]
+                elif mesh.vertices.shape[0] - 1 == 4:
+                    mesh.faces = mesh.faces[:-2, :]
 
         # Surface area of the reservoirs' facets' meshes. Saving before adjusting so that it does not change the probability of entering with the offset.
         self.res_areas = np.array([mesh.area for mesh in self.res_meshes])
@@ -678,7 +690,7 @@ class Geometry:
             mesh = self.res_meshes[r]
             normal = mesh.facets_normal[0, :]   # plane normal
             origin = mesh.vertices[0, :]        # plane origin
-            
+
             plane_coord, b1, b2 = self.transform_3d_to_2d(mesh.vertices, normal, origin)
 
             ring_list = self.get_boundary_rings(mesh)
@@ -744,14 +756,19 @@ class Geometry:
         '''
 
         if b1 is None or b2 is None:
-            if np.absolute(np.sum(normal*np.array([1, 0, 0]))) == 1: # if b1 is parallel to b1
-                b1 = np.array([0, 1, 0])
-            else:
-                b1 = np.array([1, 0, 0])
+            b = np.eye(3)
+            is_normal = 1 - np.sum(b*np.absolute(normal), axis = 1) < 1e-3
+
+            if np.any(is_normal):
+                b = b[~is_normal, :]
+
+            # if b1 is parallel to b1
+            b1 = b[0, :]
             b1 = b1 - normal*np.sum(normal*b1)  # make b1 orthogonal to the normal
             b1 = b1/np.sum(b1**2)**0.5          # normalise b1
-            b2 = np.cross(normal, b1)           # generate b2 = n x b1
 
+            b2 = np.cross(normal, b1)           # generate b2 = n x b1
+        
         A = np.vstack((b1, b2, normal)).T   # get x and y bases coefficients
         
         plane_coord = np.zeros((0, 2))

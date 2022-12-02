@@ -124,6 +124,7 @@ class Population(Constants):
         self.initialise_all_particles(geometry, phonon) # initialising particles
 
         self.conv_crit = float(self.args.conv_crit[0])
+        self.conv_count_min = int(self.args.conv_crit[1])
         self.initialise_residue(geometry)
         
         self.plot_figures(geometry, phonon, property_plot = self.args.fig_plot, colormap = self.args.colormap[0])
@@ -140,6 +141,12 @@ class Population(Constants):
             self.rt_graph, self.rt_fig = self.init_plot_real_time(geometry, phonon)
         
         print('Initialisation done!')
+
+        # self.in_bins  = np.zeros(90)
+        # self.out_bins = np.zeros(90)
+        # self.var_bins = np.zeros(180)
+        # self.spec_count = 0
+        # self.spec_total = 0
         
     def initialise_modes(self, phonon):
         '''Generate first modes.'''
@@ -967,6 +974,38 @@ class Population(Constants):
             n_out[indexes_diff] = phonon.calculate_occupation(T_diff, omega_out[indexes_diff], reference = True)
         
         ##############
+        # self.spec_count += indexes_spec.sum()
+        # self.spec_total += indexes_spec.shape[0]
+        # print('{:.3e}, {:.3e}, {:.3f}'.format(self.spec_count, self.spec_total, self.spec_count/self.spec_total))
+
+        # normals = -geometry.mesh.facets_normal[col_fac, :]
+        # v_in    = phonon.group_vel[ in_modes[:, 0],  in_modes[:, 1], :]
+        # v_out   = phonon.group_vel[out_modes[:, 0], out_modes[:, 1], :]
+
+        # in_angle  = np.arccos(np.sum(-normals*v_in, axis = 1)/np.linalg.norm(v_in, axis = 1))*180/np.pi
+        # out_angle = np.arccos(np.sum(normals*v_out, axis = 1)/np.linalg.norm(v_out, axis = 1))*180/np.pi
+        # var_angle = np.arccos(np.sum(-v_in*v_out, axis = 1)/(np.linalg.norm(v_in, axis = 1)*np.linalg.norm(v_out, axis = 1)))*180/np.pi
+
+        # self.in_bins  += np.histogram( in_angle,  90, range = (0,  90))[0]
+        # self.out_bins += np.histogram(out_angle,  90, range = (0,  90))[0]
+        # self.var_bins += np.histogram(var_angle, 180, range = (0, 180))[0]
+
+        # fig, ax = plt.subplots(nrows = 1, ncols = 3, dpi = 200, figsize = (20, 5))
+
+        # ax[0].bar(np.arange(90), self.in_bins/self.in_bins.sum())
+        # ax[1].bar(np.arange(90), self.out_bins/self.out_bins.sum())
+        # ax[2].bar(np.arange(180), self.var_bins/self.var_bins.sum())
+
+        # ax[0].set_title('In')
+        # ax[1].set_title('Out')
+        # ax[2].set_title('Var')
+
+        # plt.suptitle('overall specularity: {:.3f}'.format(self.spec_count/self.spec_total))
+
+        # plt.tight_layout()
+        # plt.savefig(self.results_folder_name + 'specular_hist.png')
+        # plt.close(fig)
+
         # saving scat data        
         # with open(self.results_folder_name+'scattering_diff.txt', 'a')as f: 
         #     for i in range(new_modes.shape[0]):
@@ -1006,7 +1045,7 @@ class Population(Constants):
 
     def find_specular_correspondences(self, geo, phonon):
         facets = self.rough_facets
-        n      = -geo.mesh.facets_normal[facets, :]
+        n      = -np.round(geo.mesh.facets_normal[facets, :], decimals = 10)
 
         k = phonon.wavevectors
         v = phonon.group_vel
@@ -1021,7 +1060,6 @@ class Population(Constants):
         inv_omega    = inv_omega.reshape(phonon.omega.shape)        # reshaping to (Q, J,)
         
         for i_f, f in enumerate(facets):
-            
             v_dot_n = np.sum(v*n[i_f, :], axis = 2) 
             s_in  = v_dot_n < 0                      # modes coming to the facet
             s_out = v_dot_n > 0                      # available modes going out of the facet
@@ -1462,7 +1500,7 @@ class Population(Constants):
         else:
             self.conv_count = 0
 
-        if self.conv_count >= 10:
+        if self.conv_count >= self.conv_count_min:
             self.finish_sim = True
 
         # update previous values

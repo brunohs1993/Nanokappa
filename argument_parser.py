@@ -19,7 +19,7 @@ def initialise_parser():
     parser.add_argument('--scale'          , '-s' , default = [1, 1, 1],
                         type = float, nargs = 3   , help    = 'Scaling factors (x, y, z) to be applied to given geometry.')
     parser.add_argument('--geo_rotation'   , '-gr' , default = [0, 0, 0, 'xyz'],
-                                      nargs = 4   , help    = 'Euler angles in degrees to be applied to given geometry (see scipy.rotation.from_euler) and the order to ' +
+                                      nargs = '*'  , help    = 'Euler angles in degrees to be applied to given geometry (see scipy.rotation.from_euler) and the order to ' +
                                                               'be applied (see scipy.rotation.from_euler).')
     parser.add_argument('--mat_rotation'   , '-mr', default = [],
                                       nargs = '*' , help    = 'Material index, Euler angles in degrees to be applied to given material and ' +
@@ -91,8 +91,8 @@ def initialise_parser():
     parser.add_argument('--n_mean'        , '-nm' , default  = [100], 
                         type = int  , nargs = 1   , help    = 'The number of datapoints to consider when calculating mean and stdev values. Each datapoint = 10 iterations. Default is 100.')
 
-    parser.add_argument('--conv_crit'     , '-cc' , default = [1e-6],
-                        type = float, nargs = 1   , help    = 'Value of convergence criteria, calculated as the norm of phonon number variation.')
+    parser.add_argument('--conv_crit'     , '-cc' , default = [1e-2, 10],
+                        type = float, nargs = 2   , help    = 'Value of convergence criteria and number of checks to keep it under criteria to consider convergence.')
 
     parser.add_argument('--output'        , '-op' , default = 'file',
                         type = str  , nargs = 1   , help    = 'Where to print the output. "file" to save it in outuput.txt. "screen" to print on terminal.')
