@@ -92,12 +92,12 @@ class Population(Constants):
         
         self.rough_facets        = geometry.rough_facets        # which facets have roughness as BC
         self.rough_facets_values = geometry.rough_facets_values # their values of roughness and correlation length
-        
+
         print('Calculating diffuse scattering probabilities...')
         self.calculate_fbz_specularity(geometry, phonon)
-        self.find_specular_correspondences(geometry, phonon)
+        self.find_specular_correspondences(geometry, phonon, model = self.args.scatter_model)
         self.diffuse_scat_probability(geometry, phonon)
-        
+
         self.connected_facets = np.array(self.args.connect_facets).reshape(-1, 2)
 
         self.offset = float(self.args.offset[0]) # offset margin to avoid problems with trimesh collision detection - standard 2*tm.tol.merge = 2e-8
@@ -127,14 +127,13 @@ class Population(Constants):
         self.conv_count_min = int(self.args.conv_crit[1])
         self.initialise_residue(geometry)
         
-        self.plot_figures(geometry, phonon, property_plot = self.args.fig_plot, colormap = self.args.colormap[0])
-
         print('Creating convergence file...')
         self.open_convergence(geometry)
         self.write_convergence(geometry)
 
         self.view = Visualisation(self.args, geometry, phonon) # initialising visualisation class
         self.view.preprocess()
+        self.plot_figures(geometry, phonon, property_plot = self.args.fig_plot, colormap = self.args.colormap[0])
 
         if len(self.rt_plot) > 0:
             print('Starting real-time plot...')
@@ -172,7 +171,7 @@ class Population(Constants):
         to enter the facets of a given geometry (geometry) with imposed boundary conditions.'''
 
         vel = np.transpose(phonon.group_vel, (0, 2, 1))           # shape = (Q, 3, J) - Group velocities of each mode
-        normals = -geometry.mesh.facets_normal[self.res_facet, :] # shape = (R, 3)    - unit normals of each facet with boundary conditions
+        normals = -geometry.facets_normal[self.res_facet, :] # shape = (R, 3)    - unit normals of each facet with boundary conditions
                                                                   # OBS: normals are reversed to point inwards (in the direction of entering particles).
         group_vel_parallel = np.dot(normals, vel)                 # shape = (R, Q, J) - dot product = projection of velocity over normal
         
@@ -186,16 +185,18 @@ class Population(Constants):
         '''Initialise positions of a given number of particles'''
         
         if key == 'random':
-            positions = tm.sample.volume_mesh(mesh, number_of_particles)
-            while positions.shape[0] == 0:
-                positions = tm.sample.volume_mesh(mesh, number_of_particles)
-            in_mesh = np.where( tm.proximity.signed_distance(mesh, positions) >= 2*self.offset )[0]
+            positions = mesh.sample_volume(number_of_particles)
+            # in_mesh = mesh.contains(positions)
+            # in_mesh[in_mesh] = mesh.closest_point(positions[in_mesh, :])[1] >= 2*self.offset
+            in_mesh = mesh.closest_point(positions)[1] >= 2*self.offset
             positions = positions[in_mesh, :]
             
             while positions.shape[0]<number_of_particles:
-                new_positions = tm.sample.volume_mesh(mesh, number_of_particles-positions.shape[0]) # this function produces UP TO n points. So it could be 0. Go figure...
+                new_positions = mesh.sample_volume(number_of_particles-positions.shape[0])
                 if new_positions.shape[0]>0:
-                    in_mesh = np.where( tm.proximity.signed_distance(mesh, new_positions) >= 2*self.offset )[0]
+                    # in_mesh = mesh.contains(new_positions)
+                    # in_mesh[in_mesh] = mesh.closest_point(new_positions[in_mesh, :])[1] >= 2*self.offset
+                    in_mesh = mesh.closest_point(new_positions)[1] >= 2*self.offset
                     new_positions = new_positions[in_mesh, :]
                     positions = np.vstack((positions, new_positions))
 
@@ -344,7 +345,7 @@ class Population(Constants):
         # The extrusion thickness is calculated such that one particle per mode is created,
         # obbeying the density of particles generated (i.e. thickness = number_of_modes/(particle_density*facet_area) );
         
-        self.bound_thickness = phonon.number_of_active_modes/(self.particle_density*geometry.mesh.facets_area[self.res_facet])
+        self.bound_thickness = phonon.number_of_active_modes/(self.particle_density*geometry.facets_area[self.res_facet])
 
         self.enter_prob = self.enter_probability(geometry, phonon)
         self.N_leaving  = np.sum(self.enter_prob, axis = (1, 2)).round().astype(int)
@@ -401,7 +402,8 @@ class Population(Constants):
                     self.res_facet_id  = np.concatenate((self.res_facet_id, (np.ones(n)*facet).astype(int))) # add to the reservoir id
 
                     # generate positions on boundary
-                    new_positions, _ = tm.sample.sample_surface(mesh, n)
+                    # new_positions, _ = tm.sample.sample_surface(mesh, n)
+                    new_positions = mesh.sample_surface(n)
 
                     self.res_positions = np.vstack((self.res_positions , new_positions ))                  # add to the positions
             
@@ -437,7 +439,8 @@ class Population(Constants):
                     self.res_facet_id = np.concatenate((self.res_facet_id, (np.ones(n)*facet).astype(int))) # add to the reservoir id
 
                     # generate positions on boundary
-                    new_positions, _ = tm.sample.sample_surface(mesh, n)
+                    # new_positions, _ = tm.sample.sample_surface(mesh, n)
+                    new_positions = mesh.sample_surface(n)
 
                     self.res_positions = np.vstack((self.res_positions , new_positions ))                  # add to the positions
         
@@ -481,7 +484,7 @@ class Population(Constants):
         
     def calculate_temperature_for_flux(self, reservoir, geometry, phonon):
         facet  = self.res_facet[reservoir]
-        normal = -geometry.mesh.facets_normal[facet, :]
+        normal = -geometry.facets_normal[facet, :]
         
         indexes_out = np.logical_and(self.n_timesteps<=0, self.collision_facets == facet)                      # particles leaving through that facet
 
@@ -603,7 +606,16 @@ class Population(Constants):
                 bound_positions = geometry.facet_centroid[res_facet_index, :] #np.array([geometry.res_centroid[i, :] for i in range(len(self.bound_values)) if self.bound_cond[i] == 'T'])
 
                 if len(bound_T) > 2:
-                    subvol_temperatures = LinearNDInterpolator(bound_positions, bound_T, fill = bound_T.mean())(geometry.subvol_center)
+                    d = (geometry.subvol_center - np.expand_dims(bound_positions, 1)) # (R, SV, 3)
+                    d = (np.sum(d**2, axis = 2).T)**0.5                               # (SV, R)
+                    
+                    w = 1/d
+                    w /= np.sum(w, axis = 1, keepdims = True)                        # (SV, R)
+                    
+                    subvol_temperatures = np.sum(bound_T*w, axis = 1)
+                    
+                    temperatures = subvol_temperatures[self.subvol_id]
+
                 elif len(bound_T) == 1:
                     subvol_temperatures = np.ones(self.n_of_subvols)*bound_T
                 elif len(bound_T) == 2:
@@ -779,42 +791,6 @@ class Population(Constants):
 
         self.n_timesteps -= 1                    # -1 timestep in the counter to boundary scattering
 
-    def find_boundary(self, positions, velocities, geometry):
-        '''Finds which mesh triangle will be hit by the particle, given an initial position and velocity
-        direction. It works with individual particles as well with a group of particles.
-        Returns: array of faces indexes for each particle'''
-
-        # get where the particle will hit a wall, and which face (triangle)
-        index_faces, index_ray, boundary_pos = geometry.mesh.ray.intersects_id(ray_origins      = positions ,
-                                                                               ray_directions   = velocities,
-                                                                               return_locations = True      ,
-                                                                               multiple_hits    = False     )
-        
-        with_ray   = np.in1d(np.arange(positions.shape[0]), index_ray) # find which particles have rays
-        stationary = (np.linalg.norm(velocities, axis = 1) == 0)       # find which particles have zero velocity
-
-        all_boundary_pos                = np.zeros( (positions.shape[0], 3) )
-        all_boundary_pos[stationary, :] = np.inf                       # those stationary have infinite collision position
-        all_boundary_pos[with_ray  , :] = boundary_pos                 # those with ray have correspondent collision position
-
-        all_faces = np.ones(with_ray.shape[0])*np.nan
-        all_faces[with_ray] = index_faces
-
-        nan_particles = np.isnan(all_faces)
-
-        index_facets = geometry.faces_to_facets(all_faces[~nan_particles])
-
-        all_facets                 = np.ones( positions.shape[0] )*np.nan  # all particles that do not collide do not have corresponding facets
-        all_facets[~nan_particles] = index_facets
-
-        if np.any(nan_particles):
-            (all_boundary_pos[nan_particles, :],
-             _,
-             all_facets[nan_particles]         ) = geometry.find_boundary_naive(positions[nan_particles, :] ,
-                                                                             velocities[nan_particles, :])
-        
-        return all_boundary_pos, all_facets
-
     def timesteps_to_boundary(self, positions, velocities, geometry, indexes_del_extra = None):
         '''Calculate how many timesteps to boundary scattering.'''
 
@@ -824,13 +800,23 @@ class Population(Constants):
             collision_pos        = np.zeros((0, 3))
             
             return ts_to_boundary, index_facets, collision_pos
-        # mesh_pos, mesh_facets = self.find_boundary(positions, velocities, geometry) # find collision in true boundary
-        mesh_pos, _, mesh_facets = geometry.find_boundary_naive(positions, velocities) # find collision in true boundary
-        
+
+        mesh_pos = np.zeros((0, 3))
+        mesh_facets = np.zeros(0, dtype = int)
+        stride = int(1e6)
+        start = 0
+        while start < positions.shape[0]:
+            new_mesh_pos, _, new_mesh_facets = geometry.mesh.find_boundary(positions[start:start+stride, :], velocities[start:start+stride, :]) # find collision in true boundary
+            
+            mesh_pos = np.concatenate((mesh_pos, new_mesh_pos), axis = 0)
+            mesh_facets = np.concatenate((mesh_facets, new_mesh_facets), axis = 0, dtype = int)
+
+            start += stride
+
         if indexes_del_extra is not None :
             # If there are any numerical errors with collision calculations, delete particles to avoid further problems
             if np.any(np.isnan(mesh_facets)):
-                nan_particles = np.isnan(mesh_facets)  # bool
+                nan_particles = mesh_facets < 0  # bool
                 indexes_del_extra[nan_particles] = True
             
             collision_pos = np.ones(positions.shape   )*np.nan
@@ -852,22 +838,27 @@ class Population(Constants):
 
     def apply_offset(self, collision_pos, velocities, facets, geo):
 
-        normals = -geo.mesh.facets_normal[facets.astype(int), :] # get the normals of the collision facets
+        normals = -geo.facets_normal[facets, :] # get the normals of the collision facets
         
         collision_pos += velocities*self.offset/np.sum(velocities*normals, axis = 1, keepdims = True) # ||d|| = ||v|| h / v . n
 
-        _, close_distance, facets = geo.find_boundary_naive(collision_pos)
+        # facets, close_distance, _ = geo.mesh.closest_facet(collision_pos)
 
-        too_close = np.absolute(self.offset - close_distance) > 1e-8 # check if there is any too close
+        # too_close = np.absolute(self.offset - close_distance) > 1e-8 # check if there is any too close
 
-        while np.any(too_close):
-            extra_offset = np.where(too_close, self.offset - close_distance, 0).reshape(-1, 1) # calculate extra displacement
+        # while np.any(too_close):
 
-            collision_pos += extra_offset*(velocities/np.sum(velocities*-geo.mesh.facets_normal[facets, :], axis = 1, keepdims = True)) # adjust position
+        #     extra_offset = np.where(too_close, self.offset - close_distance, 0).reshape(-1, 1) # calculate extra displacement
 
-            _, close_distance, facets = geo.find_boundary_naive(collision_pos)
+        #     collision_pos += extra_offset*(velocities/np.sum(velocities*-geo.facets_normal[facets, :], axis = 1, keepdims = True)) # adjust position
 
-            too_close = np.absolute(self.offset - close_distance) > 1e-8 # check again if there is any too close
+        #     facets, close_distance, _ = geo.mesh.closest_facet(collision_pos)
+
+        #     if np.any(np.isnan(collision_pos)):
+        #         indices = np.any(np.isnan(collision_pos), axis = 1).nonzero()[0]
+        #         collision_pos
+
+        #     too_close = np.absolute(self.offset - close_distance) > 1e-8 # check again if there is any too close
             
         return collision_pos, facets
 
@@ -894,7 +885,7 @@ class Population(Constants):
     
     def calculate_fbz_specularity(self, geometry, phonon):
 
-        n = -geometry.mesh.facets_normal[self.rough_facets, :] # normals (F, 3)
+        n = -geometry.facets_normal[self.rough_facets, :] # normals (F, 3)
         n = np.expand_dims(n, axis = (1, 2)) # (F, 1, 1, 3)
 
         k = phonon.wavevectors
@@ -922,7 +913,7 @@ class Population(Constants):
         if self.rough_facets.shape[0] == 0:
             print("No rough facets to calculate.")
         else:
-            n = -geometry.mesh.facets_normal[self.rough_facets, :] # (F_u, 3)
+            n = -geometry.facets_normal[self.rough_facets, :] # (F_u, 3)
 
             # sign of reflected waves
             v_all = phonon.group_vel # (Q, J, 3)
@@ -1043,13 +1034,34 @@ class Population(Constants):
 
         return new_modes
 
-    def find_specular_correspondences(self, geo, phonon):
+    def find_specular_correspondences(self, geo, phonon, model = 'all'):
+        
+        # setting reflection model restrictions
+        model_list_fbz = ['fbz', 'bz', 'brillouin', 'full_brillouin_zone', 'brillouin_zone']
+        model_list_omega = ['omega', 'frequency', 'angular_frequency', 'freq']
+        model_list_vel = ['v', 'velocity', 'group_velocity', 'group_vel', 'vel']
+        model_list_k = ['k', 'wv', 'wavevector', 'wave_vector']
+        
+        if len(model) == 0 or 'all' in model or model == 'all': # checking if 'all' is selected
+            model = ['k', 'omega', 'v', 'fbz']
+        elif len(model) > 1:                        # else be sure all keys are in lowercase
+            model = [i.lower() for i in model]
+
+        restrict_fbz   = len([i for i in model if i in model_list_fbz]) > 0
+        restrict_v     = len([i for i in model if i in model_list_vel]) > 0
+        restrict_omega = len([i for i in model if i in model_list_omega]) > 0
+        restrict_k     = len([i for i in model if i in model_list_k]) > 0
+
+        ####
+        
         facets = self.rough_facets
-        n      = -np.round(geo.mesh.facets_normal[facets, :], decimals = 10)
+        n      = -np.round(geo.facets_normal[facets, :], decimals = 10)
 
         k = phonon.wavevectors
         v = phonon.group_vel
-        tol = np.absolute(1/(2*phonon.data_mesh))
+        tol = phonon.q_to_k(np.absolute(1/(2*phonon.data_mesh)))
+
+        near_k_func = NearestNDInterpolator(k, np.arange(phonon.number_of_qpoints)) # nearest interpolator function on K space
 
         # array of INCOMING modes that CAN be specularly reflected to other mode - Initially all false
         true_spec = np.zeros((facets.shape[0], phonon.number_of_qpoints, phonon.number_of_branches), dtype = bool)
@@ -1065,84 +1077,201 @@ class Population(Constants):
             s_out = v_dot_n > 0                      # available modes going out of the facet
 
             active_k = np.any(s_in, axis = 1) # bool, (Q,) - wavevectors that can arrive to the facet
+            # print(i_f, active_k.sum())
 
-            k_try   = k[active_k, :] - 2*n[i_f, :]*np.sum(k[active_k, :]*n[i_f, :], axis = 1, keepdims = True) # reflect them specularly
-            _, disp = phonon.find_min_k(k_try, return_disp = True)                                             # check if thay stay in the FBZ
+            if restrict_fbz:
+                k_try   = k[active_k, :] - 2*n[i_f, :]*np.sum(k[active_k, :]*n[i_f, :], axis = 1, keepdims = True) # reflect them specularly
+                _, disp = phonon.find_min_k(k_try, return_disp = True)                                             # check if thay stay in the FBZ
 
-            active_k[active_k] = np.all(disp == 0, axis = 1) # normal processes can be specular
+                active_k[active_k] = np.all(disp == 0, axis = 1) # normal processes can be specular
+                # print(i_f, active_k.sum())
+            
+            if restrict_k:
+                # recalculating reflections of the ones that remained active (redundant but safe)
+                k_try = k[active_k, :] - 2*n[i_f, :]*np.sum(k[active_k, :]*n[i_f, :], axis = 1, keepdims = True) # (Qa, 3)
 
-            # recalculating reflections of the ones that remained active (redundant but safe)
+                # checking k availability
+                q_near = near_k_func(k_try)             # nearest qpoint to k_try
+                k_near = phonon.wavevectors[q_near, :]  # get the nearest k vector in relation to k_try
+                k_dist = np.absolute(k_try - k_near)    # calculate the distance between the two in each dimension
+                
+                # it should be a wavevector with at least one valid velocity and within grid tolerance
+                in_tol = np.logical_and(np.any(s_out[q_near, :], axis = 1), np.all(k_dist < tol, axis = 1))
+                
+                active_k[active_k] = in_tol # update the active to only those within tolerance
+                # print(i_f, active_k.sum())
+            
+            if restrict_v:
+                # recalculating reflections of the ones that remained active (redundant but safe)
+                k_try = k[active_k, :] - 2*n[i_f, :]*np.sum(k[active_k, :]*n[i_f, :], axis = 1, keepdims = True) # (Qa, 3)
+                
+                out_q = near_k_func(k_try)                            # out qpoints (Qa,)
+                in_q  = np.arange(phonon.number_of_qpoints)[active_k] # in  qpoints (Qa,)
+
+                v_try = v[ in_q, :, :] - 2*n[i_f, :]*np.sum(v[in_q, :, :]*n[i_f, :], axis = 2, keepdims = True) # (Qa, J, 3)
+                v_try = np.expand_dims(v_try, axis = 0)                                                         # (1, Qa, J, 3)
+                v_out = np.transpose(np.expand_dims(v[out_q, :, :], axis = 0), axes = (2, 1, 0, 3))             # (J, Qa, 1, 3)
+                
+                v_try_norm = np.linalg.norm(v_try, axis = 3)
+                v_out_norm = np.linalg.norm(v_out, axis = 3)
+
+                dot = np.sum(v_try*v_out, axis = 3) # (J, Q, J)
+
+                v_angle = np.arccos( np.around(dot/(v_try_norm*v_out_norm), decimals = 3))
+
+                same_norm  = np.absolute((v_try_norm - v_out_norm)/v_try_norm) < 1e-10
+                same_angle = v_angle < 1e-10
+
+                same_v = np.logical_and(same_norm, same_angle)
+
+                is_in = s_in[in_q, :]
+                is_out = np.transpose(np.expand_dims(s_out[out_q, :], 0), (2, 1, 0))
+
+                same_v = np.logical_and(same_v, is_in)
+                same_v = np.logical_and(same_v, is_out)
+
+                # v_dist = np.sum((v_try - v_out)**2, axis = -1)**0.5 # (J, Qa, J)
+                # same_v = v_dist == 0                              # (J, Qa, J)
+
+                # valid reflections only with the same reflected velocity
+                active_k[active_k] = np.any(same_v, axis = (0,2))
+                # print(i_f, active_k.sum())
+
+                same_v = same_v[:, np.any(same_v, axis = (0, 2)), :]
+            else:
+                same_v = np.ones((phonon.number_of_branches, active_k.sum(), phonon.number_of_branches), dtype = bool)
+            
+            if restrict_omega:
+                # recalculating reflections of the ones that remained active (redundant but safe)
+                k_try = k[active_k, :] - 2*n[i_f, :]*np.sum(k[active_k, :]*n[i_f, :], axis = 1, keepdims = True) # (Qa, 3)
+                out_q = near_k_func(k_try)                            # out qpoints (Qa,)
+                in_q  = np.arange(phonon.number_of_qpoints)[active_k] # in  qpoints (Qa,)
+
+                in_delta  = np.sum(np.absolute(v[ in_q, :, :])*np.expand_dims(tol, (0, 1)), axis = 2) # (Qa, J)
+                out_delta = np.sum(np.absolute(v[out_q, :, :])*np.expand_dims(tol, (0, 1)), axis = 2) # (Qa, J)
+
+                in_omega  = phonon.omega[ in_q, :]
+                out_omega = phonon.omega[out_q, :]
+                
+                in_uplim    = in_omega  + in_delta
+                in_downlim  = in_omega  - in_delta
+
+                out_uplim   = out_omega + out_delta
+                out_downlim = out_omega - out_delta
+
+                out_uplim   = np.transpose(np.expand_dims(out_uplim  , 0), axes = (2, 1, 0)) # (J, Qa, 1)
+                out_downlim = np.transpose(np.expand_dims(out_downlim, 0), axes = (2, 1, 0)) # (J, Qa, 1)
+
+                overlap_range = np.where(in_uplim < out_uplim, in_uplim, out_uplim) - np.where(in_downlim > out_downlim, in_downlim, out_downlim) # (J, Qa, J)
+                overlap = overlap_range > 0
+                
+                omega_diff = np.absolute((in_omega - np.transpose(np.expand_dims(out_omega  , 0), axes = (2, 1, 0)))/in_omega) # (J, Qa, J)
+                omega_diff = np.where(overlap, omega_diff, np.inf) # (J, Qa, J)
+
+                valid_corresp = np.logical_and(overlap, same_v) # correspondences with valid velocities and frequency intervals
+
+                valid_k = np.any(valid_corresp, axis = (0, 2))
+
+                active_k[active_k] = valid_k
+
+                omega_diff = omega_diff[:, valid_k, :]
+            else:
+                valid_corresp = same_v
+                omega_diff    = np.ones(same_v)
+
+            omega_diff = np.where(valid_corresp, omega_diff, np.inf) # updating valid differences
+
+            min_diff = np.amin(omega_diff, axis = 0) # (Qa, J) - minimum relative omega differences
+
+            min_diff_branch = np.where(np.any(valid_corresp, axis = 0), np.argmax(omega_diff == min_diff, axis = 0), -1).astype(int)
+
             k_try = k[active_k, :] - 2*n[i_f, :]*np.sum(k[active_k, :]*n[i_f, :], axis = 1, keepdims = True) # (Qa, 3)
-
-            near_k_func = NearestNDInterpolator(k, np.arange(phonon.number_of_qpoints)) # nearest interpolator function on K space
-
-            # checking k availability
-            q_near = near_k_func(k_try)             # nearest qpoint to k_try
-            k_near = phonon.wavevectors[q_near, :]  # get the nearest k vector in relation to k_try
-            k_dist = np.absolute(k_try - k_near)    # calculate the distance between the two in each dimension
             
-            # it should be a wavevector with at least one valid velocity and within grid tolerance
-            in_tol = np.logical_and(np.any(s_out[q_near, :], axis = 1), np.all(k_dist < tol, axis = 1))
+            in_q = np.arange(phonon.number_of_qpoints)[active_k] # in qpoints
+            out_q = near_k_func(k_try)                       # out qpoints (Qa,)
+
+            for i, q in enumerate(in_q):
+                for j in range(phonon.number_of_branches):
+                    if min_diff_branch[i, j] == -1:
+                        true_spec[i_f, q, j] = False
+                    else:
+                        true_spec[i_f, q, j] = True
             
-            active_k[active_k] = in_tol # update the active to only those within tolerance
+            i_q_in, spec_j_in = np.nonzero(min_diff_branch != -1) # specular active in q index, specular in branch
+            spec_q_in = in_q[i_q_in]                              # specular in q (true q index)
 
-            # recalculating reflections of the ones that remained active (redundant but safe)
-            k_try = k[active_k, :] - 2*n[i_f, :]*np.sum(k[active_k, :]*n[i_f, :], axis = 1, keepdims = True) # (Qa, 3)
+            spec_q_out = out_q[i_q_in]                            # specular out q
+            spec_j_out = min_diff_branch[i_q_in, spec_j_in]       # specular out j
+
+            n_ts = i_q_in.shape[0]
+
+            equal = np.logical_and(spec_q_in == spec_q_out, spec_j_in == spec_j_out)
+
+            fig, ax = plt.subplots(nrows = 2, ncols = 3, figsize = (15, 10), dpi = 100, sharex = 'row', sharey = 'row')
             
-            out_q = near_k_func(k_try)                            # out qpoints (Qa,)
-            in_q  = np.arange(phonon.number_of_qpoints)[active_k] # in  qpoints (Qa,)
+            b = np.eye(3)
+            is_normal = 1 - np.sum(b*np.absolute(n[i_f, :]), axis = 1) < 1e-3
 
-            v_try = v[ in_q, :, :] - 2*n[i_f, :]*np.sum(v[in_q, :, :]*n[i_f, :], axis = 2, keepdims = True) # (Qa, J, 3)
-            v_try = np.expand_dims(v_try, axis = 0)                                                         # (1, Qa, J, 3)
-            v_out = np.transpose(np.expand_dims(v[out_q, :, :], axis = 0), axes = (2, 1, 0, 3))             # (J, Qa, 1, 3)
+            if np.any(is_normal):
+                b = b[~is_normal, :]
+
+            # if b1 is parallel to b1
+            b1 = b[0, :]
+            b1 = b1 - n[i_f, :]*np.sum(n[i_f, :]*b1)  # make b1 orthogonal to the normal
+            b1 = b1/np.sum(b1**2)**0.5          # normalise b1
+
+            b2 = np.cross(n[i_f, :], b1)           # generate b2 = n x b1
             
-            # distance between in and out velocities
-            v_dist = np.sum((v_try - v_out)**2, axis = -1)**0.5 # (J, Qa, J)
-            same_v = v_dist == 0                                # (J, Qa, J)
+            k_b1_in = np.sum(phonon.wavevectors[spec_q_in, :]*b1, axis = 1)#/np.linalg.norm(phonon.wavevectors[spec_q_in, :], axis = 1)
+            k_b1_out = np.sum(phonon.wavevectors[spec_q_out, :]*b1, axis = 1)#/np.linalg.norm(phonon.wavevectors[spec_q_in, :], axis = 1)
+            v_b1_in = np.sum(phonon.group_vel[spec_q_in, spec_j_in, :]*b1, axis = 1)#/np.linalg.norm(phonon.group_vel[spec_q_in, spec_j_in, :], axis = 1)
+            v_b1_out = np.sum(phonon.group_vel[spec_q_out, spec_j_out, :]*b1, axis = 1)#/np.linalg.norm(phonon.group_vel[spec_q_in, spec_j_in, :], axis = 1)
 
-            # valid reflections only with the same reflected velocity
-            active_k[active_k] = np.any(same_v, axis = (0,2))
+            k_b2_in = np.sum(phonon.wavevectors[spec_q_in, :]*b2, axis = 1)#/np.linalg.norm(phonon.wavevectors[spec_q_in, :], axis = 1)
+            k_b2_out = np.sum(phonon.wavevectors[spec_q_out, :]*b2, axis = 1)#/np.linalg.norm(phonon.wavevectors[spec_q_in, :], axis = 1)
+            v_b2_in = np.sum(phonon.group_vel[spec_q_in, spec_j_in, :]*b2, axis = 1)#/np.linalg.norm(phonon.group_vel[spec_q_in, spec_j_in, :], axis = 1)
+            v_b2_out = np.sum(phonon.group_vel[spec_q_out, spec_j_out, :]*b2, axis = 1)#/np.linalg.norm(phonon.group_vel[spec_q_in, spec_j_in, :], axis = 1)
 
-            same_v = same_v[:, np.any(same_v, axis = (0, 2)), :]
+            k_n_in = np.sum(phonon.wavevectors[spec_q_in, :]*n[i_f, :], axis = 1)#/np.linalg.norm(phonon.wavevectors[spec_q_in, :], axis = 1)
+            k_n_out = np.sum(phonon.wavevectors[spec_q_out, :]*n[i_f, :], axis = 1)#/np.linalg.norm(phonon.wavevectors[spec_q_in, :], axis = 1)
+            v_n_in = np.sum(phonon.group_vel[spec_q_in, spec_j_in, :]*n[i_f, :], axis = 1)#/np.linalg.norm(phonon.group_vel[spec_q_in, spec_j_in, :], axis = 1)
+            v_n_out = np.sum(phonon.group_vel[spec_q_out, spec_j_out, :]*n[i_f, :], axis = 1)#/np.linalg.norm(phonon.group_vel[spec_q_in, spec_j_in, :], axis = 1)
+
+            ax[0, 0].scatter(k_n_in, k_n_out, s = 1)
+            ax[1, 0].scatter(v_n_in, v_n_out, s = 1)
+
+            ax[0, 1].scatter(k_b1_in, k_b1_out, s = 1)
+            ax[1, 1].scatter(v_b1_in, v_b1_out, s = 1)
+
+            ax[0, 2].scatter(k_b2_in, k_b2_out, s = 1)
+            ax[1, 2].scatter(v_b2_in, v_b2_out, s = 1)
+
+            v_list = [r'$\vec{{n}}$', r'$\vec{{b}}_{{1}}$', r'$\vec{{b}}_{{2}}$']
+
+            for i in range(3):
+                ax[0, i].set_xlabel(r'$\vec{{k}}_{{in}}\cdot$' + v_list[i])
+                ax[0, i].set_ylabel(r'$\vec{{k}}_{{out}}\cdot$' + v_list[i])
+                ax[1, i].set_xlabel(r'$\vec{{v}}_{{in}}\cdot$' + v_list[i])
+                ax[1, i].set_ylabel(r'$\vec{{v}}_{{out}}\cdot$' + v_list[i])
             
-            # recalculating reflections of the ones that remained active (redundant but safe)
-            k_try = k[active_k, :] - 2*n[i_f, :]*np.sum(k[active_k, :]*n[i_f, :], axis = 1, keepdims = True) # (Qa, 3)
-            out_q = near_k_func(k_try)                            # out qpoints (Qa,)
-            in_q  = np.arange(phonon.number_of_qpoints)[active_k] # in  qpoints (Qa,)
+            for a in ax.ravel():
+                a.yaxis.set_tick_params(labelleft=True)
 
-            # getting which in and out modes have the same omega
-            in_omega_i  = inv_omega[in_q, :]                                                # (Qa, J)
-            out_omega_i = np.transpose(np.expand_dims(inv_omega[out_q, :], 0), (2, 1, 0))   # (J, Qa, 1)
+            plt.suptitle('Normal = <{:.2f}, {:.2f}, {:.2f}>. Angles = {:.2f}, {:.2f}, {:.2f}'.format(n[i_f, 0], n[i_f, 1], n[i_f, 2],
+                                                                                                   np.arccos(n[i_f, 0])*180/np.pi,
+                                                                                                   np.arccos(n[i_f, 1])*180/np.pi,
+                                                                                                   np.arccos(n[i_f, 2])*180/np.pi))
 
-            same_omega = in_omega_i == out_omega_i # if any branch of out_k has a frequency equal to each branch of in_k (J_out, Qa, J_in)
-            same_omega = np.logical_and(same_omega, same_v)
+            # plt.show()
+            plt.tight_layout()
+            plt.savefig(self.results_folder_name + 'spec{}.png'.format(i_f))
+            plt.close(fig)
 
-            # same_omega = np.logical_and(same_omega, s_in[in_q, :])                                               # incoming modes should be valid (this is probably redundant)
-            # same_omega = np.logical_and(same_omega, np.transpose(np.expand_dims(s_out[out_q, :], 0), (2, 1, 0))) # outgoing modes should be valid (this is probably not)
-
-            same_omega_indexes = np.nonzero(np.any(same_omega, axis = 0)) # indexes where any same_omega == True for the incoming modes
-            same_omega_q_in = in_q[same_omega_indexes[0]] # get incoming qpoint with available same omega
-            same_omega_j_in = same_omega_indexes[1]       # get incoming branch with available same omega
-
-            same_omega_q_out = out_q[same_omega_indexes[0]] # correspondent ougoing out
-
-            # valid_v = np.where(same_omega, v_dist, np.inf)
-            # near_v  = valid_v == 0 # valid_v.min(axis = 0)
-
-            # same_omega_j_out = np.argmax(near_v, axis = 0)[same_omega_indexes[0], same_omega_j_in] # get qpoint with same omega
-            same_omega_j_out = np.argmax(same_omega, axis = 0)[same_omega_indexes[0], same_omega_j_in] # get qpoint with same omega
-
-            for i_m, m in enumerate(np.vstack((same_omega_q_in, same_omega_j_in)).T):
-                true_spec[i_f, m[0], m[1]] = True # the only true specular modes
-
-            n_ts = same_omega_q_in.shape[0]
-
-            correspondent_modes = np.vstack((correspondent_modes, np.vstack((np.ones(n_ts)*f, same_omega_q_in, same_omega_j_in, same_omega_q_out, same_omega_j_out)).T))
+            correspondent_modes = np.vstack((correspondent_modes, np.vstack((np.ones(n_ts)*f, spec_q_in, spec_j_in, spec_q_out, spec_j_out)).T))
 
         self.correspondent_modes = correspondent_modes.astype(int)
         self.specular_function   = NearestNDInterpolator(self.correspondent_modes[:, :3], self.correspondent_modes[:, 3:])
         self.true_specular       = copy.copy(true_spec)
-        # self.specularity         = np.where(self.true_specular, self.specularity, 0)
         self.specularity         = self.true_specular.astype(int)*self.specularity
 
         np.savetxt(self.results_folder_name + 'specular_correspondences.txt', self.correspondent_modes, fmt = '%d')
@@ -1166,7 +1295,7 @@ class Population(Constants):
         previous_positions[first, :] -= group_velocities[first, :]*self.dt # their starting position is the one before the collision
 
         L = (geometry.facet_centroid[connected_facets, :] - geometry.facet_centroid[collision_facets, :]) # get translation vector between connected facets
-        normals = -geometry.mesh.facets_normal[connected_facets, :]                                       # get the normals of the new facets
+        normals = -geometry.facets_normal[connected_facets, :]                                       # get the normals of the new facets
         alpha = 1+2*self.offset/np.sum(L*normals, axis = 1, keepdims = True)                              # correct translation considering offsets
         new_positions = collision_positions + L*alpha                                                     # translate particles
 
@@ -1234,7 +1363,7 @@ class Population(Constants):
         #                                                                             new_modes[i, 0]     , new_modes[i, 1]     ,
         #                                                                             n_g[0], n_g[1], n_g[2]))
         ###############################
-        
+
         return (new_modes,
                 new_positions,
                 new_group_vel,
@@ -1421,7 +1550,7 @@ class Population(Constants):
                 info += ' {:>7.3f}'.format(self.subvol_temperature[sv])
             info += ' ]'
             print(info)
-
+        
         self.drift()                                    # drift particles
 
         if self.n_of_reservoirs > 0:
@@ -1433,6 +1562,9 @@ class Population(Constants):
 
         self.boundary_scattering(geometry, phonon)      # perform boundary scattering/periodicity and particle deletion
         self.refresh_temperatures(geometry, phonon)     # refresh cell temperatures
+        # print(self.subvol_N_p)
+        # print(self.subvol_energy)
+        # print(self.subvol_temperature)
         self.lifetime_scattering(phonon)                # perform lifetime scattering
 
         self.current_timestep += 1                      # +1 timestep index
@@ -1586,32 +1718,12 @@ class Population(Constants):
             label = 'Subvolume index [-]'
             format = '{:d}'
 
-        # plt.ion()
-        
-        # box_size = np.ptp(geometry.bounds, axis = 0)
-        # figsize = np.array([box_size.max()/2, box_size.min()])
-        # figsize = figsize*8/(box_size.max()/2)
+        fig, ax = geometry.mesh.plot_facet_boundaries(l_color = 'grey')
 
-        figsize = (15,15)
-
-        # fig = plt.figure(figsize = figsize, dpi = 100)
-        # ax = fig.add_subplot(111, projection='3d')
-
-        fig, ax = geometry.plot_facet_boundaries(geometry.mesh, l_color = 'grey')
-        
         ax.set_box_aspect( np.ptp(geometry.bounds, axis = 0) )
         ax.set_xlim(geometry.bounds[:, 0])
         ax.set_ylim(geometry.bounds[:, 1])
         ax.set_zlim(geometry.bounds[:, 2])
-
-        # for f in range(len(geometry.mesh.facets)):
-        #     for e in geometry.mesh.facets_boundary[f]:
-        #         p = geometry.mesh.vertices[e, :]
-        #         # ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'gray')
-        #         # testing in a geometry with straight lines, so this makes sense in this case:
-        #         equal_coord = p[0, :] == p[1, :]
-        #         if np.any(np.isin(p[0, equal_coord], geometry.bounds[0, :])):
-        #             ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'gray')
 
         graph = ax.scatter(self.positions[:, 0],
                            self.positions[:, 1],
@@ -1622,36 +1734,54 @@ class Population(Constants):
                            c    = colors       ,
                            cmap = self.colormap)
         
-        # for f in range(len(geometry.mesh.facets)):
-        #     for e in geometry.mesh.facets_boundary[f]:
-        #         p = geometry.mesh.vertices[e, :]
-        #         # ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'gray')
-        #         # testing in a geometry with straight lines, so this makes sense in this case:
-        #         equal_coord = p[0, :] == p[1, :]
-        #         if np.any(np.isin(p[0, equal_coord], geometry.bounds[1, :])):
-        #             ax.plot(p[:, 0], p[:, 1], p[:, 2], '-', c = 'gray')
-        
         norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
         cb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap = self.colormap),
                      ax = ax,
                      location = 'bottom',
                      orientation = 'horizontal',
-                     fraction = 0.05,
+                     fraction = 0.1,
                      aspect = 30,
                      shrink = 0.8,
                      pad = -0.1,
                      format = format)
 
-        cb.set_label(label = label, size = 'small')
-        cb.set_ticklabels([format.format(i) for i in cb.get_ticks()], size = 'small')
+        figcolor = self.view.ax_style['figcolor']
+        facecolor = self.view.ax_style['facecolor']
+        linecolor = self.view.ax_style['axiscolor']
 
+        cb.set_label(label = label, size = 'small', color = linecolor)
+        cb.set_ticks(cb.get_ticks())
+        cb.set_ticklabels([format.format(i) for i in cb.get_ticks()], size = 'small', color = linecolor)
+
+        fig.patch.set_facecolor(figcolor)
+        ax.set_facecolor(figcolor)
+
+        ax.w_xaxis.line.set_color(linecolor)
+        ax.w_yaxis.line.set_color(linecolor)
+        ax.w_zaxis.line.set_color(linecolor)
+        ax.xaxis.label.set_color(linecolor)
+        ax.yaxis.label.set_color(linecolor)
+        ax.zaxis.label.set_color(linecolor)
+        cb.outline.set_edgecolor(linecolor)
+
+        ax.set_xticks(ax.get_xticks())
+        ax.set_yticks(ax.get_yticks())
+        ax.set_zticks(ax.get_zticks())
+
+        ax.set_xticklabels(ax.get_xticklabels(), fontdict = {'color':linecolor})
+        ax.set_yticklabels(ax.get_yticklabels(), fontdict = {'color':linecolor})
+        ax.set_zticklabels(ax.get_zticklabels(), fontdict = {'color':linecolor})
+
+
+        ###########
+        
         # graph.set_animated(True)
 
         plt.tight_layout()
 
         fig.canvas.draw()
 
-        # plt.show(block = False)
+        plt.show(block = False)
 
         self.plot_images = [np.fromstring(fig.canvas.tostring_rgb(), dtype = np.uint8, sep = '').reshape(fig.canvas.get_width_height()[::-1]+(3,))]
 
@@ -1710,9 +1840,9 @@ class Population(Constants):
             imageio.mimsave(self.results_folder_name+'simulation.gif', self.plot_images, fps=10)
             print('Saved!')
 
-    def plot_figures(self, geometry, phonon, property_plot=['temperature'], colormap = 'viridis'):
+    def plot_figures(self, geometry, phonon, property_plot=['energy'], colormap = 'viridis'):
         
-        fig, ax = geometry.plot_facet_boundaries(geometry.mesh, l_color = 'grey')
+        fig, ax = geometry.mesh.plot_facet_boundaries(l_color = self.view.ax_style['axiscolor'])
         n = len(property_plot)
 
         ax.set_box_aspect( np.ptp(geometry.bounds, axis = 0) )
@@ -1739,8 +1869,11 @@ class Population(Constants):
             elif property_plot[i] in ['omega', 'angular_frequency', 'frequency']:
                 figname = 'init_omega'
                 colors = self.omega
-                vmin = phonon.omega[phonon.omega>0].min()
-                vmax = phonon.omega.max()
+                # vmin = phonon.omega[phonon.omega>0].min()
+                # vmax = phonon.omega.max()
+                order = np.ceil(np.log10(phonon.omega.max()))
+                vmin = 0
+                vmax = (10**order)*np.ceil(phonon.omega.max()/(10**order))
                 label = r'Angular frequency $\omega$ [THz$\cdot$rad]'
                 format = '{:.2e}'
             elif property_plot[i] in ['n', 'occupation']:
@@ -1758,8 +1891,14 @@ class Population(Constants):
                     T = np.concatenate((self.res_bound_values[self.res_bound_cond == 'T'], self.subvol_temperature))
                 else:
                     T = self.subvol_temperature
-                vmin = phonon.calculate_energy(T.min()-1, phonon.omega, reference = True).min()
-                vmax = phonon.calculate_energy(T.max()+1, phonon.omega, reference = True).max()
+                
+                emin = phonon.calculate_energy(T.min()-1, phonon.omega, reference = True).min()
+                emax = phonon.calculate_energy(T.max()+1, phonon.omega, reference = True).max()
+
+                order = [np.floor( np.log10(np.absolute(emin)) ), np.floor( np.log10(emax) )]
+                vmin = (10**order[0])*np.ceil(emin/(10**order[0]))
+                vmax = (10**order[1])*np.ceil(emax/(10**order[1]))
+
                 label = r'Energy density deviation $\hbar \omega \delta n$ [eV/angstrom$^3$]'
                 format = '{:.2e}'
             elif property_plot[i] in ['sv', 'subvolumes', 'subvolume', 'subvol', 'subvols']:
@@ -1773,24 +1912,57 @@ class Population(Constants):
             graph.set_array(colors)
             if colors.shape[0] > 0:
                 graph.autoscale()
-            if i > 0:
-                cb.remove()
 
-            norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
-            cb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap = self.colormap),
-                              ax = ax,
-                              location = 'bottom',
-                              orientation = 'horizontal',
-                              fraction = 0.05,
-                              aspect = 30,
-                              shrink = 0.8,
-                              pad = -0.1,
-                              format = format)
+            if i == 0:
+                norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+                cb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap = self.colormap),
+                                ax = ax,
+                                location = 'bottom',
+                                orientation = 'horizontal',
+                                fraction = 0.1,
+                                aspect = 30,
+                                shrink = 0.8,
+                                pad = -0.1,
+                                format = format)
+                cax = cb.ax
+            else:
+                cax.clear()
 
-            cb.set_label(label = label, size = 'small')
-            cb.set_ticklabels([format.format(i) for i in cb.get_ticks()], size = 'small')
+                norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
 
-            plt.tight_layout()
+                cb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap = self.colormap),
+                                cax = cax,
+                                orientation = 'horizontal',
+                                format = format)
+
+            figcolor = self.view.ax_style['figcolor']
+            facecolor = self.view.ax_style['facecolor']
+            linecolor = self.view.ax_style['axiscolor']
+
+            cb.set_label(label = label, size = 'small', color = linecolor)
+            cb.set_ticks(cb.get_ticks())
+            cb.set_ticklabels([format.format(i) for i in cb.get_ticks()], size = 'x-small', color = linecolor)
+
+            ax.set_facecolor(figcolor)
+            fig.patch.set_facecolor(figcolor)
+
+            ax.w_xaxis.line.set_color(linecolor)
+            ax.w_yaxis.line.set_color(linecolor)
+            ax.w_zaxis.line.set_color(linecolor)
+            ax.xaxis.label.set_color(linecolor)
+            ax.yaxis.label.set_color(linecolor)
+            ax.zaxis.label.set_color(linecolor)
+            cb.outline.set_edgecolor(linecolor)
+
+            ax.set_xticks(ax.get_xticks())
+            ax.set_yticks(ax.get_yticks())
+            ax.set_zticks(ax.get_zticks())
+
+            ax.set_xticklabels(ax.get_xticklabels(), fontdict = {'color':linecolor})
+            ax.set_yticklabels(ax.get_yticklabels(), fontdict = {'color':linecolor})
+            ax.set_zticklabels(ax.get_zticklabels(), fontdict = {'color':linecolor})
+
+            plt.tight_layout(rect = (0.05, 0.05, 0.95, 0.95))
             
             plt.savefig(self.results_folder_name+figname+'.png')
 
@@ -1841,9 +2013,9 @@ class Population(Constants):
         for i in range(self.n_of_subvols):
             line += ' Np Sv {:>3d} '.format(i)
         if geometry.subvol_type == 'slice':
-            line += ' Kappa total  '
             for i in range(self.n_of_subvols):
                 line += ' Kappa Sv {:>2d} '.format(i)
+            line += ' Kappa total  '
         else:
             for _, svc in enumerate(geometry.subvol_connections):
                 line += ' K Con {:>3d}-{:>3d} '.format(svc[0], svc[1])

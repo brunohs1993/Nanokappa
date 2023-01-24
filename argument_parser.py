@@ -21,7 +21,7 @@ def initialise_parser():
     parser.add_argument('--geo_rotation'   , '-gr' , default = [0, 0, 0, 'xyz'],
                                       nargs = '*'  , help    = 'Euler angles in degrees to be applied to given geometry (see scipy.rotation.from_euler) and the order to ' +
                                                               'be applied (see scipy.rotation.from_euler).')
-    parser.add_argument('--mat_rotation'   , '-mr', default = [],
+    parser.add_argument('--mat_rotation'   , '-mr', default = [0, 0, 0, 'xyz'],
                                       nargs = '*' , help    = 'Material index, Euler angles in degrees to be applied to given material and ' +
                                                               'the order to be applied (see scipy.rotation.from_euler).')
     parser.add_argument('--particles'      , '-p' , default = ['pmps', 1],
@@ -63,6 +63,8 @@ def initialise_parser():
                                                              'If --bound_cond/--bound_values has more values than --bound_pos, the last boundary condition will be applied to all non-specified facets.')
     parser.add_argument('--bound_values'  , '-bv' , default = [310, 290],
                         type = float, nargs = '*' , help    = 'Set boundary conditions values to be imposed (temperature [K], flux [W/m^2] or roughness [angstrom]).')
+    parser.add_argument('--scatter_model' , '-sc' , default = ['all'],
+                        type = str, nargs = '*' , help    = 'Set which properties to restrict on specular reflections. Choose any number among FBZ, k, omega and velocity.')
     parser.add_argument('--connect_facets', '-cf' , default = [1, 5, 2, 4],
                         type = int  , nargs = '*' , help    = 'Set the facets that are connected to apply periodicity. Faces are connected in pairs, or 0-1, 2-3, and so on.')
     parser.add_argument('--connect_pos'   , '-cp' , default = [],
@@ -88,6 +90,8 @@ def initialise_parser():
                         type = str  , nargs = '*' , help    = 'Save figures with properties distributions. Standard is T, omega and energy.')
     parser.add_argument('--colormap'      , '-cm' , default = ['viridis'],
                         type = str  , nargs = 1   , help    = 'Set matplotlib colormap to be used on all plots. Standard is viridis.')
+    parser.add_argument('--theme'         , '-th' , default = ['light'], choices = ['light', 'dark'],
+                        type = str  , nargs = 1   , help    = 'Set theme color for all plots.')
     parser.add_argument('--n_mean'        , '-nm' , default  = [100], 
                         type = int  , nargs = 1   , help    = 'The number of datapoints to consider when calculating mean and stdev values. Each datapoint = 10 iterations. Default is 100.')
 

@@ -6,3 +6,4 @@ test_material/*.pickle
 test_material/FBZ.png
 optimiser/simulations.csv
 optimiser/simulations.xlsx
+*~$*

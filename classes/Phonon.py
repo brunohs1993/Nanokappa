@@ -12,9 +12,7 @@ from phonopy import Phonopy
 from phonopy.interface.calculator import read_crystal_structure
 
 # other
-import sys
-import os
-import pickle
+import sys, os, pickle, re
 
 from classes.Constants import Constants
 
@@ -39,9 +37,32 @@ class Phonon(Constants):
         self.args = arguments
         self.mat_index = int(mat_index)
         self.name = self.args.mat_names[mat_index]
+        self.get_mat_folder()
+
+        self.args.pickled_mat = [int(i) for i in self.args.pickled_mat]
+
+        if self.mat_index in self.args.pickled_mat:
+            self.open_pickled_material()
+        else:
+            self.load_base_properties()
+            print('Pickling...')
+            self.pickle_material()
+
+        if len(self.args.mat_rotation) > 0:
+            self.rotate_crystal()
         
+        self.calculate_reference(self.T_reference)
+
+        print('Generating p_ref = f(T)...')
+        self.initialise_ref_momentum_function()
+        
+        self.plot_FBZ()
+
+        print('Material initialisation done!')
+
+    def get_mat_folder(self):
         if len(self.args.mat_folder) > 0:
-            self.mat_folder = self.args.mat_folder[mat_index]
+            self.mat_folder = self.args.mat_folder[self.mat_index]
         else:
             self.mat_folder = ''
         
@@ -55,11 +76,10 @@ class Phonon(Constants):
             self.mat_folder = self.mat_folder.replace('\\', '/')
             if not self.mat_folder.endswith('/'):
                 self.mat_folder += '/'
-                    
-    def load_properties(self):
+    
+    def load_base_properties(self):
         '''Initialise all phonon properties from input files.'''
         
-        self.args.pickled_mat = [int(i) for i in self.args.pickled_mat]
         self.T_reference = self.args.reference_temp[0]
 
         #### we have to discuss for the following ####
@@ -134,9 +154,6 @@ class Phonon(Constants):
         print('Searching for degeneracies...')
         self.find_degeneracies()
 
-        if len(self.args.mat_rotation) > 0:
-            self.rotate_crystal()
-
         print('Material info: {:d} q-points; {:d} branches -> {:d} modes in total.'.format(self.number_of_qpoints, self.number_of_branches, self.number_of_modes))
 
         print('Interpolating lifetime...')
@@ -144,18 +161,10 @@ class Phonon(Constants):
 
         print('Generating T = f(E)...')
         self.zero_point = self.calculate_zeropoint()
-        self.calculate_reference(self.T_reference)
+        
         self.initialise_temperature_function()
 
-        print('Generating p_ref = f(T)...')
-        self.initialise_ref_momentum_function()
-
         self.initialise_density_of_states()
-
-        print('Pickling...')
-        self.pickle_material()
-
-        print('Material initialisation done!')
 
     def load_hdf_data(self, hdf_file):
         ''' Get all data from hdf file.
@@ -199,6 +208,7 @@ class Phonon(Constants):
 
         self.wavevectors = self.find_min_k(k)
 
+    def plot_FBZ(self):
         fig, ax = plt.subplots(nrows = 1, ncols = 1, subplot_kw={'projection': '3d'})
         ax.scatter(self.wavevectors[:, 0], self.wavevectors[:, 1], self.wavevectors[:, 2], s = 1, c = np.sum(self.wavevectors**2, axis = 1))
         
@@ -284,30 +294,31 @@ class Phonon(Constants):
         '''Rotates the orientation of the crystal in relation to the geometry axis.'''
         print('Rotating crystal...')        
         
-        # initialize angles and order
-        self.rotation_angles = None
-        self.rotation_order  = None
-
-        n_mats = len(self.args.mat_names) # how many materials are listed
-
-        for i in range(n_mats): # for each material
-            if int(self.args.mat_rotation[i*5]) == self.mat_index: # if it is the material of this object
-
-                self.rotation_angles = np.array(self.args.mat_rotation[i*5+1:i*5+4]).astype(float) # get rotation angles
-
-                self.rotation_order  = self.args.mat_rotation[i*4+4]                 # get rotation order
+        rot_groups = []
+        g = []
+        for i, s in enumerate(self.args.mat_rotation):
+            if re.fullmatch('[0-9]+', s):
+                g.append(i)
+            elif re.fullmatch('[A-Z]+|[a-z]+', s):
+                g.append(i)
+                rot_groups.append(g)
+                g = []
+            else:
+                Exception('Wrong mat_rotation parameter. Quitting simulaton.')
         
-        if self.rotation_angles is not None: # if the rotation was defined for this material
+        if len(rot_groups) > 0:
+            group = rot_groups[self.mat_index]
             
-            # generate rotation object
+            rot_params = [self.args.mat_rotation[i] for i in group]
+            self.rotation_angles = [float(i) for i in rot_params[:-1]]
+            self.rotation_order  = rot_params[-1]
+            
             R = rot.from_euler(self.rotation_order, self.rotation_angles, degrees = True)
 
             self.wavevectors = R.apply(self.wavevectors) # rotate k
 
             for i in range(self.number_of_branches): # for each branch
                 self.group_vel[:, i, :] = R.apply(self.group_vel[:, i, :]) # rotate v_g
-        
-        self.group_vel = np.around(self.group_vel, decimals = 6)
 
     def load_gamma(self):
         '''gamma = temperatures X q-pointsX p-branches'''
@@ -413,7 +424,7 @@ class Phonon(Constants):
         self.energy_array = np.array( list( map(self.calculate_crystal_energy, T_array) ) ).reshape(-1)
 
         # Interpolating
-        self.temperature_function = interp1d( self.energy_array, T_array, kind = 'linear', fill_value = 'extrapolate' )
+        self.temperature_function = interp1d( self.energy_array, T_array, kind = 'linear', fill_value = (T_min, T_max), bounds_error = False)
 
     def normalise_to_density(self, x):
         '''Defines conversion from energy to energy density here so it is easy to change.'''
@@ -462,7 +473,8 @@ class Phonon(Constants):
         
         files = os.listdir(self.mat_folder)
         
-        short_fname = self.name + '_{:d}'.format(int(self.T_reference)) + '.pickle'
+        # short_fname = self.name + '_{:d}'.format(int(self.T_reference)) + '.pickle'
+        short_fname = '{}.pickle'.format(self.name)
 
         pickled_file = self.mat_folder + short_fname
 
@@ -476,9 +488,7 @@ class Phonon(Constants):
     
     def open_pickled_material(self):
         
-        self.T_reference = self.args.reference_temp[0]
-
-        short_fname = self.name + '_{:d}'.format(int(self.T_reference)) + '.pickle'
+        short_fname = '{}.pickle'.format(self.name)
 
         pickled_file = self.mat_folder + short_fname
 
@@ -486,11 +496,13 @@ class Phonon(Constants):
 
         if short_fname in files:
             pickle_in = open(pickled_file, 'rb')
-            return pickle.load(pickle_in)
+            self.__dict__.update(pickle.load(pickle_in).__dict__)
         else:
             print('Material not yet pickled!')
-            self.load_properties()
-            return self.open_pickled_material()
+            self.load_base_properties()
+            print('Pickling...')
+            self.pickle_material()
+            self.open_pickled_material()
 
 def expand_FBZ(axis,weight,qpoints,tensor,rank,rotations,reciprocal_lattice):
         # expand tensor from IBZ to BZ

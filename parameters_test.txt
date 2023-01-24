@@ -27,7 +27,7 @@
 --path_points      
 --results_folder   test_results/test
 --results_location main
---conv_crit        0
+--conv_crit        0 10
 --colormap         jet
 --fig_plot         subvol omega energy
 --rt_plot          

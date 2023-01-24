@@ -1,5 +1,6 @@
 # calculations
 import numpy as np
+import warnings
 
 # plotting and animation
 import matplotlib
@@ -13,6 +14,8 @@ import copy
 
 # simulation
 from classes.Constants import Constants
+
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 class Visualisation(Constants):
     def __init__(self, args, geometry, phonon):
@@ -37,15 +40,35 @@ class Visualisation(Constants):
         self.set_style_dicts()
     
     def set_style_dicts(self):
+        
+        self.theme = 'light'
+
+        figcolor  = 'whitesmoke'
+        facecolor = 'whitesmoke'
+        linecolor = 'black'
+        gridcolor = 'slategrey'
+        textcolor = 'black'
+
+        if self.args.theme[0] == 'dark':
+            self.theme = 'dark'
+
+            facecolor = (np.array([29,34,38])/255)*2
+            figcolor  = np.array([29,34,38])/255
+            linecolor = 'lightsteelblue'
+            gridcolor = 'slategrey'
+            textcolor = 'lightsteelblue'
+        elif self.args.theme[0] not in ['light', 'dark']:
+            Warning('Invalid theme. Defaulting to light theme.')
+
         if self.geometry.subvol_type == 'slice':
             self.profile_plot_style = dict(linestyle   = ':',
-                                           color       = 'k',
+                                           color       = linecolor,
                                            marker = 'o',
                                            markersize  = 5,
                                            capsize = 5 )
         else:
             self.profile_plot_style = dict(linestyle   = 'None',
-                                           color       = 'k'   ,
+                                           color       = linecolor   ,
                                            marker = 'o'   ,
                                            markersize  = 5    ,
                                            capsize = 5)
@@ -54,10 +77,15 @@ class Visualisation(Constants):
         
         self.grid_style = dict(ls    = '--'       ,
                                lw    = 1          ,
-                               color = 'slategray')
+                               color = gridcolor)
+        
+        self.ax_style = dict(figcolor = figcolor,
+                             facecolor = facecolor,
+                             axiscolor = linecolor,
+                             textcolor = textcolor)
         
         self.mean_plot_style = dict(linestyle = '--',
-                                    color     = 'k' )
+                                    color     = linecolor )
         
         self.stdev_plot_style = dict(color     = 'r' ,
                                      linestyle = '--')
@@ -78,7 +106,7 @@ class Visualisation(Constants):
 
         if self.sim_time.shape[0] > 1:
         #     if verbose: print('Plotting convergence...')
-            self.plot_convergence_general(property_list = ['T', 'Np', 'phi', 'kappa'], cmap = None)
+            self.plot_convergence_general(property_list = ['e', 'T', 'Np', 'phi', 'kappa'], cmap = None)
 
         if self.n_of_reservoirs >0 :
             if verbose: print('Plotting energy balance convergence...')
@@ -431,6 +459,7 @@ class Visualisation(Constants):
                 ylabel           = [r'Local $e$ [eV/$\AA^3$]']
                 nrows            = 1
                 sharey           = True
+                sharex           = False
                 prof_x           = np.arange(self.geometry.n_of_subvols)
                 prof_xlabel      = 'Subvolume'
                 prof_xticks      = np.arange(self.geometry.n_of_subvols)
@@ -523,7 +552,11 @@ class Visualisation(Constants):
                 ax[-1, 1].set_xticks(prof_xticks)
                 ax[-1, 1].set_xticklabels(prof_xticklabels, fontdict = prof_xtick_fontdict)
                 for a in ax[:, 0]:
-                    a.legend(conv_labels, ncols = 1+len(conv_labels)//10, fontsize = legend_fontsize)
+                    a.legend(conv_labels, ncols = 1+len(conv_labels)//10,
+                             fontsize = legend_fontsize,
+                             facecolor = self.ax_style['facecolor'],
+                             edgecolor = self.ax_style['axiscolor'],
+                             labelcolor = self.ax_style['textcolor'])
                 
             elif nrows == 2:
                 for i in range(n_plot):
@@ -538,7 +571,10 @@ class Visualisation(Constants):
                 ax['bottom'].plot(conv_x, rol_mean, **mean_dict )
                 ax['bottom'].plot(conv_x, rol_std , **stdev_dict)
 
-                ax['left'].legend(conv_labels, ncols = 1+len(conv_labels)//10, fontsize = legend_fontsize)
+                ax['left'].legend(conv_labels, ncols = 1+len(conv_labels)//10, fontsize = legend_fontsize,
+                                  facecolor = self.ax_style['facecolor'],
+                                  edgecolor = self.ax_style['axiscolor'],
+                                  labelcolor = self.ax_style['textcolor'])
                 ax['left'].set_xlabel(conv_xlabel)
                 ax['left'].set_ylabel(ylabel[0])
 
@@ -546,14 +582,17 @@ class Visualisation(Constants):
                 ax['right'].set_xlabel(prof_xlabel)
                 ax['right'].set_xticklabels(prof_xticklabels, fontdict = prof_xtick_fontdict)
 
-                ax['bottom'].legend(['Instantaneous', r'Rolling $\mu$ ({} datapoints)'.format(N), r'Rolling $\sigma$ ({} datapoints)'.format(N)])
+                ax['bottom'].legend(['Instantaneous', r'Rolling $\mu$ ({} datapoints)'.format(N), r'Rolling $\sigma$ ({} datapoints)'.format(N)],
+                                    facecolor = self.ax_style['facecolor'],
+                                    edgecolor = self.ax_style['axiscolor'],
+                                    labelcolor = self.ax_style['textcolor'])
                 ax['bottom'].set_xlabel(conv_xlabel)
                 ax['bottom'].set_ylabel(ylabel[1])
 
                 text_y = min(0, np.nanmin(mean_prof)*1.5) + (max(0, np.nanmax(mean_prof)*1.5) - min(0, np.nanmin(mean_prof)*1.5))*0.75
                 props = dict(boxstyle='round', facecolor='white', alpha=0.5)
                 
-                ax['bottom'].text(conv_x[-1], text_y, #rol_mean[-1]*1.05,
+                ax['bottom'].text(conv_x[-1], text_y,
                                   r'$\kappa$ = {:.2f}$\pm${:.2f} W/m$\cdot$K'.format(rol_mean[-1], rol_std[-1]),
                                   ha = 'right', bbox = props)
                 
@@ -568,9 +607,12 @@ class Visualisation(Constants):
                 ax[1].set_xticks(prof_xticks)
                 ax[1].set_xticklabels(prof_xticklabels, fontdict = prof_xtick_fontdict)
 
-                # ax[0].ticklabel_format(axis = 'y', style = 'plain', scilimits=(0,0), useOffset = False)
                 ax[0].set_xlabel(conv_xlabel)
-                ax[0].legend(conv_labels, ncols = 1+len(conv_labels)//10, fontsize = legend_fontsize)
+                ax[0].legend(conv_labels, ncols = 1+len(conv_labels)//10,
+                             fontsize = legend_fontsize,
+                             facecolor = self.ax_style['facecolor'],
+                             edgecolor = self.ax_style['axiscolor'],
+                             labelcolor = self.ax_style['textcolor'])
             
             if prop in ['kappa', 'conductivity']:
                 y_max = max(0, 1.5*np.nanmax(mean_prof))
@@ -590,7 +632,31 @@ class Visualisation(Constants):
                     a.grid(True, **grid_dict)
                     a.ticklabel_format(axis = 'y', style = 'sci', scilimits=(0,3), useOffset = False)
             
-            plt.suptitle(suptitle, fontsize = 'xx-large') # figure title
+            if type(ax) == dict:
+                for a in ax:
+                    ax[a].set_facecolor(self.ax_style['facecolor'])
+                    fig.patch.set_facecolor(self.ax_style['figcolor'])
+
+                    for s in ax[a].spines:
+                        ax[a].spines[s].set_color(self.ax_style['axiscolor'])
+                    
+                    ax[a].xaxis.label.set_color(self.ax_style['textcolor'])
+                    ax[a].yaxis.label.set_color(self.ax_style['textcolor'])
+                    ax[a].tick_params(axis='both', colors=self.ax_style['axiscolor'])
+
+            else:
+                for a in ax.ravel():
+                    a.set_facecolor(self.ax_style['facecolor'])
+                    fig.patch.set_facecolor(self.ax_style['figcolor'])
+
+                    for s in a.spines:
+                        a.spines[s].set_color(self.ax_style['axiscolor'])
+                    
+                    a.xaxis.label.set_color(self.ax_style['textcolor'])
+                    a.yaxis.label.set_color(self.ax_style['textcolor'])
+                    a.tick_params(axis='both', colors=self.ax_style['axiscolor'])
+
+            plt.suptitle(suptitle, fontsize = 'xx-large', color = self.ax_style['textcolor']) # figure title
             plt.tight_layout() # pack everything
             plt.savefig(self.folder + filename) # save figure
             plt.close(fig)
@@ -800,6 +866,7 @@ class Visualisation(Constants):
                      pad = -0.1)
         
         cb.set_label(label = 'Thermal Conductivity [W/mK]', size = 'small')
+        cb.set_ticks(cb.get_ticks())
         cb.set_ticklabels(cb.get_ticks(), size = 'small')
         
         plt.tight_layout()

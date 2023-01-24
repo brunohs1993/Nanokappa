@@ -7,11 +7,13 @@ import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as rot
 from scipy.interpolate import NearestNDInterpolator
 from scipy.stats.qmc import Sobol
-# from scipy.spatial import Delaunay
+
+from itertools import combinations
 
 # geometry
+from classes.Mesh import Mesh
+import routines.geo3d as geo3d
 import trimesh as tm
-# from trimesh.ray.ray_pyembree import RayMeshIntersector # FASTER
 import routines.subvolumes as subvolumes
 from shapely.geometry import Polygon, Point
 from mapbox_earcut import triangulate_float32 as triangulate_earcut
@@ -20,7 +22,6 @@ try:
     # soft dependency, not really needed. Maybe add it as an option, like trimesh?
     # I tested both earcut and triangle and I don't see much difference, but I'll keep it for now. 
 except: pass
-# from trimesh.proximity import ProximityQuery
 
 # other
 import sys
@@ -66,11 +67,9 @@ class Geometry:
 
         self.load_geo_file(self.shape) # loading
         self.transform_mesh()          # transforming
-        self.get_outer_hull(args)      # getting the outer hull, making it watertight and correcting bound_facets
-        self.get_mesh_properties()     # defining useful properties
+        self.get_mesh_properties()
         self.get_bound_facets(args)    # get boundary conditions facets
         self.check_facet_connections(args)   # check if all connections are valid and adjust vertices
-        self.get_plane_k()
         self.save_reservoir_meshes(engine = 'earcut')   # save meshes of each reservoir after adjust vertices
         self.plot_mesh_bc()
         self.set_subvolumes()          # define subvolumes and save their meshes and properties
@@ -86,16 +85,21 @@ class Geometry:
         print('Loading geometry...')
 
         if shape == 'cuboid':
-            self.mesh = tm.creation.box( self.dimensions )
+            prev_mesh = tm.creation.box( self.dimensions )
         elif shape == 'cylinder':
-            self.mesh = tm.creation.cylinder( radius = self.dimensions[1], height = self.dimensions[0], sections = int(self.dimensions[2]))
+            prev_mesh = tm.creation.cylinder( radius = self.dimensions[1], height = self.dimensions[0], sections = int(self.dimensions[2]))
         elif shape == 'cone':
-            self.mesh = tm.creation.cone( self.dimensions[0], self.dimensions[1] )
+            prev_mesh = tm.creation.cone( self.dimensions[0], self.dimensions[1] )
         elif shape == 'capsule':
-            self.mesh = tm.creation.capsule( self.dimensions[0], self.dimensions[1] )
+            prev_mesh = tm.creation.capsule( self.dimensions[0], self.dimensions[1] )
+        elif shape == 'sphere':
+            prev_mesh = tm.creation.uv_sphere( radius = self.dimensions[0], count = [int(self.dimensions[1]), int(self.dimensions[2])] )
+        elif shape == 'icosphere':
+            prev_mesh = tm.creation.icosphere( radius = float(self.dimensions[0]), subdivisions = int(self.dimensions[1]) )
         else:
-            self.mesh = tm.load(shape)
-            self.mesh.fix_normals()
+            prev_mesh = tm.load(shape)
+            
+        self.mesh = Mesh(np.around(prev_mesh.vertices, decimals = 10), prev_mesh.faces)
 
     def transform_mesh(self):
         '''Builds transformation matrix and aplies it to the mesh.'''
@@ -104,145 +108,44 @@ class Geometry:
 
         self.mesh.rezero()  # brings mesh to origin such that all vertices are on the positive octant
 
-        scale_matrix = np.identity(4)*np.append(self.scale, 1)
+        self.mesh.vertices *= self.scale
 
-        self.mesh.apply_transform(scale_matrix) # scale mesh
+        # scale_matrix = np.identity(4)*np.append(self.scale, 1)
+
+        # self.mesh.apply_transform(scale_matrix) # scale mesh
+
         if self.rotation is not None or self.rot_order is not None:
-            rotation_matrix       = np.zeros( (4, 4) ) # initialising transformation matrix
-            rotation_matrix[3, 3] = 1
+            # rotation_matrix       = np.zeros( (4, 4) ) # initialising transformation matrix
+            # rotation_matrix[3, 3] = 1
 
-            rotation_matrix[0:3, 0:3] = rot.from_euler(self.rot_order, self.rotation, degrees = True).as_matrix() # building rotation terms
+            # rotation_matrix[0:3, 0:3] = rot.from_euler(self.rot_order, self.rotation, degrees = True).as_matrix() # building rotation terms
 
-            self.mesh.apply_transform(rotation_matrix) # rotate mesh
+            # self.mesh.apply_transform(rotation_matrix) # rotate mesh
+
+            R = rot.from_euler(self.rot_order, self.rotation, degrees = True)
+            self.mesh.vertices = R.apply(self.mesh.vertices)
 
             self.mesh.rezero() # brings mesh to origin back again to avoid negative coordinates
-            
+        
         # THIS IS TO TRY AVOID PROBLEMS WITH PERIODIC BOUNDARY CONDITION
         # DUE TO ROUNDING ERRORS
         self.mesh.vertices = np.around(self.mesh.vertices, decimals = self.tol_decimals)
         self.mesh.vertices = np.where(self.mesh.vertices == -0., 0, self.mesh.vertices)
 
-    def get_outer_hull(self, args, view = False):
-        '''This ensures that the mesh does not have internal faces and gets only the external ones.
-        It works by generating rays in a box around the mesh, and registering which faces these rays hit on.
-        When the mesh is filled and can be considered watertight, it stops and substitutes the old mesh by the new one.'''
-
-        print('Making mesh watertight...')
-        # bounding box mesh
-        box = tm.creation.box(extents = self.mesh.extents+0.2)
-        box.rezero()
-        box.vertices -= 0.1
-
-        # if mesh is composed of more than one mesh, add them up
-        if isinstance(self.mesh, tm.Scene):
-            print(self.mesh.dump(concatenate=True))
-        else:
-            submesh = self.mesh
-
-        # get external faces of the mesh to make it watertight
-        exponent = 4
-        known_faces = np.empty(0)
-        i = 0
-
-        print('Number of bodies: ', self.mesh.body_count)
-
-        while (not submesh.is_watertight) and i<1000:
-            
-            i = i+1
-            print('Try', i)
-
-            n_points = 10**exponent
-
-            # sampling points on bounding box
-            start_points, _ = tm.sample.sample_surface(box, n_points)
-            end_points  , _ = tm.sample.sample_surface(box, n_points)
-            directions = end_points - start_points
-
-            # detecting hit faces
-            tri, _ = self.mesh.ray.intersects_id(ray_origins = start_points, ray_directions = directions, multiple_hits = False)
-
-            # get all unique faces that were hit
-            valid_faces = np.unique(tri[tri >= 0])
-
-            # add detected faces to the external ones
-            known_faces = np.unique(np.concatenate((known_faces, valid_faces))).astype(int)
-
-            # generate submesh with known faces
-            submesh = tm.util.submesh(mesh = self.mesh, faces_sequence = [known_faces], append = True)
-            
-            if view:
-                submesh.show()
-
-            # Try to make submesh watertight
-            try:
-                submesh.process(validate=True)
-                submesh.fill_holes()
-                submesh.fix_normals()
-            except:
-                pass
-
-        # finalise submesh
-        submesh.process(validate=True)
-        submesh.fill_holes()
-        submesh.fix_normals()
-
-        # referencing vertices
-        vertices_indexes = []
-
-        for i in range(submesh.vertices.shape[0]):                                  # for each vertex in the new mesh
-            vertex = submesh.vertices[i, :]                                         # get its coordinates
-            index = np.where(np.all(self.mesh.vertices == vertex, axis = 1))[0]     # check where they are in the old mesh
-            vertices_indexes.append(index)                                          # append the index to find them in the old mesh
-        
-        vertices_indexes = np.array(vertices_indexes)
-
-        # referencing faces
-        faces_indexes = []
-
-        for i in range(submesh.faces.shape[0]):                                                     # check for each snew_mesh face
-            new_face        = submesh.faces[i, :]                                                   # the vertices in the new mesh that compose the face - ex: [0, 1, 2]
-            vertices_in_old = vertices_indexes[new_face]                                            # and how they are referenced in the old mesh
-                                                                                                    # ex: [5, 2, 8] = [vertices_indexes[0], vertices_indexes[1], vertices_indexes[2]]
-            for j in range(self.mesh.faces.shape[0]):                                               # Then for each face in the old mesh
-                old_face = self.mesh.faces[j, :]                                                    # get its vertices
-                is_in = np.array([vertex in old_face for vertex in vertices_in_old], dtype = bool)  # and check if all vertices match
-                if np.all(is_in):                                                                   # If they do
-                    faces_indexes.append(j)                                                         # register the index
-                    break                                                                           # break the loop and check next face in new mesh.
-        
-        faces_indexes = np.array(faces_indexes)
-
-        facets_indexes = []
-        # referencing facets
-        for i in range(len(submesh.facets)):                                                    # Check for each facet in the new mesh
-            new_facet    = submesh.facets[i]                                                    # which are the faces that compose the facet
-            faces_in_old = faces_indexes[new_facet]                                             # and how they are referenced in the old mesh.
-            for j in range(len(self.mesh.facets)):                                              # Then for each facet in the old mesh
-                old_facet = self.mesh.facets[j]                                                 # get its faces
-                is_in = np.array([face in old_facet for face in faces_in_old], dtype = bool)    # and check if all faces match
-                if np.all(is_in):                                                               # If they do
-                    facets_indexes.append(j)                                                    # register the index
-                    break                                                                       # break the loop and check next face in new mesh.
-
-        args.bound_facets   = [facets_indexes.index(facet) for facet in args.bound_facets]    # correcting input arguments for boundary conditions
-        args.connect_facets = [facets_indexes.index(facet) for facet in args.connect_facets]
-
-        if view:
-            submesh.show()
-
-        # substitute geometry with submesh
-        self.mesh = submesh
-
-        print('Watertight?', self.mesh.is_watertight)
+        self.mesh.update_mesh_properties()
+        self.mesh.rezero()
 
     def get_mesh_properties(self):
-        '''Get useful properties of the mesh.'''
+        self.faces          = self.mesh.faces
+        self.facets         = self.mesh.facets
+        self.n_of_faces     = self.mesh.n_of_faces
+        self.n_of_facets    = self.mesh.n_of_facets
+        self.bounds         = self.mesh.bounds
+        self.facet_centroid = self.mesh.facet_centroid
+        self.volume         = self.mesh.volume
+        self.facets_normal  = self.mesh.facets_normal
+        self.facets_area    = self.mesh.facets_area
 
-        self.bounds           = self.mesh.bounds
-        self.domain_centroid  = self.mesh.center_mass
-        self.volume           = self.mesh.volume
-        self.n_of_facets = len(self.mesh.facets)
-    
     def set_subvolumes(self):
         print('Defining subvolumes centers...')
 
@@ -266,11 +169,12 @@ class Geometry:
 
             self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
                                                       xc = self.scale_positions(self.subvol_center))
-            
-            try: # try slicing the mesh first
-                self.subvol_volume, self.subvol_center = self.calculate_subvol_volume(return_centers = True)
-            except: # if it gives an error, try with quasi monte carlo / sobol sampling
-                self.subvol_volume, self.subvol_center = self.calculate_subvol_volume(algorithm = 'qmc', return_centers = True)
+            self.subvol_volume, self.subvol_center = self.calculate_subvol_volume(algorithm = 'mc', return_centers = True)
+
+            # try: # try slicing the mesh first
+            #     self.subvol_volume, self.subvol_center = self.calculate_subvol_volume(return_centers = True)
+            # except: # if it gives an error, try with quasi monte carlo / sobol sampling
+            #     self.subvol_volume, self.subvol_center = self.calculate_subvol_volume(algorithm = 'qmc', return_centers = True)
 
             self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
                                                       xc = self.scale_positions(self.subvol_center))
@@ -281,8 +185,7 @@ class Geometry:
             self.n_of_subvols    = int(self.args.subvolumes[1])
             self.subvol_center = subvolumes.distribute(self.mesh, self.n_of_subvols, self.folder, view = True)
 
-            # inside = self.mesh.contains(self.subvol_center)
-            inside = self.contains_naive(self.subvol_center)
+            inside = self.mesh.contains(self.subvol_center)
             self.subvol_center = self.subvol_center[inside, :]
 
             self.subvol_center = self.subvol_center[np.lexsort((self.subvol_center[:,2],
@@ -316,9 +219,7 @@ class Geometry:
 
             self.subvol_center = (np.vstack(list(map(np.ravel, g))).T)*self.bounds.ptp(axis = 0)+self.bounds[0, :] # create centers
 
-            # passed = tm.proximity.signed_distance(self.mesh, self.subvol_center) > 0 
-
-            passed = self.contains_naive(self.subvol_center)
+            passed = self.mesh.closest_point(self.subvol_center)[1] > self.offset
 
             self.subvol_center = self.subvol_center[passed, :]
 
@@ -333,10 +234,11 @@ class Geometry:
             self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
                                                       xc = self.scale_positions(self.subvol_center))
 
-            try: # try slicing the mesh first
-                self.subvol_volume = self.calculate_subvol_volume(verbose = False)
-            except: # if it gives an error, try with quasi monte carlo / sobol sampling
-                self.subvol_volume = self.calculate_subvol_volume(algorithm = 'qmc', tol = 1e-4, verbose = False)
+            self.subvol_volume = self.calculate_subvol_volume(algorithm = 'mc', tol = 1e-4, verbose = True)
+            # try: # try slicing the mesh first
+            #     self.subvol_volume = self.calculate_subvol_volume(verbose = False)
+            # except: # if it gives an error, try with quasi monte carlo / sobol sampling
+            #     self.subvol_volume = self.calculate_subvol_volume(algorithm = 'qmc', tol = 1e-4, verbose = False)
 
         else:
             print('Invalid subvolume type!')
@@ -397,11 +299,11 @@ class Geometry:
 
         elif algorithm == 'qmc':
             ################# RANDOM SAMPLES ########################
+            
             cover = np.zeros(self.n_of_subvols)
             err   = np.ones(self.n_of_subvols)
 
             n_t  = 0
-            n_sv = np.zeros(self.n_of_subvols)
 
             ns = int(2**10)
             gen = Sobol(3)
@@ -413,11 +315,10 @@ class Geometry:
                 
                 new_samples = gen.random(ns)*self.bounds.ptp(axis = 0)+self.bounds[0, :]
 
-                # new_samples_in = np.nonzero(self.contains_naive(new_samples))[0]
                 new_samples_in = np.nonzero(self.mesh.contains(new_samples))[0]
 
                 new_samples = new_samples[new_samples_in, :]
-
+                
                 samples = np.vstack((samples, new_samples))
                 scaled_samples = np.vstack((scaled_samples, self.scale_positions(new_samples)))
 
@@ -425,24 +326,64 @@ class Geometry:
                 
                 r = self.subvol_classifier.predict(scaled_samples)
 
-                # for i in range(self.n_of_subvols):
-                #     n_sv[i] = (r == i).sum()
-                
-                # new_cover = n_sv/n_t
                 new_cover = np.mean(r, axis = 0)
-
+                
                 with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
                     err = np.absolute((new_cover - cover)/cover)
-                
+                    err[np.isnan(err)] = 1
                 if verbose:
                     print('{:4d} - Samples: {:>8.2e} - Max error: {:>8.2e}'.format(cnt, n_t, err.max()))
 
                 cnt += 1
                 cover = copy.copy(new_cover)
 
-            subvol_volume = cover*self.mesh.volume
+            subvol_volume = cover*self.volume
 
             if return_centers:
+                r = np.argmax(self.subvol_classifier.predict(scaled_samples), axis = 1)
+                subvol_center = np.zeros((self.n_of_subvols, 3))
+                for sv in range(self.n_of_subvols):
+                    subvol_center[sv, :] = np.mean(samples[ r == sv, :], axis = 0)
+            
+        elif algorithm == 'mc':
+            ################# RANDOM SAMPLES ########################
+            
+            cover = np.zeros(self.n_of_subvols)
+            err   = np.ones(self.n_of_subvols)
+
+            nt  = 0
+            ns = int(2**10)
+
+            cnt = 1
+            samples        = np.zeros((0, 3))
+            scaled_samples = np.zeros((0, 3))
+            while err.max() > tol:
+                
+                new_samples = self.mesh.sample_volume(ns)
+
+                samples = np.vstack((samples, new_samples))
+
+                scaled_samples = self.scale_positions(new_samples)
+                
+                r = self.subvol_classifier.predict(scaled_samples)
+
+                new_cover = (cover*nt + r.sum(axis = 0))/(nt+ns)
+
+                nt += ns
+
+                with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
+                    err = np.absolute((new_cover - cover)/cover)
+                    err[np.isnan(err)] = 1
+                if verbose:
+                    print('{:4d} - Samples: {:>8.2e} - Max error: {:>8.2e}'.format(cnt, nt, err.max()))
+
+                cnt += 1
+                cover = copy.copy(new_cover)
+
+            subvol_volume = cover*self.volume
+
+            if return_centers:
+                scaled_samples = self.scale_positions(samples)                
                 r = np.argmax(self.subvol_classifier.predict(scaled_samples), axis = 1)
                 subvol_center = np.zeros((self.n_of_subvols, 3))
                 for sv in range(self.n_of_subvols):
@@ -477,15 +418,13 @@ class Geometry:
             else:
                 Exception('Please specify the type of position for BC with the keyword "absolute" or "relative".')
 
-            _, _, close_tri = tm.proximity.closest_point(self.mesh, self.bound_pos)
-            
-            self.bound_facets = np.zeros(0)
-            for i_t, t in enumerate(close_tri):
-                for i_f, f in enumerate(self.mesh.facets):
-                    if t in f:
-                        self.bound_facets = np.append(self.bound_facets, i_f)
-                        self.bound_cond[i_f] = args.bound_cond[i_t]
-                        break
+            self.bound_facets, _, _ = self.mesh.closest_facet(self.bound_pos)
+
+            for j, i in enumerate(self.bound_facets):
+                self.bound_cond[i] = args.bound_cond[j]
+
+        else:
+            self.bound_facets = np.array([])
 
         self.res_facets     = np.arange(self.n_of_facets, dtype = int)[np.logical_or(self.bound_cond == 'T', self.bound_cond == 'F')]
         self.res_bound_cond = self.bound_cond[np.logical_or(self.bound_cond == 'T', self.bound_cond == 'F')]
@@ -506,9 +445,7 @@ class Geometry:
             self.rough_facets_values[:] = args.bound_values[-1]
         
         # saving values
-        for i in range(len(self.bound_facets)):                               # for each specified facet
-            
-            bound_facet = self.bound_facets[i]                                # get the facet location
+        for i, bound_facet in enumerate(self.bound_facets):                               # for each specified facet
             
             if bound_facet in self.res_facets:                                # if it is a reservoir
                 j = self.res_facets == bound_facet                            # get where it is
@@ -516,20 +453,7 @@ class Geometry:
                 
             elif bound_facet in self.rough_facets:                            # if it is a rough facet
                 j = self.rough_facets == bound_facet                          # get the facet location
-                
                 self.rough_facets_values[j] = args.bound_values[i]   # save roughness (eta)
-        
-        faces    = [self.mesh.facets[i]      for i in range(self.n_of_facets)] # indexes of the faces that define each facet
-        vertices = [self.mesh.faces[i]       for i in faces                       ] # indexes of the vertices that ar contained by each facet
-        coords   = [self.mesh.vertices[i, :] for i in vertices                    ] # vertices coordinates contained by the boundary facet
-
-        self.facet_vertices = [np.unique(np.vstack((v[0, :, :], v[1, :, :])), axis = 0) for v in coords]
-        self.facet_bound_vertices = [self.mesh.vertices[np.unique(self.mesh.facets_boundary[i]), :] for i in range(len(self.mesh.facets))]
-
-        # calculation of the centroid of each facet as the mean of vertex coordinates, weighted by how many faces they are connected to.
-        # this is equal to the mean of triangles centroids.
-
-        self.facet_centroid = np.array([self.get_facet_centroid(i) for i in range(self.n_of_facets)])
         
     def check_facet_connections(self, args):
 
@@ -544,23 +468,22 @@ class Geometry:
             else:
                 raise Exception("Wrong option in --connect_pos. Choose between 'relative' or 'absolute'.")
             
-            self.get_plane_k()
-            args.connect_facets = self.find_boundary_naive(points)[2]
+            args.connect_facets = self.mesh.closest_facet(points)[0]
 
         connections = np.array(args.connect_facets).reshape(-1, 2)
 
         for i in range(connections.shape[0]):
-            normal_1 = self.mesh.facets_normal[connections[i, 0], :]
-            normal_2 = self.mesh.facets_normal[connections[i, 1], :]
+            normal_1 = self.facets_normal[connections[i, 0], :]
+            normal_2 = self.facets_normal[connections[i, 1], :]
             normal_check = np.all(np.absolute(normal_1+normal_2) < 10**-self.tol_decimals)
 
             if normal_check:
 
-                faces_1 = self.mesh.facets[connections[i, 0]]
-                faces_2 = self.mesh.facets[connections[i, 1]]
+                faces_1 = self.facets[connections[i, 0]]
+                faces_2 = self.facets[connections[i, 1]]
 
-                mesh_1 = self.mesh.submesh(faces_sequence = [faces_1], append = True)
-                mesh_2 = self.mesh.submesh(faces_sequence = [faces_2], append = True)
+                mesh_1 = Mesh(vertices = self.mesh.vertices, faces = self.mesh.faces[faces_1, :])
+                mesh_2 = Mesh(vertices = self.mesh.vertices, faces = self.mesh.faces[faces_2, :])
 
                 mesh_1.rezero()
                 mesh_2.rezero()
@@ -568,8 +491,8 @@ class Geometry:
                 ring_1 = self.get_boundary_rings(mesh_1)
                 ring_2 = self.get_boundary_rings(mesh_2)
 
-                vertices_1_2d, b1, b2 = self.transform_3d_to_2d(mesh_1.vertices, normal_1, np.zeros(3))
-                vertices_2_2d, _, _ = self.transform_3d_to_2d(mesh_2.vertices, normal_1, np.zeros(3), b1 = b1, b2 = b2)
+                vertices_1_2d, b1, b2 = geo3d.transform_3d_to_2d(mesh_1.vertices, normal_1, np.zeros(3))
+                vertices_2_2d, _, _ = geo3d.transform_3d_to_2d(mesh_2.vertices, normal_1, np.zeros(3), b1 = b1, b2 = b2)
 
                 vertices_1_2d, ring_1 = self.remove_midpoints_from_ring(vertices_1_2d, ring_1)
                 vertices_2_2d, ring_2 = self.remove_midpoints_from_ring(vertices_2_2d, ring_2)
@@ -588,98 +511,18 @@ class Geometry:
                     Exception('Connection {:d} is wrong! Check arguments!'.format(i))
             else:
                 Exception('Connected facets normals do not agree!!')
-
-        # print('Adjusting mesh.')
-        # self.adjust_facet_connections(connections)
-
-    def adjust_facet_connections(self, connections):
-        
-        n_connections = connections.shape[0]
-
-        check_array = np.zeros((2, n_connections), dtype = bool)
-        check = np.all(check_array)
-        
-        count = 1
-        while not check:
-            print('Adjusting periodic vertices, iteration = ', count)
-            for i in range(n_connections):
-
-                facet_1 = connections[i, 0] # facets
-                facet_2 = connections[i, 1]
-
-                abs_vertices_1 = self.facet_vertices[facet_1] # absolute coordinates of vertices
-                abs_vertices_2 = self.facet_vertices[facet_2]
-
-                # the indices of each vertex in the mesh data
-                vertices_indices_1 = np.all(abs_vertices_1.reshape(-1, 1, 3) == self.mesh.vertices, axis = 2)
-                vertices_indices_1 = np.argmax(vertices_indices_1, axis = 0)
-
-                vertices_indices_2 = np.all(abs_vertices_2.reshape(-1, 1, 3) == self.mesh.vertices, axis = 2)
-                vertices_indices_2 = np.argmax(vertices_indices_2, axis = 0)
-
-                # centroids of each facet
-                centroid_1 = self.facet_centroid[facet_1, :]
-                centroid_2 = self.facet_centroid[facet_2, :]
-
-                rel_vertices_1 = abs_vertices_1 - centroid_1
-                index_1 = np.lexsort(rel_vertices_1.T)
-                rel_vertices_1 = rel_vertices_1[index_1, :]
-                vertices_indices_1 = vertices_indices_1[index_1]
-
-                rel_vertices_2 = abs_vertices_2 - centroid_2
-                index_2 = np.lexsort(rel_vertices_2.T)
-                rel_vertices_2 = rel_vertices_2[index_2, :]
-                vertices_indices_2 = vertices_indices_2[index_2]
-
-                new_vertices = (rel_vertices_1 + rel_vertices_2)/2
-
-                var_1 = new_vertices - rel_vertices_1
-                var_2 = new_vertices - rel_vertices_2
-
-                check_array[0, i] = np.all(var_1 < tm.tol.merge)
-                check_array[1, i] = np.all(var_2 < tm.tol.merge)
-
-                for j in range(new_vertices.shape[0]):
-                    
-                    step = 0.3
-                    # adjust vertices
-                    self.mesh.vertices[vertices_indices_1[j], :] += step*var_1[j, :]
-                    self.mesh.vertices[vertices_indices_2[j], :] += step*var_2[j, :]
-                
-                self.mesh.vertices = np.around(self.mesh.vertices, decimals = 8)
-                
-                # update centroids and facet_vertices
-                faces    = [self.mesh.facets[ii]      for ii in range(self.n_of_facets)] # indexes of the faces that define each facet
-                vertices = [self.mesh.faces[ii]       for ii in faces                       ] # indexes of the vertices that ar contained by each facet
-                coords   = [self.mesh.vertices[ii, :] for ii in vertices                    ] # vertices coordinates contained by the boundary facet
-
-                self.facet_vertices = [np.unique(np.vstack((v[0, :, :], v[1, :, :])), axis = 0) for v in coords]
-                
-                # calculation of the centroid of each facet as the mean of vertex coordinates, weighted by how many faces they are connected to.
-                # this is equal to the mean of triangles centroids.
-                self.facet_centroid = np.array([self.get_facet_centroid(i) for i in range(self.n_of_facets)])
-
-            check = np.all(check_array)
-            count += 1
-
-            self.mesh.rezero() # brings mesh to origin back again to avoid negative coordinates
-            self.mesh.fix_normals()
-        
+    
     def save_reservoir_meshes(self, engine = 'earcut'):
 
         # faces of reservoirs
         self.res_faces = [self.mesh.facets[i] for i in self.res_facets]
 
         # meshes of the boundary facets to be used for sampling
-        self.res_meshes = self.mesh.submesh(faces_sequence = self.res_faces, append = False)
-        
-        # for some reason, trimesh creates extra triangles for 3 or 4 sided cylinders. This is to fix that:
-        for mesh in self.res_meshes:
-            if mesh.facets_boundary[0].shape[0] == 0:
-                if mesh.vertices.shape[0] - 1 == 3:
-                    mesh.faces = mesh.faces[:-1, :]
-                elif mesh.vertices.shape[0] - 1 == 4:
-                    mesh.faces = mesh.faces[:-2, :]
+        self.res_meshes = [Mesh(vertices = self.mesh.vertices, faces = self.mesh.faces[self.mesh.facets[i], :]) for i in self.res_facets]
+        for m in self.res_meshes:
+            unique_v = np.unique(m.faces)
+            unref_v  = ~np.isin(np.arange(self.mesh.n_of_vertices), unique_v)
+            m.remove_vertices(unref_v.nonzero()[0])
 
         # Surface area of the reservoirs' facets' meshes. Saving before adjusting so that it does not change the probability of entering with the offset.
         self.res_areas = np.array([mesh.area for mesh in self.res_meshes])
@@ -691,7 +534,7 @@ class Geometry:
             normal = mesh.facets_normal[0, :]   # plane normal
             origin = mesh.vertices[0, :]        # plane origin
 
-            plane_coord, b1, b2 = self.transform_3d_to_2d(mesh.vertices, normal, origin)
+            plane_coord, b1, b2 = geo3d.transform_3d_to_2d(mesh.vertices, normal, origin)
 
             ring_list = self.get_boundary_rings(mesh)
 
@@ -721,11 +564,11 @@ class Geometry:
 
                 faces = triangulate_earcut(v_2d, ind).reshape(-1, 3)
 
-            v_3d = self.transform_2d_to_3d(v_2d, b1, b2, origin)
+            v_3d = geo3d.transform_2d_to_3d(v_2d, b1, b2, origin)
 
             v_3d = self.adjust_reservoirs_to_offset(v_3d, h, r)
 
-            self.res_meshes[r] = tm.base.Trimesh(vertices = v_3d, faces = faces).process() # save mesh
+            self.res_meshes[r] = Mesh(vertices = v_3d, faces = faces) # save mesh
 
     def plot_mesh_bc(self):
         
@@ -745,43 +588,6 @@ class Geometry:
 
         plt.savefig(self.args.results_folder + 'BC_plot.png')
         plt.close(fig)
-
-    def transform_3d_to_2d(self, vertices, normal, origin, b1 = None, b2 = None):
-        '''Transform 3d vertices to the 2d projection on a plane
-        defined by normal and origin. The other two base vectors are chosen as
-        the projection of unit x (or unit y if the normal is already equal to
-        unit x) in the plane and the cross product between normal and b1.
-        
-        Returns the coordinates of the mesh vertices projected onto the plane and the base vectors.
-        '''
-
-        if b1 is None or b2 is None:
-            b = np.eye(3)
-            is_normal = 1 - np.sum(b*np.absolute(normal), axis = 1) < 1e-3
-
-            if np.any(is_normal):
-                b = b[~is_normal, :]
-
-            # if b1 is parallel to b1
-            b1 = b[0, :]
-            b1 = b1 - normal*np.sum(normal*b1)  # make b1 orthogonal to the normal
-            b1 = b1/np.sum(b1**2)**0.5          # normalise b1
-
-            b2 = np.cross(normal, b1)           # generate b2 = n x b1
-        
-        A = np.vstack((b1, b2, normal)).T   # get x and y bases coefficients
-        
-        plane_coord = np.zeros((0, 2))
-        for v in vertices:             # for each vertex
-
-            B = np.expand_dims((v - origin), 1)     # get relative coord
-            
-            plane_coord = np.vstack((plane_coord, np.linalg.solve(A, B).T[0, :2])) # store the plane coordinates
-        
-        return plane_coord, b1, b2
-
-    def transform_2d_to_3d(self, v, b1, b2, o):
-        return np.expand_dims(v[:, 0], 1)*b1 + np.expand_dims(v[:, 1], 1)*b2 + o 
 
     def remove_midpoints_from_ring(self, v, r, tol = 1e-3, close_ring = False):
         '''From a list of vertices (any dimension), removes midpoints
@@ -822,7 +628,7 @@ class Geometry:
         If fct is not informed, the first facet of the mesh is considered.'''
         
         # ordering the vertices for line string
-        bound_edges = mesh.facets_boundary[fct]
+        bound_edges = mesh.edges[mesh.facets_boundary[fct], :]
         boundary_vertices = np.unique(bound_edges)
 
         active = np.ones(bound_edges.shape[0], dtype = bool)
@@ -987,19 +793,19 @@ class Geometry:
 
     def adjust_reservoirs_to_offset(self, v, h, r):
         fct = self.res_facets[r]
-        normal = self.mesh.facets_normal[fct, :]
+        normal = self.facets_normal[fct, :]
 
         v -= normal*h # move the reservoir mesh to the offsett plane
 
-        _, d, close_face = tm.proximity.closest_point_naive(self.mesh, v)
+        close_face, d, _ = self.mesh.closest_face(v)
 
         d = np.round(d, decimals = 8)
 
-        too_close = np.logical_and(d < h, ~np.in1d(close_face, self.mesh.facets[fct]))
+        too_close = np.logical_and(d < h, ~np.in1d(close_face, self.facets[fct]))
         
         while np.any(too_close):
 
-            n_f = self.mesh.face_normals[close_face[too_close], :] # face normals
+            n_f = self.face_normals[close_face[too_close], :] # face normals
 
             dot_fr = np.sum(normal*n_f, axis = 1, keepdims = True)
 
@@ -1008,7 +814,7 @@ class Geometry:
 
             dot_lf = np.sum(n_l*n_f, axis = 1, keepdims = True)
             
-            o = self.mesh.vertices[self.mesh.faces[close_face[too_close], 0], :] # planes origins
+            o = self.vertices[self.faces[close_face[too_close], 0], :] # planes origins
 
             t_c = np.sum((o - v[too_close, :])*n_f, axis = 1, keepdims = True)/dot_lf
 
@@ -1016,11 +822,11 @@ class Geometry:
 
             v[too_close, :] -= (t_r*n_l)
 
-            _, d, close_face = tm.proximity.closest_point_naive(self.mesh, v)
+            close_face, d,  = self.mesh.closest_face(v)
 
             d = np.round(d, decimals = 8)
 
-            too_close = np.logical_and(d < h, ~np.in1d(close_face, self.mesh.facets[self.res_facets[r]]))
+            too_close = np.logical_and(d < h, ~np.in1d(close_face, self.facets[self.res_facets[r]]))
 
         return v
 
@@ -1043,7 +849,7 @@ class Geometry:
     def plot_facet_boundaries(self, mesh, fig = None, ax = None, facets = None, l_color = 'k', linestyle = '-', number_facets = False, m_color = 'r', markerstyle = 'o'):
 
         if ax is None or fig is None:
-            fig, ax = plt.subplots(nrows = 1, ncols = 1, dpi = 200, subplot_kw={'projection':'3d'})
+            fig, ax = plt.subplots(nrows = 1, ncols = 1, dpi = 200, subplot_kw={'projection':'3d'}, layout = 'constrained')
             ax.set_box_aspect( np.ptp(mesh.bounds, axis = 0) )
             ax.tick_params(labelsize = 5)
             ax.set_xlabel('x')
@@ -1055,9 +861,9 @@ class Geometry:
         
         for fct in facets:
             for e in mesh.facets_boundary[fct]:
-                ax.plot(mesh.vertices[e, 0], mesh.vertices[e, 1], mesh.vertices[e, 2], linestyle = linestyle, color = l_color)
+                ax.plot(mesh.vertices[mesh.edges[e, :], 0], mesh.vertices[mesh.edges[e, :], 1], mesh.vertices[mesh.edges[e, :], 2], linestyle = linestyle, color = l_color)
             if number_facets:
-                c = self.get_facet_centroid(int(fct))
+                c = self.facet_centroid[int(fct), :]
                 ax.scatter(c[0], c[1], c[2], marker = markerstyle, c = m_color)
                 ax.text(c[0], c[1], c[2], s = fct)
         
@@ -1070,8 +876,8 @@ class Geometry:
         
         if isinstance(index_faces, (int, float)): # if only one index is passed
             face = int(index_faces)
-            for j in range(len(self.mesh.facets)):
-                facet = self.mesh.facets[j]
+            for j in range(len(self.facets)):
+                facet = self.facets[j]
                 if face in facet:
                     return int(j)
         elif isinstance(index_faces, (tuple, list, np.ndarray)):
@@ -1079,8 +885,8 @@ class Geometry:
             index_facets = np.zeros(index_faces.shape)
             for i in range(index_faces.shape[0]):
                 face = index_faces[i]
-                for j in range(len(self.mesh.facets)):
-                    facet = self.mesh.facets[j]
+                for j in range(len(self.facets)):
+                    facet = self.facets[j]
                     if face in facet:
                         index_facets[i] = j
 
@@ -1101,332 +907,9 @@ class Geometry:
 
         return x_s
 
-    def get_plane_k(self):
-        # finds and stores the constant in the plane equation:
-        # n . x + k = 0
-
-        n = -self.mesh.facets_normal # inward normals
-
-        # get the first vertex of each face as reference to calculate plane constant
-        ref_vert = np.zeros(n.shape)
-
-        for i in range(self.n_of_facets):
-            face = self.mesh.facets[i][0]
-            ref_vert[i, :] = self.mesh.vertices[self.mesh.faces[face, 0], :]
-
-        self.facet_k = -np.sum(n*ref_vert, axis = 1) # k for each facet
-
-    def contains_single(self, x):
-        v = tm.creation.icosphere(subdivisions = 0).vertices # 12 rays
-        
-        _, t, _ = self.find_boundary_naive(np.ones(v.shape)*x, direction = v)
-
-        is_in = ~np.any(t == np.inf) and np.all(t > 0)
-
-        return is_in
-    
-    def contains_naive(self, x):
-        if len(x.shape) == 1:
-            x = x.reshape(1, 3)
-
-        contains = np.array(list(map(self.contains_single, x)))
-        contains = np.zeros(x.shape[0], dtype = bool)
-        for i, p in enumerate(x):
-            contains[i] = self.contains_single(p)
-        
-        return contains
-
-    def find_boundary_naive(self, x, direction = None):
-        '''Finds the boundary in relation to a point. If v is informed, the
-           the boundary is searched along the path in v direction. If not,
-           it looks for the closest point to the mesh. This may be a better
-           alternative than the Trimesh function if the mesh does not have
-           many faces.
-           
-           Arguments:
-           x = origin points
-           directions (optional) = directions to evaluate the mesh.
-           
-           Returns:
-           final_xc = position of the collision
-           final_tc = distance of the collision. If direction is given, d = t/||direction||. Else, d = t.
-           final_fc = the facet where the particle hits.
-           '''
-
-        # if direction is None:
-        #     res = self.pool.starmap(self.find_boundary_single, x)
-        #     xc, tc, fc = zip(*res)
-        # else:
-        #     args = ((x[i, :], direction[i, :]) for i in range(x.shape[0]))
-        #     xc, tc, fc = zip(*list(self.pool.starmap(self.find_boundary_single, args)))
-        
-        # xc = np.array(xc)
-        # tc = np.array(tc)
-        # fc = np.array(fc).astype(int)
-
-        # return xc, tc, fc
-
-        stride = int(1e5)
-        step   = 0
-
-        original_x = np.copy(x)
-        if direction is not None:
-            original_v = np.copy(direction)
-        
-        final_xc = np.zeros(x.shape)
-        final_tc = np.zeros(x.shape[0])
-        final_fc = np.zeros(x.shape[0])
-
-        while step*stride < original_x.shape[0]:
-            i_start = step*stride
-            i_end   = min((step+1)*stride, original_x.shape[0])
-
-            x = original_x[i_start:i_end, :]
-            if direction is not None:
-                direction = original_v[i_start:i_end, :]
-
-            n = -self.mesh.facets_normal # normals - (F, 3)
-            k = self.facet_k             # (F,)
-
-            if direction is None:
-                t = np.sum(x.reshape(-1, 1, 3)*n, axis = 2)+k
-            else:
-                v = direction
-                with np.errstate(divide = 'ignore', invalid = 'ignore', over = 'ignore'):
-                    t = -(np.sum(x.reshape(-1, 1, 3)*n, axis = 2)+k)/np.sum(v.reshape(-1, 1, 3)*n, axis = 2)
-            
-            t_valid = t >= 0
-
-            t = np.where(t_valid, t, np.inf) # update t - (N, F)
-            
-            xc = np.ones(x.shape)*np.nan    # (N, 3)
-            tc = np.ones(x.shape[0])*np.inf # (N,)
-            fc = -np.ones(x.shape[0], dtype = int) # (N,)
-
-            active = fc < 0 # generate a follow up boolean mask - (N,)
-            
-            out = np.all(~t_valid, axis = 1) # particles that are out would result in an infinite loop
-            active[out] = False              # those that are out are not active
-
-            while np.any(active):
-                gc.collect()
-                
-                t_min = np.amin(t[active, :], axis = 1, keepdims = True) # get minimum t
-
-                cand_f = np.argmax(t[active, :] == t_min, axis = 1)      # which facet
-
-                if direction is None:
-                    v = self.mesh.facets_normal[cand_f, :]
-                    cand_xc = x[active, :]+t_min*v # candidate collision positions based on t_min
-                else:
-                    cand_xc = x[active, :]+t_min*v[active, :] # candidate collision positions based on t_min
-
-                for f, faces in enumerate(self.mesh.facets): # for each facet
-                    f_particles = cand_f == f       # particles that may be close to that facet
-                    if np.any(f_particles):
-                        # faces = self.mesh.facets[f] # indexes of faces part of that facet
-                        n_fp = f_particles.sum()
-
-                        in_facet = np.zeros(n_fp, dtype = bool)
-                        
-                        for face in faces: # for each face in the facet
-                            
-                            tri = self.mesh.vertices[self.mesh.faces[face], :] # vertces of the face
-                            tri = np.ones((n_fp, 3, 3))*tri # reshaping for barycentric
-                            
-                            # trying to use 'cross' because 'cramer' was causing infinite loops due to a division by zero
-                            bar = tm.triangles.points_to_barycentric(tri, cand_xc[f_particles, :], method = 'cramer')
-
-                            # check whether the points are between the vertices of the face
-                            tol = 0
-                            valid = np.all(np.logical_and(bar >= -tol, bar <= 1+tol), axis = 1)
-                            
-                            in_facet[valid] = True # those valid are in facet
-
-                        in_indices = np.where(f_particles)[0][in_facet] # indices of the particles analysed for that facet that are really hitting
-                        
-                        active_indices = np.arange(x.shape[0])[active]  # active indices in general population
-
-                        if direction is None:
-                            better_indices = t_min[in_indices, 0] < tc[active_indices[in_indices]]
-                            confirm_indices = active_indices[in_indices[better_indices]]
-                        else:
-                            confirm_indices = active_indices[in_indices] # those to be confirmed
-                        
-                        if len(confirm_indices) > 0:
-                            # xc[confirm_indices, :] = np.copy(cand_xc[in_indices, :])
-                            tc[confirm_indices] = np.copy(t_min[in_indices, 0])
-                            fc[confirm_indices] = f
-                        
-                t_valid[active, cand_f] = False
-
-                active = fc < 0
-
-                t_valid[~active, :] = False
-                t = np.where(t_valid, t, np.inf) # update t - (N, F)
-
-                out = np.all(~t_valid, axis = 1) # particles that are out would result in an infinite loop
-                out = np.logical_or(out, np.all(np.absolute(t) == np.inf, axis = 1))
-                active[out] = False              # those that are out are not active
-
-            if direction is None:
-                v = self.mesh.facets_normal[fc, :]
-            
-            with np.errstate(divide = 'ignore', invalid = 'ignore', over = 'ignore'):
-                xc = x+tc.reshape(-1, 1)*v
-
-            if direction is None:
-                # if the code is looking for the nearest point the edges need to be checked.
-
-                v1 = self.mesh.vertices[self.mesh.edges[:, 0], :]       # reference vertex (E, 3)
-                e  = self.mesh.vertices[self.mesh.edges[:, 1], :] - v1  # edge vector      (E, 3)
-
-                x_e  = np.sum( x*np.expand_dims(e, 1), axis = -1).T #  x . e - (N, E)
-                v1_e = np.sum(v1*e                   , axis = -1)   # v1 . e - (E, )
-                e_e  = np.sum( e*e                   , axis = -1).T #  e . e - (E, )
-
-                t_e = (x_e - v1_e)/(e_e) # (N, E)
-
-                t_e = np.where(t_e >= 0, t_e, np.inf) # removing t < 0
-                t_e = np.where(t_e <= 1, t_e, np.inf) # removing t > 1
-
-                #(E, N, 3)            (E, N, 1)            (E, 1, 3)           (E, 1, 3)
-                with np.errstate(divide = 'ignore', invalid = 'ignore', over = 'ignore'):
-                    # (E, N, 3)            (E, N, 1)            (E, 1, 3)           (E, 1, 3)
-                    xc_cand = np.expand_dims(t_e.T, 2)*np.expand_dims(e, 1)+np.expand_dims(v1, 1) # calculate candidate positions
-
-                dist = np.linalg.norm(x-xc_cand, axis = -1).T # get distance from collision (N, E)
-
-                d_min = np.nanmin(dist, axis = 1, keepdims = True) # get the closest
-
-                ec = np.argmax(dist == d_min, axis = 1) # which edge
-
-                t_e = t_e[np.arange(ec.shape[0]), ec] # get only the t parameter for the closest points
-
-                fc_cand = -np.ones(ec.shape[0])
-                for i, ec_i in enumerate(ec):
-                    verts = self.mesh.edges[ec_i]
-                    for j, faces in enumerate(self.mesh.facets):
-                        fct_v = np.unique(self.mesh.faces[faces, :]) # get unique vertices
-                        if np.all(np.in1d(verts, fct_v)): # if both vertices of the edge are in the facet, they are part of the facet
-                            fc_cand[i] = j
-                            break
-                
-                edge_is_closer = d_min.squeeze() < tc # which particles are actually closer to an edge than to a face
-                
-                xc[edge_is_closer, :] = v1[ec[edge_is_closer], :]+t_e[edge_is_closer].reshape(-1, 1)*e[ec[edge_is_closer], :]
-                tc[edge_is_closer] = d_min[edge_is_closer, 0] # save tc (distance from collision point)
-                fc[edge_is_closer] = fc_cand[edge_is_closer]
-
-            final_xc[i_start:i_end, :] = np.copy(xc)
-            final_tc[i_start:i_end]    = np.copy(tc)
-            final_fc[i_start:i_end]    = np.copy(fc)
-
-            step += 1
-        
-        final_fc = final_fc.astype(int)
-
-        return final_xc, final_tc, final_fc
-
-    def find_boundary_single(self, x, direction = None):
-        '''Finds the boundary in relation to a single point. If v is informed, the
-           the boundary is searched along the path in v direction. If not,
-           it looks for the closest point to the mesh. This may be a better
-           alternative for small meshes with not many faces than the Trimesh.
-           
-           Obs: THIS WORKS ONLY FOR POINTS INSIDE THE MESH (for now).'''
-
-        n = -self.mesh.facets_normal # normals - (F, 3)
-        k = self.facet_k             # (F,)
-
-        if direction is None:
-            t = np.sum(x*n, axis = 1)+k
-        else:
-            v = direction
-            with np.errstate(divide = 'ignore', invalid = 'ignore', over = 'ignore'):
-                t = -(np.sum(x*n, axis = 1)+k)/np.sum(v*n, axis = 1)
-        
-        t_valid = t >= 0
-
-        if np.all(~t_valid): # particles that are out would result in an infinite loop
-            return np.ones(3)*np.nan, np.nan, -1
-        
-        t = np.where(t_valid, t, np.inf) # update t - (F,)
-        
-        order = np.argsort(t) # index of order
-
-        in_facet = False
-
-        for fc in order: # for each facet, in order
-            tc = t[fc] # get minimum t
-
-            if direction is None:
-                v = -n[fc, :]
-
-            xc = x + tc*v # candidate collision positions based on t_min    
-
-            for face in self.mesh.facets[fc]: # for each face in the facet
-                    
-                tri = self.mesh.vertices[self.mesh.faces[face], :] # vertices of the face
-                
-                # trying to use 'cross' because 'cramer' was causing infinite loops due to a division by zero
-                bar = tm.triangles.points_to_barycentric(np.expand_dims(tri, 0), np.expand_dims(xc, 0), method = 'cramer')
-
-                # check whether the points are between the vertices of the face
-                tol = 0
-                in_facet = np.all(np.logical_and(bar >= -tol, bar <= 1+tol), axis = 1)
-
-                if in_facet:
-                    if direction is None:
-                        break # leave the loop with current xc, tc and fc
-                    else:
-                        # return current xc, tc and fc
-                        return xc, tc, fc
-            
-            if in_facet:
-                break
-
-        if direction is None:
-            # if the code is looking for the nearest point the edges need to be checked.
-
-            v1 = self.mesh.vertices[self.mesh.edges[:, 0], :]       # reference vertex (E, 3)
-            e  = self.mesh.vertices[self.mesh.edges[:, 1], :] - v1  # edge vector      (E, 3)
-
-            x_e  = np.sum( x*e, axis = 1, keepdims = True) #  x . e - (E,1)
-            v1_e = np.sum(v1*e, axis = 1, keepdims = True) # v1 . e - (E,1)
-            e_e  = np.sum( e*e, axis = 1, keepdims = True) #  e . e - (E,1)
-
-            t_e = (x_e - v1_e)/(e_e) # (E,1)
-
-            t_e = np.where(t_e >= 0, t_e, np.inf) # removing t < 0
-            t_e = np.where(t_e <= 1, t_e, np.inf) # removing t > 1
-
-            with np.errstate(divide = 'ignore', invalid = 'ignore', over = 'ignore'):
-                xc_cand = t_e*e + v1 # calculate candidate positions - (E, 3)
-
-            dist = np.linalg.norm(x-xc_cand, axis = 1) # get distance from collision (E,)
-
-            d_min = np.nanmin(dist) # get the closest
-
-            if d_min >= tc:
-                return xc, tc, fc
-            else:
-                ec = np.argmax(dist == d_min) # which edge
-
-                t_e = t_e[ec] # get only the t parameter for the closest points
-
-                verts = self.mesh.edges[ec]
-                for j, faces in enumerate(self.mesh.facets):
-                    fct_v = np.unique(self.mesh.faces[faces, :]) # get unique vertices
-                    if np.all(np.in1d(verts, fct_v)): # if both vertices of the edge are in the facet, they are part of the facet
-                        fc = j
-                        break
-            
-                return xc, tc, fc
-
     def get_subvol_connections(self):
         print('Getting subvol connections...')
-        
+
         o = (self.subvol_center+np.expand_dims(self.subvol_center, 1))/2 # interface origins/midpoints (SV, SV, 3)
         n = self.subvol_center-np.expand_dims(self.subvol_center, 1)     # interface normals/directions (SV, SV, 3)
         c_d = np.linalg.norm(n, axis = -1)                               # distances (SV, SV)
@@ -1439,14 +922,12 @@ class Geometry:
         sv_con = sv_con[np.lexsort((sv_con[:,1], sv_con[:,0]))]
         sv_con = np.unique(sv_con, axis = 0)
         
-        # Obs: for some reason mesh.contains(points) fails too often, so I'm using signed_distance.
-        contains = tm.proximity.signed_distance(self.mesh, o[sv_con[:, 0], sv_con[:, 1], :]) > 0 
-        # contains = self.contains_naive(o[sv_con[:, 0], sv_con[:, 1], :])
+        contains = self.mesh.contains(o[sv_con[:, 0], sv_con[:, 1], :])
 
         sv_con = sv_con[contains, :]
         x_col = self.subvol_center[sv_con[:, 0], :]
         v_col = n[sv_con[:, 0], sv_con[:, 1], :]
-        _, d, _ = self.find_boundary_naive(x = x_col, direction = v_col)
+        _, d, _ = self.mesh.find_boundary(x_col, v_col)
 
         sv_con = sv_con[d>1, :]
 
@@ -1495,7 +976,7 @@ class Geometry:
         u_sv = np.unique(sv_con) # keep only the ones that are connected
 
         self.subvol_center = self.subvol_center[u_sv, :]
-        
+
         new_sv_con = np.zeros(sv_con.shape, dtype = int)
         for i, sv in enumerate(u_sv):
             new_sv_con = np.where(sv_con == sv, i, new_sv_con)
@@ -1525,28 +1006,6 @@ class Geometry:
         plt.savefig(self.args.results_folder + 'subvol_connections.png')
         plt.close(fig)
 
-    def get_facet_centroid(self, f):
-        '''Calculates the centroid of facet f by the sum
-           of the triangles centroids weighted by their areas.'''
-
-        if type(f) == int:
-            c = np.zeros(3)
-            for tri in self.mesh.facets[f]:
-                v = self.mesh.vertices[self.mesh.faces[tri], :]
-                A = np.linalg.norm(np.cross(v[1, :]-v[0, :], v[2, :]-v[0, :])/2)
-                c += v.mean(axis = 0)*A
-        elif type(f) in [np.ndarray, list, tuple]:
-            c = np.zeros((f.shape[0], 3))
-            for i, i_f in enumerate(f):
-                for tri in self.mesh.facets[i_f]:
-                    v = self.mesh.vertices[self.mesh.faces[tri], :]
-                    A = np.linalg.norm(np.cross(v[1, :]-v[0, :], v[2, :]-v[0, :])/2)
-                    c[i, :] += v.mean(axis = 0)*A
-            
-        c /= self.mesh.facets_area[f]
-
-        return c
-
     def get_path(self):
         if len(self.args.path_points) > 0:
             if self.args.path_points[0] == 'relative':
@@ -1565,7 +1024,6 @@ class Geometry:
     def snap_path(self, points):
 
         sv_points = np.argmax(self.subvol_classifier.predict(self.scale_positions(points)), axis = 1)
-
         
         if np.unique(sv_points).shape[0] == 1:
             raise Warning('Invalid path points. Path conductivity will be turned off.')

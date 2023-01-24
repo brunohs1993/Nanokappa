@@ -1,0 +1,47 @@
+# facecolor : [29,34,38]/255)*2
+# figcolor  : [29,34,38]/255
+# linecolor : 'lightsteelblue'
+# gridcolor : 'slategrey'
+# textcolor : 'lightsteelblue'
+
+figure.facecolor : [29,34,38]/255
+
+axes.facecolor : [29,34,38]/255*2
+axes.edgecolor : lightsteelblue
+
+xtick.color : lightsteelblue
+ytick.color : lightsteelblue
+ztick.color : lightsteelblue
+
+
+
+
+
+self.profile_plot_style = dict(linestyle   = ':',
+                                color       = linecolor,
+                                marker = 'o',
+                                markersize  = 5,
+                                capsize = 5 )
+else:
+    self.profile_plot_style = dict(linestyle   = 'None',
+                                    color       = linecolor   ,
+                                    marker = 'o'   ,
+                                    markersize  = 5    ,
+                                    capsize = 5)
+
+self.convergence_plot_style = dict(linestyle = '-')
+
+self.grid_style = dict(ls    = '--'       ,
+                        lw    = 1          ,
+                        color = gridcolor)
+
+self.ax_style = dict(figcolor = figcolor,
+                        facecolor = facecolor,
+                        axiscolor = linecolor,
+                        textcolor = textcolor)
+
+self.mean_plot_style = dict(linestyle = '--',
+                            color     = linecolor )
+
+self.stdev_plot_style = dict(color     = 'r' ,
+                                linestyle = '--')

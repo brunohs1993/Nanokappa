@@ -60,17 +60,8 @@ geo = Geometry(args)
 # opening file
 if len(args.mat_names) == 1:
     phonons = Phonon(args, 0)
-    if 0 in args.pickled_mat:
-        phonons = phonons.open_pickled_material()
-    else:
-        phonons.load_properties()
 else:
     phonons = [Phonon(args, i) for i in range(len(args.mat_names))]
-    for i in range(len(phonons)):
-        if i in args.pickled_mat:
-            phonons[i] = phonons[i].open_pickled_material()
-        else:
-            phonons[i].load_properties()
 
 # THIS IMPLEMENTATION OF PHONONS AS A LIST NEEDS TO BE INCLUDED IN THE POPULATION CLASS.
 # FOR NOW ONLY ONE MATERIAL WORKS
