@@ -110,17 +110,7 @@ class Geometry:
 
         self.mesh.vertices *= self.scale
 
-        # scale_matrix = np.identity(4)*np.append(self.scale, 1)
-
-        # self.mesh.apply_transform(scale_matrix) # scale mesh
-
         if self.rotation is not None or self.rot_order is not None:
-            # rotation_matrix       = np.zeros( (4, 4) ) # initialising transformation matrix
-            # rotation_matrix[3, 3] = 1
-
-            # rotation_matrix[0:3, 0:3] = rot.from_euler(self.rot_order, self.rotation, degrees = True).as_matrix() # building rotation terms
-
-            # self.mesh.apply_transform(rotation_matrix) # rotate mesh
 
             R = rot.from_euler(self.rot_order, self.rotation, degrees = True)
             self.mesh.vertices = R.apply(self.mesh.vertices)
@@ -234,7 +224,7 @@ class Geometry:
             self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
                                                       xc = self.scale_positions(self.subvol_center))
 
-            self.subvol_volume = self.calculate_subvol_volume(algorithm = 'mc', tol = 1e-4, verbose = True)
+            self.subvol_volume = self.calculate_subvol_volume(algorithm = 'mc', tol = 1e-4, verbose = False)
             # try: # try slicing the mesh first
             #     self.subvol_volume = self.calculate_subvol_volume(verbose = False)
             # except: # if it gives an error, try with quasi monte carlo / sobol sampling

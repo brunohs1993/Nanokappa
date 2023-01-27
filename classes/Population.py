@@ -348,6 +348,7 @@ class Population(Constants):
         self.bound_thickness = phonon.number_of_active_modes/(self.particle_density*geometry.facets_area[self.res_facet])
 
         self.enter_prob = self.enter_probability(geometry, phonon)
+        self.res_counter = np.random.rand(*self.enter_prob.shape)
         self.N_leaving  = np.sum(self.enter_prob, axis = (1, 2)).round().astype(int)
 
         self.res_energy_balance   = np.zeros(self.n_of_reservoirs)
@@ -356,7 +357,58 @@ class Population(Constants):
 
     def fill_reservoirs(self, geometry, phonon, n_leaving = None):
 
-        if self.res_gen == 'fixed_rate':
+        if self.res_gen == 'constant':
+            fixed_np      = np.floor(self.enter_prob).astype(int) # number of particles that will enter every iteration
+            
+            self.res_counter += self.enter_prob - fixed_np
+
+            in_modes_mask = (self.res_counter >= 1).astype(int) # shape = (R, Q, J)
+
+            self.res_counter -= in_modes_mask
+
+            in_modes_np = fixed_np + in_modes_mask
+
+            # calculate how many particles entered each facet
+            N_p_facet = in_modes_np.sum(axis = (1, 2))    # shape = (R,)
+
+            # initialise new arrays
+            self.res_positions = np.zeros((0, 3))
+            self.res_modes     = np.zeros((0, 2), dtype = int)
+            self.res_facet_id  = np.zeros(0, dtype = int)
+            self.res_dt_in     = np.zeros(0, dtype = int)
+
+            for i in range(self.n_of_reservoirs):                         # for each reservoir
+                n      = N_p_facet[i]                                     # the number of particles on that facet
+                if n > 0:
+                    facet  = self.res_facet[i]                                # get its facet index
+                    mesh   = geometry.res_meshes[i]                           # select boundary
+                    
+                    # adding fixed particles
+                    c = in_modes_np[i, :, :].max()  # gets the maximum number of particles of a single mode to be generated
+                    while c > 0:
+                        
+                        c_modes = np.vstack(np.where(in_modes_np[i, :, :] >= c)).T
+
+                        if c == 1:
+                            c_dt_in = self.dt*(1-(self.res_counter[i, c_modes[:, 0], c_modes[:, 1]]/self.enter_prob[i, c_modes[:, 0], c_modes[:, 1]]))
+                        else:
+                            r = np.random.rand(c_modes.shape[0])
+                            c_dt_in = self.dt*(1-(c-1+r)/self.enter_prob[i, c_modes[:, 0], c_modes[:, 1]])
+                        
+                        c -= 1
+                        
+                        self.res_dt_in = np.concatenate((self.res_dt_in, c_dt_in)) # add to the time drifted inside the domain
+                        self.res_modes = np.vstack((self.res_modes, c_modes.astype(int))) # add to the modes
+
+                    self.res_facet_id  = np.concatenate((self.res_facet_id, (np.ones(n)*facet).astype(int))) # add to the reservoir id
+
+                    # generate positions on boundary
+                    # new_positions, _ = tm.sample.sample_surface(mesh, n)
+                    new_positions = mesh.sample_surface(n)
+
+                    self.res_positions = np.vstack((self.res_positions , new_positions ))                  # add to the positions
+
+        elif self.res_gen == 'fixed_rate':
             # generate random numbers
             dice = np.random.rand(self.n_of_reservoirs, phonon.number_of_qpoints, phonon.number_of_branches)
 
@@ -925,11 +977,28 @@ class Population(Constants):
             self.creation_roulette = np.zeros((self.rough_facets.shape[0], phonon.number_of_qpoints*phonon.number_of_branches))
 
             C_total = np.where(v_dot_n > 0, v_dot_n, 0)  # total rate of creation    (F_u, Q, J)
-            # D_total = np.where(v_dot_n < 0, v_dot_n, 0)  # total rate of destruction (F_u, Q, J)
+            D_total = np.where(v_dot_n < 0, -v_dot_n, 0)  # total rate of destruction (F_u, Q, J)
 
             self.creation_rate = C_total*(1-self.specularity)#/C_total.sum(axis = (1, 2), keepdims = True)
 
             self.creation_rate = np.where(np.isnan(self.creation_rate), 0, self.creation_rate)
+
+            i_f = np.argmax(self.rough_facets == self.correspondent_modes[:, 0].reshape(-1, 1), axis = 1)
+            in_q  = self.correspondent_modes[:, 1]
+            in_j  = self.correspondent_modes[:, 2]
+            out_q = self.correspondent_modes[:, 3]
+            out_j = self.correspondent_modes[:, 4]
+
+            self.creation_rate[i_f, out_q, out_j] = D_total[i_f, in_q, in_j]*(1 - self.specularity[i_f, in_q, in_j])
+
+            # for i in self.correspondent_modes:
+            #     i_f = np.argmax(self.rough_facets == i[0])
+            #     in_q  = i[1]
+            #     in_j  = i[2]
+            #     out_q = i[3]
+            #     out_j = i[4]
+
+            #     self.creation_rate[i_f, out_q, out_j] = D_total[i_f, in_q, in_j]*(1 - self.specularity[i_f, in_q, in_j])
 
             # self.destruction_rate = D_total#/D_total.sum(axis = (1, 2), keepdims = True)
             for i_f, _ in enumerate(self.rough_facets):
@@ -945,7 +1014,7 @@ class Population(Constants):
         n_p = in_modes.shape[0]
         r = np.random.rand(n_p)
 
-        indexes_spec = np.logical_and(true_spec, r < p)
+        indexes_spec = np.logical_and(true_spec, r <= p)
         indexes_diff = ~indexes_spec
 
         out_modes = np.zeros(in_modes.shape, dtype = int)
@@ -954,6 +1023,7 @@ class Population(Constants):
 
         if np.any(indexes_spec):
             a = np.hstack((np.expand_dims(col_fac[indexes_spec], 1), in_modes[indexes_spec, :]))
+
             out_modes[indexes_spec, :] = self.specular_function(a)
 
         if np.any(indexes_diff):
@@ -1077,14 +1147,12 @@ class Population(Constants):
             s_out = v_dot_n > 0                      # available modes going out of the facet
 
             active_k = np.any(s_in, axis = 1) # bool, (Q,) - wavevectors that can arrive to the facet
-            # print(i_f, active_k.sum())
 
             if restrict_fbz:
                 k_try   = k[active_k, :] - 2*n[i_f, :]*np.sum(k[active_k, :]*n[i_f, :], axis = 1, keepdims = True) # reflect them specularly
                 _, disp = phonon.find_min_k(k_try, return_disp = True)                                             # check if thay stay in the FBZ
 
                 active_k[active_k] = np.all(disp == 0, axis = 1) # normal processes can be specular
-                # print(i_f, active_k.sum())
             
             if restrict_k:
                 # recalculating reflections of the ones that remained active (redundant but safe)
@@ -1099,7 +1167,6 @@ class Population(Constants):
                 in_tol = np.logical_and(np.any(s_out[q_near, :], axis = 1), np.all(k_dist < tol, axis = 1))
                 
                 active_k[active_k] = in_tol # update the active to only those within tolerance
-                # print(i_f, active_k.sum())
             
             if restrict_v:
                 # recalculating reflections of the ones that remained active (redundant but safe)
@@ -1117,7 +1184,8 @@ class Population(Constants):
 
                 dot = np.sum(v_try*v_out, axis = 3) # (J, Q, J)
 
-                v_angle = np.arccos( np.around(dot/(v_try_norm*v_out_norm), decimals = 3))
+                # v_angle = np.arccos( np.around(dot/(v_try_norm*v_out_norm), decimals = 3))
+                v_angle = np.arccos(np.around(dot/(v_try_norm*v_out_norm), decimals = 3))
 
                 same_norm  = np.absolute((v_try_norm - v_out_norm)/v_try_norm) < 1e-10
                 same_angle = v_angle < 1e-10
@@ -1205,7 +1273,15 @@ class Population(Constants):
 
             n_ts = i_q_in.shape[0]
 
-            equal = np.logical_and(spec_q_in == spec_q_out, spec_j_in == spec_j_out)
+            # fig, ax = plt.subplots(nrows = 1, ncols = 3, sharex='all', sharey='all')
+            
+            # for i in range(3):
+            #     data_in  = phonon.group_vel[spec_q_in , spec_j_in, i]
+            #     data_out = phonon.group_vel[spec_q_out, spec_j_out, i]
+            #     ax[i].hist([data_out, data_in], bins = 100, stacked = False, histtype = 'step')
+            
+            # plt.show()
+            # plt.close(fig)
 
             fig, ax = plt.subplots(nrows = 2, ncols = 3, figsize = (15, 10), dpi = 100, sharex = 'row', sharey = 'row')
             
@@ -1399,7 +1475,7 @@ class Population(Constants):
 
         # while there are any particles with the timestep not completely calculated
         while np.any(calculated_ts < 1):
-            
+
             # I. Deleting particles entering reservoirs
 
             # identifying particles hitting rough facets
@@ -1408,6 +1484,8 @@ class Population(Constants):
             indexes_del = np.logical_and(indexes_del, 
                                          (1-calculated_ts) > new_n_timesteps)
             indexes_del = np.logical_or(indexes_del, indexes_del_extra)
+
+            # print('del', indexes_del.sum())
 
             if np.any(indexes_del):
                 rand_res_index = np.random.rand(0, self.n_of_reservoirs, indexes_del_extra.sum()) # indexes_del_extra will be regenerated randomly on the reservoirs
@@ -1449,7 +1527,7 @@ class Population(Constants):
             indexes_per = np.logical_and(indexes_per               ,
                                          (1-calculated_ts) > new_n_timesteps)
             indexes_per = np.logical_and(indexes_per, ~indexes_del_extra)
-            
+
             if np.any(indexes_per):
 
                 # enforcing periodic boundary condition
@@ -1472,9 +1550,16 @@ class Population(Constants):
             # identifying particles hitting rough facets
             indexes_ref = np.logical_and(calculated_ts       <   1 ,
                                          self.collision_cond == 'R')
+            # print('ref', indexes_ref.sum())
             indexes_ref = np.logical_and(indexes_ref               ,
                                          (1-calculated_ts) > new_n_timesteps)
+            # print('ref', indexes_ref.sum())
             indexes_ref = np.logical_and(indexes_ref, ~indexes_del_extra)
+
+            # print('ref', indexes_ref.sum())
+
+            # if indexes_ref.sum() == 0:
+            #     print((calculated_ts < 1).sum(), calculated_ts.min(), calculated_ts.max())
             
             if np.any(indexes_ref):
                 (self.modes[indexes_ref, :]              ,
@@ -1558,6 +1643,8 @@ class Population(Constants):
                 self.fill_reservoirs(geometry, phonon)          # refill reservoirs
             elif self.res_gen == 'one_to_one':
                 self.fill_reservoirs(geometry, phonon, n_leaving = self.N_leaving)          # refill reservoirs
+            elif self.res_gen == 'constant':
+                self.fill_reservoirs(geometry, phonon)          # refill reservoirs
             self.add_reservoir_particles(geometry)  # add reservoir particles that come in the domain
 
         self.boundary_scattering(geometry, phonon)      # perform boundary scattering/periodicity and particle deletion
@@ -1651,11 +1738,7 @@ class Population(Constants):
     def init_plot_real_time(self, geometry, phonon):
         '''Initialises the real time plot to be updated for each timestep.'''
 
-        n_dt_to_plot = np.floor( np.log10( self.args.iterations[0] ) ) - 1    # number of timesteps to save new animation frame
-        n_dt_to_plot = int(10**n_dt_to_plot)
-        n_dt_to_plot = max([1, n_dt_to_plot])
-
-        self.n_dt_to_plot = 100 # n_dt_to_plot
+        self.n_dt_to_plot = 100
 
         if self.rt_plot[0] in ['T', 'temperature']:
             colors = self.temperatures
@@ -1677,7 +1760,7 @@ class Population(Constants):
             vmax = phonon.calculate_energy(T.max()+1, phonon.omega, reference = True).max()
             label = r'Energy density deviation $\hbar \omega \delta n$ [eV/angstrom$^3$]'
             format = '{:.2e}'
-        elif self.rt_plot[0] in ['omega', 'angular_frequency']:
+        elif self.rt_plot[0] in ['omega', 'angular_frequency', 'frequency']:
             colors = self.omega
             vmin = phonon.omega[phonon.omega>0].min()
             vmax = phonon.omega.max()
@@ -1802,7 +1885,7 @@ class Population(Constants):
             colors = self.temperatures
         elif property_plot in ['e', 'energy']:
             colors = self.energies
-        elif property_plot in ['omega', 'angular_frequency']:
+        elif property_plot in ['omega', 'angular_frequency', 'frequency']:
             colors = self.omega
         elif property_plot in ['n', 'occupation']:
             colors = self.occupation

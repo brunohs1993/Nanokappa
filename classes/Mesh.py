@@ -528,10 +528,10 @@ class Mesh:
 
         self.remove_vertices(unref, update)
     
-    def plot_triangles(self, fig = None, ax = None, l_color = 'k', linestyle = '-', numbers = False, m_color = 'r', markerstyle = 'o'):
+    def plot_triangles(self, fig = None, ax = None, l_color = 'k', linestyle = '-', numbers = False, m_color = 'r', markerstyle = 'o', dpi = 200):
         
         if ax is None or fig is None:
-            fig, ax = plt.subplots(nrows = 1, ncols = 1, dpi = 200, subplot_kw={'projection':'3d'})
+            fig, ax = plt.subplots(nrows = 1, ncols = 1, dpi = dpi, subplot_kw={'projection':'3d'})
             ax.set_box_aspect( np.ptp(self.bounds, axis = 0) )
         
         for e in self.edges:
@@ -544,10 +544,10 @@ class Mesh:
        
         return fig, ax
     
-    def plot_facet_boundaries(self, fig = None, ax = None, facets = None, l_color = 'k', linestyle = '-', number_facets = False, m_color = 'r', markerstyle = 'o'):
+    def plot_facet_boundaries(self, fig = None, ax = None, facets = None, l_color = 'k', linestyle = '-', number_facets = False, m_color = 'r', markerstyle = 'o', dpi = 200):
 
         if ax is None or fig is None:
-            fig, ax = plt.subplots(nrows = 1, ncols = 1, dpi = 200, subplot_kw={'projection':'3d'}, layout = 'constrained')
+            fig, ax = plt.subplots(nrows = 1, ncols = 1, dpi = dpi, subplot_kw={'projection':'3d'}, layout = 'constrained')
             ax.set_box_aspect( np.ptp(self.bounds, axis = 0) )
             ax.tick_params(labelsize = 5)
             ax.set_xlabel('x')
@@ -666,23 +666,21 @@ class Mesh:
         return xc, dc
 
     def contains_naive(self, x):
-        f, d, pj = self.closest_face(x)
-        contains = np.sum(self.face_normals[f, :]*(pj - x), axis = 1) >= 0
+        # f, d, pj = self.closest_face(x)
+        # contains = np.sum(self.face_normals[f, :]*(pj - x), axis = 1) >= 0
 
-        # if len(x.squeeze().shape) == 1:
-        #     x = x.squeeze().reshape(1, 3)
+        v = np.mean(self.bounds, axis = 0) - x
+        v /= np.linalg.norm(v, axis = 1, keepdims = True)
+        _, _, f = self.find_boundary(x, v)
 
-        # e, _, pj = self.closest_edge(x)
+        contains = f >= 0
 
-        # faces = [self.edges_faces[i] for i in e]
-        # faces = [f[~np.isin(f, self.interfaces)] for f in faces] # remove interfaces
+        contains[contains] = np.sum(self.facets_normal[f[contains], :]*v[contains, :], axis = 1) >= 0
 
-        # sign_dist = [np.sum((pj[i, :] - x[i, :])*self.face_normals[f, :], axis = 1) for i, f in enumerate(faces)]
-
-        # min_i = [np.argmax(np.absolute(i) == np.absolute(i).min()) for i in sign_dist]
-        # sign_dist = np.array([sign_dist[i][min_i[i]] for i in range(len(sign_dist))])
-        
-        # contains = sign_dist >= 0 # the normal of the closest face should agree with the vector pj - x
+        # fig, ax = self.plot_triangles()
+        # ax.scatter(x[contains, 0], x[contains, 1], x[contains, 2], s = 1, c = 'b')
+        # ax.scatter(x[~contains, 0], x[~contains, 1], x[~contains, 2], s = 1, c = 'r')
+        # plt.show()
 
         return contains
 
@@ -735,6 +733,26 @@ class Mesh:
         fc = fc.astype(int)
 
         xc = x + np.expand_dims(tc, 1)*v
+        # if np.any(np.isnan(xc)) or np.any(np.isinf(xc)):
+        #     i = np.any(np.logical_or(np.isnan(xc), np.isinf(xc)), axis = 1)
+        #     print(x[i, :])
+        #     print(v[i, :])
+        #     print(tc[i])
+        #     print(xc[i, :])
+
+        #     print(xc.shape[0], self.contains(xc[i, :]).sum())
+
+        #     # t_bound = (x[i, :] - np.expand_dims(self.bounds, axis = 1))/v[i, :]
+            
+        # fig, ax = self.plot_triangles(l_color = 'lightgrey', linestyle = '-', dpi = 300)
+        # # ax.scatter(x[~i, 0], x[~i, 1], x[~i, 2], c = 'r', s = 1)
+        # # ax.scatter(self.simplices_points[:, 0], self.simplices_points[:, 1], self.simplices_points[:, 2], c = 'r', s = 1)
+        # ax.scatter(x[:, 0], x[:, 1], x[:, 2], c = 'b', s = 1)
+        # ax.scatter(xc[:, 0], xc[:, 1], xc[:, 2], c = 'r', s = 1)
+
+        # for i in range(x.shape[0]):
+        #     ax.plot([x[i, 0], xc[i, 0]], [x[i, 1], xc[i, 1]], [x[i, 2], xc[i, 2]], color = 'k', linestyle = ':', linewidth = 1)
+        # plt.show()
 
         return xc, tc, fc
 
@@ -768,6 +786,11 @@ class Mesh:
             new_points = np.random.rand(n-points.shape[0], 3)*self.extents + self.bounds[0, :]
             contains   = self.contains_naive(new_points)
             points = np.vstack((points, new_points[contains, :]))
+
+
+        # fig, ax = self.plot_triangles()
+        # ax.scatter(points[:, 0], points[:, 1], points[:, 2], s = 1, c = 'b')
+        # plt.show()
         
         return points
 

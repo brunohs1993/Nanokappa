@@ -71,7 +71,7 @@ def initialise_parser():
                                       nargs = '*' , help    = 'Set the POSITIONS from which to find the closest facet to apply the connections between facets. Nargs depends on what was specified on --bound_cond.' + 
                                                              'First value is a keyword "relative" - considers all points in the mesh between 0 and 1 - or "absolute" - direct positions. Set points as kw x1 y1 z1 x2 y2 z2 etc.' +
                                                              'The facets are connected in pairs, the same way as declared on --connect_facets.')
-    parser.add_argument('--reservoir_gen' , '-gn' , default = ['fixed_rate'], choices = ['fixed_rate', 'one_to_one'],
+    parser.add_argument('--reservoir_gen' , '-gn' , default = ['fixed_rate'], choices = ['fixed_rate', 'one_to_one', 'constant'],
                         type = str  , nargs = '*' , help    = 'Set the type of generation of particles in the reservoir. "fixed_rate" means the generation is independent from the particles leaving the domain. '+
                                                               '"one_to_one" means that a particle will be generated only when a particle leaves the domain (one leaves, one enters).')
     parser.add_argument('--offset'        , '-os' , default = [1e-3],
