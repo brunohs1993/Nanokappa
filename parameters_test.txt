@@ -8,10 +8,11 @@
 --scale            1 1 1
 --geo_rotation     0 0 0 xyz
 --subvolumes       slice 10 0
---bound_facets     0 3 1 5
---bound_pos        
+--bound_facets     
+--bound_pos        relative -0.1 0.5 0.5 1.1 0.5 0.5 0.5 0.5 -0.1 0.5 0.5 1.1
 --bound_cond       T T R R P
---connect_facets   2 4
+--connect_facets   
+--connect_pos      relative 0.5 -0.1 0.5 0.5 1.1 0.5
 --reservoir_gen    fixed_rate
 --bound_values     302 298 0 0
 --reference_temp   297
