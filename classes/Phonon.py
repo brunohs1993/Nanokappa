@@ -297,6 +297,8 @@ class Phonon(Constants):
         rot_groups = []
         g = []
         for i, s in enumerate(self.args.mat_rotation):
+            if type(s) != str:
+                s = str(s)
             if re.fullmatch('[0-9]+', s):
                 g.append(i)
             elif re.fullmatch('[A-Z]+|[a-z]+', s):
