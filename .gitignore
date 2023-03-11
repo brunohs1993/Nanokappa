@@ -7,3 +7,7 @@ test_material/FBZ.png
 optimiser/simulations.csv
 optimiser/simulations.xlsx
 *~$*
+paper_plots.ipynb
+kappa_plots.ipynb
+.vscode
+.pytest_cache

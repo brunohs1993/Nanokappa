@@ -1,32 +1,22 @@
 # calculations
-from calendar import c
-from errno import EBADMSG
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 
 from scipy.spatial.transform import Rotation as rot
 from scipy.interpolate import NearestNDInterpolator
 from scipy.stats.qmc import Sobol
-
-from itertools import combinations
 
 # geometry
 from classes.Mesh import Mesh
 import routines.geo3d as geo3d
 import trimesh as tm
 import routines.subvolumes as subvolumes
-from shapely.geometry import Polygon, Point
-from mapbox_earcut import triangulate_float32 as triangulate_earcut
-try:
-    from triangle import triangulate as triangulate_tri
-    # soft dependency, not really needed. Maybe add it as an option, like trimesh?
-    # I tested both earcut and triangle and I don't see much difference, but I'll keep it for now. 
-except: pass
+from shapely.geometry import Polygon
 
 # other
 import sys
 import copy
-import gc
 import time
 
 np.set_printoptions(precision=3, threshold=sys.maxsize, linewidth=np.nan)
@@ -36,8 +26,7 @@ np.set_printoptions(precision=3, threshold=sys.maxsize, linewidth=np.nan)
 #   Class that prepares and defines the geometry to be simulated.
 
 #   TO DO
-#
-#   - Remove correlation length on the roughness boundary condition
+#   
 #   - Write docstring for all methods
 #   - Clean the code in general
 
@@ -70,7 +59,7 @@ class Geometry:
         self.get_mesh_properties()
         self.get_bound_facets(args)    # get boundary conditions facets
         self.check_facet_connections(args)   # check if all connections are valid and adjust vertices
-        self.save_reservoir_meshes(engine = 'earcut')   # save meshes of each reservoir after adjust vertices
+        # self.save_reservoir_meshes(engine = 'earcut')   # save meshes of each reservoir after adjust vertices
         self.plot_mesh_bc()
         self.set_subvolumes()          # define subvolumes and save their meshes and properties
 
@@ -84,22 +73,99 @@ class Geometry:
         
         print('Loading geometry...')
 
-        if shape == 'cuboid':
-            prev_mesh = tm.creation.box( self.dimensions )
-        elif shape == 'cylinder':
-            prev_mesh = tm.creation.cylinder( radius = self.dimensions[1], height = self.dimensions[0], sections = int(self.dimensions[2]))
-        elif shape == 'cone':
-            prev_mesh = tm.creation.cone( self.dimensions[0], self.dimensions[1] )
-        elif shape == 'capsule':
-            prev_mesh = tm.creation.capsule( self.dimensions[0], self.dimensions[1] )
-        elif shape == 'sphere':
-            prev_mesh = tm.creation.uv_sphere( radius = self.dimensions[0], count = [int(self.dimensions[1]), int(self.dimensions[2])] )
-        elif shape == 'icosphere':
-            prev_mesh = tm.creation.icosphere( radius = float(self.dimensions[0]), subdivisions = int(self.dimensions[1]) )
+        if shape in ['cuboid', 'box', 'cylinder', 'rod', 'bar']:
+            self.mesh = self.generate_primitives(shape, self.dimensions)
         else:
-            prev_mesh = tm.load(shape)
+            if shape == 'cone':
+                prev_mesh = tm.creation.cone( self.dimensions[0], self.dimensions[1] )
+            elif shape == 'capsule':
+                prev_mesh = tm.creation.capsule( self.dimensions[0], self.dimensions[1] )
+            elif shape == 'sphere':
+                prev_mesh = tm.creation.uv_sphere( radius = self.dimensions[0], count = [int(self.dimensions[1]), int(self.dimensions[2])] )
+            elif shape == 'icosphere':
+                prev_mesh = tm.creation.icosphere( radius = float(self.dimensions[0]), subdivisions = int(self.dimensions[1]) )
+            else:
+                prev_mesh = tm.load(shape)
+                
+            self.mesh = Mesh(np.around(prev_mesh.vertices, decimals = 10), prev_mesh.faces)
+
+    def generate_primitives(self, shape, dims):
+        if shape in ['cuboid', 'box']:
+            vertices = np.array([[0, 0, 0],
+                                 [0, 0, 1],
+                                 [0, 1, 1],
+                                 [0, 1, 0],
+                                 [1, 0, 0],
+                                 [1, 0, 1],
+                                 [1, 1, 1],
+                                 [1, 1, 0]])*np.array(dims)
             
-        self.mesh = Mesh(np.around(prev_mesh.vertices, decimals = 10), prev_mesh.faces)
+            faces = np.array([[0, 1, 2],
+                              [0, 2, 3],
+                              [4, 5, 6],
+                              [4, 6, 7],
+                              [0, 4, 5],
+                              [0, 5, 1],
+                              [3, 7, 6],
+                              [3, 6, 2],
+                              [0, 4, 7],
+                              [0, 7, 3],
+                              [1, 5, 6],
+                              [1, 6, 2]], dtype = int)
+
+        elif shape in ['sphere', 'ball']:
+            pass
+        elif shape in ['cylinder', 'rod', 'bar']:
+            L = float(dims[0])
+            R = float(dims[1])
+            N = int(dims[2])
+            
+            angles = np.arange(N)*2*np.pi/N
+
+            ring = (np.vstack((np.cos(angles), np.sin(angles), np.zeros(N)))*R).T
+
+            vertices = np.vstack((np.zeros((1, 3)),
+                                  ring,
+                                  np.zeros((1, 3)) + np.array([0, 0, L]),
+                                  ring             + np.array([0, 0, L])))
+
+            faces = []
+            # lower base
+            for i in range(1, N+1):
+                if i == N:
+                    faces.append([0, i, 1])
+                else:
+                    faces.append([0, i, i+1])
+
+            # sides
+            for i in range(1, N+1):
+                if i == N:
+                    faces.append([i, i+(N+1), i+2])
+                    faces.append([i, 1      , i+2])
+                else:
+                    faces.append([i, i+(N+1), i+1+(N+1)])
+                    faces.append([i, i+1    , i+1+(N+1)])
+
+            faces = np.vstack(faces).astype(int)         # group
+            faces = np.vstack((faces, faces[:N, :]+N+1)) # upper base
+
+        elif shape in ['zig-zag', 'zigzag', 'corrugated']:
+            pass
+        elif shape in ['star']:
+            r = float(dims[0])
+            R = float(dims[1])
+            H = float(dims[2])
+            N = int(dims[3])
+
+            outer_angles = np.arange(N)*2*np.pi/N
+            inner_angles = (np.arange(N)-0.5)*2*np.pi/N
+
+            inner_ring = (np.vstack((np.cos(inner_angles), np.sin(inner_angles), np.zeros(N)))*r).T
+            outer_ring = (np.vstack((np.cos(outer_angles), np.sin(outer_angles), np.zeros(N)))*R).T
+
+            
+
+        return Mesh(vertices, faces)
 
     def transform_mesh(self):
         '''Builds transformation matrix and aplies it to the mesh.'''
@@ -157,18 +223,17 @@ class Geometry:
             
             self.slice_length = np.ptp(self.bounds[:, self.slice_axis])/self.n_of_subvols
 
+            # self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
+            #                                           xc = self.scale_positions(self.subvol_center))
             self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
-                                                      xc = self.scale_positions(self.subvol_center))
-            self.subvol_volume, self.subvol_center = self.calculate_subvol_volume(algorithm = 'mc', return_centers = True)
+                                                      xc = self.subvol_center)
+            self.subvol_volume = self.calculate_subvol_volume(algorithm = 'mc', return_centers = False)
 
             # try: # try slicing the mesh first
             #     self.subvol_volume, self.subvol_center = self.calculate_subvol_volume(return_centers = True)
             # except: # if it gives an error, try with quasi monte carlo / sobol sampling
             #     self.subvol_volume, self.subvol_center = self.calculate_subvol_volume(algorithm = 'qmc', return_centers = True)
 
-            self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
-                                                      xc = self.scale_positions(self.subvol_center))
-            
             self.get_subvol_connections()
 
         elif self.subvol_type == 'voronoi':
@@ -184,8 +249,10 @@ class Geometry:
             
             self.get_subvol_connections()
 
+            # self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
+            #                                       xc = self.scale_positions(self.subvol_center))
             self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
-                                                  xc = self.scale_positions(self.subvol_center))
+                                                      xc = self.subvol_center)
 
             try: # try slicing the mesh first
                 self.subvol_volume = self.calculate_subvol_volume()
@@ -221,8 +288,10 @@ class Geometry:
 
             self.get_subvol_connections()
 
+            # self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
+            #                                           xc = self.scale_positions(self.subvol_center))
             self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
-                                                      xc = self.scale_positions(self.subvol_center))
+                                                      xc = self.subvol_center)
 
             self.subvol_volume = self.calculate_subvol_volume(algorithm = 'mc', tol = 1e-4, verbose = False)
             # try: # try slicing the mesh first
@@ -355,7 +424,10 @@ class Geometry:
 
                 scaled_samples = self.scale_positions(new_samples)
                 
-                r = self.subvol_classifier.predict(scaled_samples)
+                # r = self.subvol_classifier.predict(scaled_samples)
+                r = self.subvol_classifier.predict(new_samples)
+
+                nr = np.array([(r == i).sum(dtype = int) for i in range(self.n_of_subvols)])
 
                 new_cover = (cover*nt + r.sum(axis = 0))/(nt+ns)
 
@@ -373,8 +445,9 @@ class Geometry:
             subvol_volume = cover*self.volume
 
             if return_centers:
-                scaled_samples = self.scale_positions(samples)                
-                r = np.argmax(self.subvol_classifier.predict(scaled_samples), axis = 1)
+                # scaled_samples = self.scale_positions(samples)                
+                # r = np.argmax(self.subvol_classifier.predict(scaled_samples), axis = 1)
+                r = self.subvol_classifier.predict(samples)
                 subvol_center = np.zeros((self.n_of_subvols, 3))
                 for sv in range(self.n_of_subvols):
                     subvol_center[sv, :] = np.mean(samples[ r == sv, :], axis = 0)
@@ -399,14 +472,14 @@ class Geometry:
             try:
                 self.bound_pos = np.array(args.bound_pos[1:]).reshape(-1, 3).astype(float)
             except:
-                Exception('Boundary positions ill defined. Check input parameters.')
+                raise Exception('Boundary positions ill defined. Check input parameters.')
             
             if   args.bound_pos[0] == 'relative':
                     self.bound_pos = self.scale_positions(self.bound_pos, True)
             elif args.bound_pos[0] == 'absolute':
                 pass
             else:
-                Exception('Please specify the type of position for BC with the keyword "absolute" or "relative".')
+                raise Exception('Please specify the type of position for BC with the keyword "absolute" or "relative".')
 
             self.bound_facets, _, _ = self.mesh.closest_facet(self.bound_pos)
 
@@ -444,7 +517,7 @@ class Geometry:
             elif bound_facet in self.rough_facets:                            # if it is a rough facet
                 j = self.rough_facets == bound_facet                          # get the facet location
                 self.rough_facets_values[j] = args.bound_values[i]   # save roughness (eta)
-        
+
     def check_facet_connections(self, args):
 
         print('Checking connected faces...')
@@ -502,64 +575,6 @@ class Geometry:
             else:
                 Exception('Connected facets normals do not agree!!')
     
-    def save_reservoir_meshes(self, engine = 'earcut'):
-
-        # faces of reservoirs
-        self.res_faces = [self.mesh.facets[i] for i in self.res_facets]
-
-        # meshes of the boundary facets to be used for sampling
-        self.res_meshes = [Mesh(vertices = self.mesh.vertices, faces = self.mesh.faces[self.mesh.facets[i], :]) for i in self.res_facets]
-        for m in self.res_meshes:
-            unique_v = np.unique(m.faces)
-            unref_v  = ~np.isin(np.arange(self.mesh.n_of_vertices), unique_v)
-            m.remove_vertices(unref_v.nonzero()[0])
-
-        # Surface area of the reservoirs' facets' meshes. Saving before adjusting so that it does not change the probability of entering with the offset.
-        self.res_areas = np.array([mesh.area for mesh in self.res_meshes])
-
-        h = self.offset # margin to adjust - a little more than offset just to be sure
-
-        for r in range(self.n_of_reservoirs):
-            mesh = self.res_meshes[r]
-            normal = mesh.facets_normal[0, :]   # plane normal
-            origin = mesh.vertices[0, :]        # plane origin
-
-            plane_coord, b1, b2 = geo3d.transform_3d_to_2d(mesh.vertices, normal, origin)
-
-            ring_list = self.get_boundary_rings(mesh)
-
-            poly = self.save_polygon(plane_coord, ring_list)
-
-            poly = self.offset_polygon(poly, h)
-            
-            if engine == 'triangle':
-
-                v, seg, c, p = self.get_v_and_seg_for_triangle(poly, recenter = True, rescale = True)
-
-                holes = self.get_holes_for_triangle(poly, recenter = c, rescale = p)
-
-                if holes.shape[0] > 0:
-                    poly_dict = dict(vertices=v, segments=seg, holes=holes)
-                else:
-                    poly_dict = dict(vertices=v, segments=seg)
-
-                tri_dict = triangulate_tri(poly_dict, 'p')
-                
-                v_2d = tri_dict['vertices']*p+c
-                
-                faces = tri_dict['triangles']
-
-            elif engine == 'earcut':
-                v_2d, ind = self.get_v_and_ind_for_earcut(poly)
-
-                faces = triangulate_earcut(v_2d, ind).reshape(-1, 3)
-
-            v_3d = geo3d.transform_2d_to_3d(v_2d, b1, b2, origin)
-
-            v_3d = self.adjust_reservoirs_to_offset(v_3d, h, r)
-
-            self.res_meshes[r] = Mesh(vertices = v_3d, faces = faces) # save mesh
-
     def plot_mesh_bc(self):
         
         fig, ax = self.plot_facet_boundaries(self.mesh, l_color = 'lightgrey', number_facets = False)
@@ -576,10 +591,16 @@ class Geometry:
         if fcts.shape[0] > 0:
             fig, ax = self.plot_facet_boundaries(self.mesh, fig, ax, facets = fcts, l_color = 'r', linestyle=':', m_color = 'r', number_facets=True)
 
+        legend_elements = [Patch(facecolor='w', edgecolor='k', linestyle = '-', label='Roughness'),
+                           Patch(facecolor='w', edgecolor='b', linestyle = '-', label='Reservoir'),
+                           Patch(facecolor='w', edgecolor='r', linestyle = ':', label='Periodic')]
+        
+        ax.legend(handles=legend_elements, loc='lower right')
+
         plt.savefig(self.args.results_folder + 'BC_plot.png')
         plt.close(fig)
 
-    def remove_midpoints_from_ring(self, v, r, tol = 1e-3, close_ring = False):
+    def remove_midpoints_from_ring(self, v, r, tol = 1e-3):
         '''From a list of vertices (any dimension), removes midpoints
            by comparing the cosine of the angle between previous and
            next vertices in the sequence to a tolerance, and adjust
@@ -670,156 +691,6 @@ class Geometry:
         else:
             return poly
 
-    def offset_polygon(self, poly, h, join_style = 2, tolerance = 0.1):
-    
-        '''Returns the inner offset of a 2D shapely polygon by h, given join style and tolerance.'''
-
-        # shell offset
-        right_offset = poly.exterior.parallel_offset(h, 'right', 2)
-        left_offset  = poly.exterior.parallel_offset(h, 'left' , 2)
-
-        if right_offset.length < left_offset.length:
-            ext_offset = right_offset.simplify(tolerance)
-        else: ext_offset = left_offset.simplify(tolerance)
-
-        # holes offsets
-        int_offset = []
-        for int_line in poly.interiors:
-            right_offset = int_line.buffer(tolerance, join_style = join_style).exterior.parallel_offset(h, 'right', join_style)
-            left_offset  = int_line.buffer(tolerance, join_style = join_style).exterior.parallel_offset(h, 'left' , join_style)
-
-            if right_offset.length > left_offset.length: # holes get larger
-                int_offset.append(right_offset.simplify(0.1))
-            else: int_offset.append(left_offset.simplify(0.1))
-        
-        offset_poly = Polygon(ext_offset.coords, [i.coords for i in int_offset]) # offset polygon
-        
-        return offset_poly
-
-    def get_holes_for_triangle(self, poly, N = 50, recenter = None, rescale = None):
-        '''Returns a (M,2) numpy array with coordinates of points to be used
-        in triangle.triangulate to identify holes in the polygon. All points are inside
-        the convex hull of the polygon.'''
-
-        # looking for holes
-        bound = np.array(poly.bounds).reshape(2, 2)
-
-        ratio = bound.ptp(axis = 0)[0]/bound.ptp(axis = 0)[1]
-
-        if ratio >=1: # if dx > dy
-            nx = int(np.ceil(ratio*N))+1
-            XX, YY = np.meshgrid(np.arange(nx)/(nx-1), np.arange(N+1)/(N))
-        else:
-            ny = int(np.ceil(N/ratio))+1
-            XX, YY = np.meshgrid(np.arange(N+1)/(N), np.arange(ny)/(ny-1))
-
-        samples = np.vstack([XX.ravel(), YY.ravel()]).T*bound.ptp(axis = 0)+bound[0, :]
-
-        far_enough = np.array([Point(samples[i, :]).distance(poly) for i in range(samples.shape[0])]) > np.min(bound.ptp(axis = 0)/(2*N))
-
-        in_hull = np.array([Point(samples[i, :]).within(poly.convex_hull) for i in range(samples.shape[0])])
-
-        in_holes = ~np.array([Point(samples[i, :]).within(poly) for i in range(samples.shape[0])])
-
-        in_holes = np.logical_and(np.logical_and(in_holes, in_hull), far_enough)
-
-        holes = samples[in_holes, :]
-
-        if np.any(in_holes):
-            if recenter is not None:
-                holes -= recenter
-            if rescale is not None:
-                holes /= rescale
-
-        return holes
-
-    def get_v_and_seg_for_triangle(self, poly, recenter = True, rescale = True):
-        
-        v = np.array(poly.exterior.coords)[:-1, :]
-        N = v.shape[0]
-        seg = np.vstack([np.arange(N), np.arange(N)+1]).T % N
-
-        for i in poly.interiors:
-            new_v = np.array(i.coords)[:-1, :]
-            
-            N0 = v.shape[0]
-            Ni = new_v.shape[0]
-            
-            v = np.vstack((v, new_v))
-            
-            new_seg = np.vstack([np.arange(Ni), np.arange(Ni)+1]).T % Ni + N0
-            seg = np.vstack((seg, new_seg))
-
-        # dislocate the vertices so that origin is inside the vertices (avoid errors, for some reason)
-        if recenter:
-            c = v.mean(axis = 0)
-            v -= c
-        if rescale:
-            p = v.ptp(axis = 0)
-            v /= p
-
-        if recenter and rescale:
-            return v, seg, c, p
-        elif recenter:
-            return v, seg, c
-        elif rescale:
-            return v, seg, p
-        else:
-            return v, seg
-
-    def get_v_and_ind_for_earcut(self, poly):
-
-        v = np.array(poly.exterior.coords)[:-1, :]
-        ind = [v.shape[0]]
-
-        for i in poly.interiors:
-            new_v = np.array(i.coords)[:-1, :]
-            
-            ind.append(ind[-1]+new_v.shape[0])
-            
-            v = np.vstack((v, new_v))
-            
-        return v, ind
-
-    def adjust_reservoirs_to_offset(self, v, h, r):
-        fct = self.res_facets[r]
-        normal = self.facets_normal[fct, :]
-
-        v -= normal*h # move the reservoir mesh to the offsett plane
-
-        close_face, d, _ = self.mesh.closest_face(v)
-
-        d = np.round(d, decimals = 8)
-
-        too_close = np.logical_and(d < h, ~np.in1d(close_face, self.facets[fct]))
-        
-        while np.any(too_close):
-
-            n_f = self.face_normals[close_face[too_close], :] # face normals
-
-            dot_fr = np.sum(normal*n_f, axis = 1, keepdims = True)
-
-            n_l = n_f - dot_fr*normal
-            n_l /= np.linalg.norm(n_l, axis = 1, keepdims = True)
-
-            dot_lf = np.sum(n_l*n_f, axis = 1, keepdims = True)
-            
-            o = self.vertices[self.faces[close_face[too_close], 0], :] # planes origins
-
-            t_c = np.sum((o - v[too_close, :])*n_f, axis = 1, keepdims = True)/dot_lf
-
-            t_r = t_c+h/dot_lf
-
-            v[too_close, :] -= (t_r*n_l)
-
-            close_face, d,  = self.mesh.closest_face(v)
-
-            d = np.round(d, decimals = 8)
-
-            too_close = np.logical_and(d < h, ~np.in1d(close_face, self.facets[self.res_facets[r]]))
-
-        return v
-
     def plot_triangles(self, mesh, fig = None, ax = None, l_color = 'k', linestyle = '-', numbers = False, m_color = 'r', markerstyle = 'o'):
         
         if ax is None or fig is None:
@@ -904,13 +775,17 @@ class Geometry:
         n = self.subvol_center-np.expand_dims(self.subvol_center, 1)     # interface normals/directions (SV, SV, 3)
         c_d = np.linalg.norm(n, axis = -1)                               # distances (SV, SV)
 
-        psbl_con = np.ones((self.n_of_subvols, self.n_of_subvols), dtype = bool) # possible connections matrix
-        psbl_con[np.arange(self.n_of_subvols), np.arange(self.n_of_subvols)] = False
+        if self.subvol_type == 'slice':
+            sv_con = np.vstack((np.arange(self.n_of_subvols-1), np.arange(self.n_of_subvols-1))).T
+            sv_con[:, 1] += 1
+        else:
+            psbl_con = np.ones((self.n_of_subvols, self.n_of_subvols), dtype = bool) # possible connections matrix
+            psbl_con[np.arange(self.n_of_subvols), np.arange(self.n_of_subvols)] = False
 
-        sv_con = np.vstack(psbl_con.nonzero()).T # get posible connections
-        sv_con = np.sort(sv_con, axis = 1) # remove repetitions
-        sv_con = sv_con[np.lexsort((sv_con[:,1], sv_con[:,0]))]
-        sv_con = np.unique(sv_con, axis = 0)
+            sv_con = np.vstack(psbl_con.nonzero()).T # get posible connections
+            sv_con = np.sort(sv_con, axis = 1) # remove repetitions
+            sv_con = sv_con[np.lexsort((sv_con[:,1], sv_con[:,0]))]
+            sv_con = np.unique(sv_con, axis = 0)
         
         contains = self.mesh.contains(o[sv_con[:, 0], sv_con[:, 1], :])
 
@@ -1013,7 +888,8 @@ class Geometry:
 
     def snap_path(self, points):
 
-        sv_points = np.argmax(self.subvol_classifier.predict(self.scale_positions(points)), axis = 1)
+        # sv_points = np.argmax(self.subvol_classifier.predict(self.scale_positions(points)), axis = 1)
+        sv_points = self.subvol_classifier.predict(points)
         
         if np.unique(sv_points).shape[0] == 1:
             raise Warning('Invalid path points. Path conductivity will be turned off.')
@@ -1133,7 +1009,7 @@ class SubvolClassifier():
         else:
             self.xc = xc
 
-        self.f = NearestNDInterpolator(self.xc, np.eye(self.n, self.n))
+        self.f = NearestNDInterpolator(self.xc, np.arange(self.n))
         
     def predict(self, x):
         return self.f(x)

@@ -126,9 +126,10 @@ class Visualisation(Constants):
         '''Plots the scattering probability of the maximum temperature (in which scattering mostly occurs)
         and gives information about simulation instability due to de ratio dt/tau.'''
 
-        T = self.phonon.T_reference
+        max_res_T = max([self.geometry.res_values[i] for i, bc in enumerate(self.geometry.res_bound_cond) if bc == 'T'])
+        T = max(self.phonon.T_reference, max_res_T)
         
-        fig = plt.figure(figsize = (8,8), dpi = 120)
+        fig = plt.figure(figsize = (8,8), dpi = 200)
         
         x_data = self.phonon.omega[self.unique_modes[:, 0], self.unique_modes[:, 1]]
 
@@ -196,7 +197,7 @@ class Visualisation(Constants):
                 fontsize = 'large',
                 linespacing = 1.1)
 
-        fig.suptitle(r'Scattering probability for $T_{{hot}}$ with $dt = ${:.2f} ps'.format(self.dt),
+        fig.suptitle(r'Scattering probability with $dt = ${:.2f} ps'.format(self.dt),
                      fontsize = 'xx-large')
 
         plt.tight_layout()
@@ -286,7 +287,8 @@ class Visualisation(Constants):
         del(data)
 
         # mean and stdev
-        N = int(self.args.n_mean[0])
+        self.n_mean = int(self.args.n_mean[0])
+        N = self.n_mean
 
         self.mean_total_en = self.total_en[-N:].mean(axis = 0)
         self.mean_en_res   = self.en_res[-N:, :].mean(axis = 0)
@@ -551,12 +553,13 @@ class Visualisation(Constants):
                 ax[-1, 1].set_xlabel(prof_xlabel)
                 ax[-1, 1].set_xticks(prof_xticks)
                 ax[-1, 1].set_xticklabels(prof_xticklabels, fontdict = prof_xtick_fontdict)
-                for a in ax[:, 0]:
-                    a.legend(conv_labels, ncols = 1+len(conv_labels)//10,
-                             fontsize = legend_fontsize,
-                             facecolor = self.ax_style['facecolor'],
-                             edgecolor = self.ax_style['axiscolor'],
-                             labelcolor = self.ax_style['textcolor'])
+                if len(conv_labels) <= 70:
+                    for a in ax[:, 0]:
+                        a.legend(conv_labels, ncols = 1+len(conv_labels)//10,
+                                fontsize = legend_fontsize,
+                                facecolor = self.ax_style['facecolor'],
+                                edgecolor = self.ax_style['axiscolor'],
+                                labelcolor = self.ax_style['textcolor'])
                 
             elif nrows == 2:
                 for i in range(n_plot):
@@ -570,11 +573,11 @@ class Visualisation(Constants):
                 
                 ax['bottom'].plot(conv_x, rol_mean, **mean_dict )
                 ax['bottom'].plot(conv_x, rol_std , **stdev_dict)
-
-                ax['left'].legend(conv_labels, ncols = 1+len(conv_labels)//10, fontsize = legend_fontsize,
-                                  facecolor = self.ax_style['facecolor'],
-                                  edgecolor = self.ax_style['axiscolor'],
-                                  labelcolor = self.ax_style['textcolor'])
+                if len(conv_labels) <= 70:
+                    ax['left'].legend(conv_labels, ncols = 1+len(conv_labels)//10, fontsize = legend_fontsize,
+                                    facecolor = self.ax_style['facecolor'],
+                                    edgecolor = self.ax_style['axiscolor'],
+                                    labelcolor = self.ax_style['textcolor'])
                 ax['left'].set_xlabel(conv_xlabel)
                 ax['left'].set_ylabel(ylabel[0])
 
@@ -608,11 +611,12 @@ class Visualisation(Constants):
                 ax[1].set_xticklabels(prof_xticklabels, fontdict = prof_xtick_fontdict)
 
                 ax[0].set_xlabel(conv_xlabel)
-                ax[0].legend(conv_labels, ncols = 1+len(conv_labels)//10,
-                             fontsize = legend_fontsize,
-                             facecolor = self.ax_style['facecolor'],
-                             edgecolor = self.ax_style['axiscolor'],
-                             labelcolor = self.ax_style['textcolor'])
+                if len(conv_labels) <= 70:
+                    ax[0].legend(conv_labels, ncols = 1+len(conv_labels)//10,
+                                fontsize = legend_fontsize,
+                                facecolor = self.ax_style['facecolor'],
+                                edgecolor = self.ax_style['axiscolor'],
+                                labelcolor = self.ax_style['textcolor'])
             
             if prop in ['kappa', 'conductivity']:
                 y_max = max(0, 1.5*np.nanmax(mean_prof))
@@ -667,13 +671,9 @@ class Visualisation(Constants):
         omega    = self.phonon.omega[self.q_point, self.branch]
         velocity = self.phonon.group_vel[self.q_point, self.branch, self.geometry.slice_axis]
         occupation = self.occupation
-        slice_id = np.argmax(self.geometry.subvol_classifier.predict(self.geometry.scale_positions(self.position)), axis = 1)
+        slice_id = self.geometry.subvol_classifier.predict(self.position)
         
-        n_dt_to_conv = np.floor( np.log10( self.args.iterations[0] ) ) - 2    # number of timesteps for each convergence datapoints
-        n_dt_to_conv = int(10**n_dt_to_conv)
-        n_dt_to_conv = max([10, n_dt_to_conv])
-
-        n = int(200/(n_dt_to_conv*self.args.timestep[0]))
+        n = self.n_mean
         slice_res_T = np.zeros(self.n_of_subvols+2)
         slice_res_T[ 0]   = self.geometry.res_values[0]   # THIS IS A PLACEHOLDER. CORRECT LATER FOR THE GENERAL CASE
         slice_res_T[1:-1] = self.T[-n:, :].mean(axis = 0)
@@ -736,15 +736,16 @@ class Visualisation(Constants):
         
         labels = ['Slice {:d}'.format(i+1) for i in range(self.n_of_subvols)]
         labels += ['Domain']
-        
-        ax[0].legend(labels, fontsize = 'x-large')
+        if len(labels) < 25:
+            ax[0].legend(labels, fontsize = 'x-large')
         ax[0].set_xlabel(r'Angular Frequency $\omega$ [rad THz]', fontsize = 'x-large')
         ax[0].set_ylabel(r'Thermal conductivity in band $k(\omega)$ [W/mK]', fontsize = 'x-large')
 
         ax[0].ticklabel_format(axis = 'y', style = 'sci', scilimits=(0,0), useOffset = False)
         ax[0].ticklabel_format(axis = 'x', useOffset = False)
 
-        ax[1].legend(labels, fontsize = 'x-large')
+        if len(labels) < 25:
+            ax[1].legend(labels, fontsize = 'x-large')
         ax[1].set_xlabel(r'Angular Frequency $\omega$ [rad THz]', fontsize = 'x-large')
         ax[1].set_ylabel(r'Cumulated Thermal conductivity in band $k(\omega)$ [W/mK]', fontsize = 'x-large')
 
@@ -829,8 +830,6 @@ class Visualisation(Constants):
 
     def plot_kappa_path(self):
         
-        # fig, ax = plt.subplots(nrows = 1, ncols = 2, figsize = (10, 5), dpi = 200)
-
         fig, ax = self.geometry.plot_facet_boundaries(self.geometry.mesh)
         
         cmap = matplotlib.colormaps['jet']
@@ -841,7 +840,10 @@ class Visualisation(Constants):
         else:
             k = np.copy(self.mean_con_k)
         
-        norm_k = (k - np.nanmin(k))/(np.nanmax(k) - np.nanmin(k))
+        min_k = np.floor(np.nanmin(k)/10)*10
+        max_k = np.ceil(np.nanmax(k)/10)*10
+        
+        norm_k = (k - min_k)/(max_k - min_k)
 
         colors = cmap(norm_k)
 
@@ -855,7 +857,9 @@ class Visualisation(Constants):
 
         # divider = make_axes_locatable(plt.gca())
         # cax = divider.append_axes("bottom", "5%", pad="3%")
-        norm = matplotlib.colors.Normalize(vmin=np.nanmin(k), vmax=np.nanmax(k))
+        # norm = matplotlib.colors.Normalize(vmin=np.nanmin(k), vmax=np.nanmax(k))
+
+        norm = matplotlib.colors.Normalize(vmin=min_k, vmax=max_k)
         cb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap),
                      ax = ax,
                      location = 'bottom',
@@ -866,8 +870,10 @@ class Visualisation(Constants):
                      pad = -0.1)
         
         cb.set_label(label = 'Thermal Conductivity [W/mK]', size = 'small')
-        cb.set_ticks(cb.get_ticks())
-        cb.set_ticklabels(cb.get_ticks(), size = 'small')
+
+        ticks = ['{:.1f}'.format(i) for i in np.arange(6)/5*(max_k - min_k)+min_k]
+        cb.set_ticks([float(i) for i in ticks])
+        cb.set_ticklabels(ticks, size = 'small')
         
         plt.tight_layout()
         # plt.show()

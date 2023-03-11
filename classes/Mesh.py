@@ -3,11 +3,18 @@ from scipy.spatial.transform import Rotation as rot
 import routines.geo3d as geo3d
 import matplotlib.pyplot as plt
 from itertools import combinations
+import os
 
 # import gc
 from scipy.spatial import Delaunay
-import time
-import copy
+
+#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=
+
+#   Class representing the triangular mesh without any BC or material data.
+
+#   TO DO
+#   - Complete the implementation of interfaces for interfaces with more than one face (probably using adjacency)
+#   - Better triangulation to avoid holes or simplices outside boundaries (gmsh seems to be a good option)
 
 class Mesh:
     def __init__(self, vertices, faces, remove_unref = True, triangulate_volume = True):
@@ -142,13 +149,6 @@ class Mesh:
         # The following tries to ensure that it will not be repeated.
         for f, nh in enumerate(n_hits): # for each number of hits
             if nh > 1: # if the number of hits is more than one
-                #                  (H, 3)                       (H, 1, 3)
-                # diff = np.linalg.norm(x[new_hits[f, :], f, :] - np.expand_dims(x[new_hits[f, :], f, :], axis = 1), axis = 2) # (H, H)
-
-                # non_repeated = np.sum(np.tri(diff.shape[0])*diff > 1e-10)
-
-                # n_hits[f] = non_repeated + (non_repeated == 0) # +1 added in the case that all points are the same (hence non_repeated = 0, but n_hits = 1)
-
                 n_hits[f] = np.unique(np.around(x[new_hits[f, :], f, :], decimals = 8), axis = 0).shape[0]
 
         for f, nh in enumerate(n_hits):
@@ -173,6 +173,33 @@ class Mesh:
         
         self.face_adjacency = np.sort(self.face_adjacency, axis = 1)
         self.face_adjacency = self.face_adjacency[np.lexsort((self.face_adjacency[:, 1], self.face_adjacency[:, 0])), :]
+
+    def get_facet_adjacency(self):
+        
+        all_ngb = []
+        for fct in self.facets:
+            indices = np.any(np.isin(self.face_adjacency, fct), axis = 1)
+            fct_ngb = np.unique(self.face_adjacency[indices, :]) # get adjacencent faces to the composing faces
+            fct_ngb = fct_ngb[~np.isin(fct_ngb, fct)]        # remove those that compose the facet
+
+            fct_ngb = np.unique(self.faces_to_facets(fct_ngb)) # transform in facets and get the unique
+
+            all_ngb.append(fct_ngb.astype(int))
+        
+        self.facets_neighbours = all_ngb
+
+        all_adj = np.zeros((0, 2))
+
+        for f, n in enumerate(self.facets_neighbours):
+            new_adj = np.zeros((len(n), 2))
+            new_adj[:, 0] = f
+            new_adj[:, 1] = np.array(n)
+            all_adj = np.vstack((all_adj, new_adj))
+        
+        all_adj = np.sort(all_adj, axis = 1)
+        all_adj = np.unique(all_adj, axis = 0)
+
+        self.facets_adjacency = all_adj
 
     def get_faces_properties(self):
         '''Get:
@@ -276,6 +303,8 @@ class Mesh:
 
         self.get_faces_facets()
 
+        self.get_facet_adjacency()
+
     def faces_to_facets(self, index_faces):
         ''' get which facet those faces are part of '''
         return self.face_facets[index_faces]
@@ -320,7 +349,7 @@ class Mesh:
         else:
             self.interfaces = np.array([], dtype = int)
     
-    def triangulate_volume(self, max_edge_div = 100, sample_volume = 100, sample_surface = 0):
+    def triangulate_volume(self, max_edge_div = 100, sample_volume = 100, sample_surface = 100):
         '''Delaunay triangulation of the mesh volume, keeping the simplices for volume calculations.
            Arguments:
            - max_edge_div (bool) : maximum length between points to subdivde mesh edges;
@@ -334,64 +363,68 @@ class Mesh:
             self.simplices_volumes = np.zeros(0)
             self.n_of_simplices = 0
         else:
-            
-            self.simplices_points = np.zeros((0, 3))
-            for e in self.edges:
-                n = int(np.ceil(np.linalg.norm(self.vertices[e[1], :] - self.vertices[e[0], :])/max_edge_div))
-                new = self.vertices[e[0], :] + (self.vertices[e[1], :] - self.vertices[e[0], :])*np.arange(1, n).reshape(-1, 1)/n
-                self.simplices_points = np.vstack((self.simplices_points, new))
+            inv_failed = True
+            while inv_failed:
+                self.simplices_points = np.zeros((0, 3))
+                for e in self.edges:
+                    n = int(np.ceil(np.linalg.norm(self.vertices[e[1], :] - self.vertices[e[0], :])/max_edge_div))
+                    new = self.vertices[e[0], :] + (self.vertices[e[1], :] - self.vertices[e[0], :])*np.arange(1, n).reshape(-1, 1)/n
+                    self.simplices_points = np.vstack((self.simplices_points, new))
 
-            self.simplices_points = np.vstack((self.simplices_points, self.vertices))
-            if bool(sample_volume):
-                self.simplices_points = np.vstack((self.simplices_points, self.sample_volume_naive(sample_volume)))
-            if bool(sample_surface):
-                self.simplices_points = np.vstack((self.simplices_points, self.sample_surface(sample_surface)))
+                self.simplices_points = np.vstack((self.simplices_points, self.vertices))
+                if bool(sample_volume):
+                    self.simplices_points = np.vstack((self.simplices_points, self.sample_volume_naive(sample_volume)))
+                if bool(sample_surface):
+                    self.simplices_points = np.vstack((self.simplices_points, self.sample_surface(sample_surface)))
 
-            options = 'Qt Qbb Qc' # Qt = merged coincident points; Qbb = rescaling to [0, max]
-            tri = Delaunay(self.simplices_points, qhull_options = options)
-            tri.close()
+                options = 'Qt Qbb Qc' # Qt = merged coincident points; Qbb = rescaling to [0, max]
+                tri = Delaunay(self.simplices_points, qhull_options = options)
+                tri.close()
 
-            # checking simplex volume
-            v1 = self.simplices_points[tri.simplices[:, 1], :] - self.simplices_points[tri.simplices[:, 0], :]
-            v2 = self.simplices_points[tri.simplices[:, 2], :] - self.simplices_points[tri.simplices[:, 0], :]
-            v3 = self.simplices_points[tri.simplices[:, 3], :] - self.simplices_points[tri.simplices[:, 0], :]
+                # checking simplex volume
+                v1 = self.simplices_points[tri.simplices[:, 1], :] - self.simplices_points[tri.simplices[:, 0], :]
+                v2 = self.simplices_points[tri.simplices[:, 2], :] - self.simplices_points[tri.simplices[:, 0], :]
+                v3 = self.simplices_points[tri.simplices[:, 3], :] - self.simplices_points[tri.simplices[:, 0], :]
 
-            X = np.cross(v1, v2, axis = 1)
+                X = np.cross(v1, v2, axis = 1)
 
-            A = np.linalg.norm(X, axis = 1)/2
+                A = np.linalg.norm(X, axis = 1)/2
 
-            n = X/np.linalg.norm(X, axis = 1, keepdims = True)
+                n = X/np.linalg.norm(X, axis = 1, keepdims = True)
 
-            h = np.absolute(np.sum(v3*n, axis = 1))
+                h = np.absolute(np.sum(v3*n, axis = 1))
 
-            V = A*h/3
+                V = A*h/3
 
-            to_del = V <= 1e-6
+                to_del = V <= 1e-6
 
-            c = self.simplices_points[tri.simplices].mean(axis = 1)
-            
-            contains = self.contains_naive(c)
+                c = self.simplices_points[tri.simplices].mean(axis = 1)
+                
+                contains = self.contains_naive(c)
 
-            to_del = np.logical_or(to_del, ~contains)
+                to_del = np.logical_or(to_del, ~contains)
 
-            self.simplices = np.delete(tri.simplices, to_del, axis = 0) # keep the simplices
-            
-            self.n_of_simplices = self.simplices.shape[0]
+                self.simplices = np.delete(tri.simplices, to_del, axis = 0) # keep the simplices
+                
+                self.n_of_simplices = self.simplices.shape[0]
 
-            self.simplices_bounds = np.concatenate((np.expand_dims(self.simplices_points[self.simplices, :].min(axis = 1), 0),
-                                                    np.expand_dims(self.simplices_points[self.simplices, :].max(axis = 1), 0)), axis = 0) # and their bounds
+                self.simplices_bounds = np.concatenate((np.expand_dims(self.simplices_points[self.simplices, :].min(axis = 1), 0),
+                                                        np.expand_dims(self.simplices_points[self.simplices, :].max(axis = 1), 0)), axis = 0) # and their bounds
 
-            # Setting simplices baricentric coordinates to speedup "contains" queries.
-            v1 = self.simplices_points[self.simplices[:, 1], :] - self.simplices_points[self.simplices[:, 0], :]
-            v2 = self.simplices_points[self.simplices[:, 2], :] - self.simplices_points[self.simplices[:, 0], :]
-            v3 = self.simplices_points[self.simplices[:, 3], :] - self.simplices_points[self.simplices[:, 0], :]
+                # Setting simplices baricentric coordinates to speedup "contains" queries.
+                v1 = self.simplices_points[self.simplices[:, 1], :] - self.simplices_points[self.simplices[:, 0], :]
+                v2 = self.simplices_points[self.simplices[:, 2], :] - self.simplices_points[self.simplices[:, 0], :]
+                v3 = self.simplices_points[self.simplices[:, 3], :] - self.simplices_points[self.simplices[:, 0], :]
 
 
-            A = np.concatenate((np.expand_dims(v1, 1),
-                                np.expand_dims(v2, 1),
-                                np.expand_dims(v3, 1)), axis = 1) # (S, 3v, 3d)
-
-            self.contains_matrices = np.linalg.inv(A) # (S, 3v, 3d)
+                A = np.concatenate((np.expand_dims(v1, 1),
+                                    np.expand_dims(v2, 1),
+                                    np.expand_dims(v3, 1)), axis = 1) # (S, 3v, 3d)
+                try:
+                    self.contains_matrices = np.linalg.inv(A) # (S, 3v, 3d)
+                    inv_failed = False
+                except:
+                    pass
 
             # calculating simplices volumes for volumetric sampling
             X = np.cross(v1, v2, axis = 1)
@@ -624,15 +657,19 @@ class Mesh:
         # base case
         return -1
 
-    def closest_edge(self, x):
+    def closest_edge(self, x, edges = None):
         '''Finds the closest point on the edges of the geometry for
            one or more points in x.'''
+        if edges is None:
+            edges = self.edges
+        else:
+            edges = self.edges[edges, :]
 
         if len(x.shape) == 1:
             x = x.reshape(1, 3)
         
-        v1 = np.expand_dims(self.vertices[self.edges[:, 0], :], 1) # (E, 1, 3)
-        v2 = np.expand_dims(self.vertices[self.edges[:, 1], :], 1) # (E, 1, 3)
+        v1 = np.expand_dims(self.vertices[edges[:, 0], :], 1) # (E, 1, 3)
+        v2 = np.expand_dims(self.vertices[edges[:, 1], :], 1) # (E, 1, 3)
         dv = v2 - v1                                               # (E, 1, 3)
 
         t = np.sum((x - v1)*dv, axis = 2)/np.sum(dv*dv, axis = 2) # (E, P)
@@ -666,21 +703,16 @@ class Mesh:
         return xc, dc
 
     def contains_naive(self, x):
-        # f, d, pj = self.closest_face(x)
-        # contains = np.sum(self.face_normals[f, :]*(pj - x), axis = 1) >= 0
 
         v = np.mean(self.bounds, axis = 0) - x
         v /= np.linalg.norm(v, axis = 1, keepdims = True)
-        _, _, f = self.find_boundary(x, v)
+        # _, _, f = self.find_boundary(x, v)
+        f, _, p = self.closest_face(x)
 
         contains = f >= 0
+        contains[contains] = np.sum(self.face_normals[f[contains], :]*(p[contains, :] - x[contains, :]), axis = 1) > 0
 
-        contains[contains] = np.sum(self.facets_normal[f[contains], :]*v[contains, :], axis = 1) >= 0
-
-        # fig, ax = self.plot_triangles()
-        # ax.scatter(x[contains, 0], x[contains, 1], x[contains, 2], s = 1, c = 'b')
-        # ax.scatter(x[~contains, 0], x[~contains, 1], x[~contains, 2], s = 1, c = 'r')
-        # plt.show()
+        # contains[contains] = np.sum(self.facets_normal[f[contains], :]*v[contains, :], axis = 1) >= 0
 
         return contains
 
@@ -698,7 +730,7 @@ class Mesh:
         #                    sum((P, 1, 3)*(F, 3)) --> (P, F)             + (F,)              sum((P, 1, 3) * (F, 3)) ---> (P, F)
             t = -(np.sum(np.expand_dims(x, 1)*self.face_normals, axis = 2)+self.face_k)/np.sum(np.expand_dims(v, 1)*self.face_normals, axis = 2) # (P, F)
 
-        possible = t >= 0
+        possible = t >= self.tol
         possible = np.logical_and(possible, ~np.isnan(t))
         possible = np.logical_and(possible, ~np.isinf(np.absolute(t)))
 
@@ -733,26 +765,6 @@ class Mesh:
         fc = fc.astype(int)
 
         xc = x + np.expand_dims(tc, 1)*v
-        # if np.any(np.isnan(xc)) or np.any(np.isinf(xc)):
-        #     i = np.any(np.logical_or(np.isnan(xc), np.isinf(xc)), axis = 1)
-        #     print(x[i, :])
-        #     print(v[i, :])
-        #     print(tc[i])
-        #     print(xc[i, :])
-
-        #     print(xc.shape[0], self.contains(xc[i, :]).sum())
-
-        #     # t_bound = (x[i, :] - np.expand_dims(self.bounds, axis = 1))/v[i, :]
-            
-        # fig, ax = self.plot_triangles(l_color = 'lightgrey', linestyle = '-', dpi = 300)
-        # # ax.scatter(x[~i, 0], x[~i, 1], x[~i, 2], c = 'r', s = 1)
-        # # ax.scatter(self.simplices_points[:, 0], self.simplices_points[:, 1], self.simplices_points[:, 2], c = 'r', s = 1)
-        # ax.scatter(x[:, 0], x[:, 1], x[:, 2], c = 'b', s = 1)
-        # ax.scatter(xc[:, 0], xc[:, 1], xc[:, 2], c = 'r', s = 1)
-
-        # for i in range(x.shape[0]):
-        #     ax.plot([x[i, 0], xc[i, 0]], [x[i, 1], xc[i, 1]], [x[i, 2], xc[i, 2]], color = 'k', linestyle = ':', linewidth = 1)
-        # plt.show()
 
         return xc, tc, fc
 
@@ -766,7 +778,7 @@ class Mesh:
 
         a = np.random.rand(n, 4, 1) # (N, 4, 1)
         a = -np.log(a)
-        a /= a.sum(axis = 1, keepdims = True)
+        a /= a.sum(axis = 1, keepdims = True) # (N, 1, 1)
 
         x = np.sum(a*v, axis = 1)
 
@@ -787,18 +799,23 @@ class Mesh:
             contains   = self.contains_naive(new_points)
             points = np.vstack((points, new_points[contains, :]))
 
-
-        # fig, ax = self.plot_triangles()
-        # ax.scatter(points[:, 0], points[:, 1], points[:, 2], s = 1, c = 'b')
-        # plt.show()
-        
         return points
 
-    def sample_surface(self, n):
+    def sample_surface(self, n, faces = None, facets = None):
         if self.n_of_faces == 0:
             Exception('Number of faces is 0. There is no surface to sample from.')
 
-        f = np.random.choice(self.n_of_faces, size = n, p = self.face_areas/self.face_areas.sum()) # from which faces to draw the points
+        if facets is None and faces is None:
+            faces = np.arange(self.n_of_faces, dtype = int)
+        else:
+            try:
+                int(facets)
+                facets = np.array([facets])
+            except: pass
+            face_list = [self.facets[f] for f in facets]
+            faces = np.concatenate(face_list)
+
+        f = np.random.choice(faces, size = n, p = self.face_areas[faces]/self.face_areas[faces].sum()) # from which faces to draw the points
 
         v = self.vertices[self.faces[f, :], :] # (N, 3, 3)
 
@@ -809,78 +826,27 @@ class Mesh:
         x = np.sum(a*v, axis = 1) # (N, 3)
 
         return x
+
+    def export_stl(self, name, path = None):
+        '''Saves an ASCII stl file with the mesh.'''
         
+        if path is None:
+            path = os.getcwd()
 
-        #     def get_first_simplex(self, mesh):
+        name.replace('.stl', '')
 
-        # base     = mesh.faces[0, :]     # face vertex indices that will be the base of the simplex
-        # base_fct = mesh.face_facets[0] # facet of the base
+        content = 'solid {:s}\n'.format(name)
+
+        for f in range(self.n_of_faces):
+            content += 'facet normal {:.6e} {:.6e} {:.6e}\n'.format(self.face_normals[f, 0], self.face_normals[f, 1], self.face_normals[f, 2])
+            content += '    outer loop\n'
+            for v in range(3):
+                content += '        vertex {:.6e} {:.6e} {:.6e}\n'.format(self.vertices[self.faces[f, v], 0],
+                                                                          self.vertices[self.faces[f, v], 1],
+                                                                          self.vertices[self.faces[f, v], 2])
+            content += '    endloop\n'
+            content += 'endfacet\n'
+        content += 'endsolid {:s}'.format(name)
         
-        # adj = mesh.face_adjacency[np.any(mesh.face_adjacency == 0, axis = 1), :] # get all adjacencies with 0
-        # adj = adj[adj != 0]                                                      # remove face 0 from list
-        # adj = adj[~np.isin(adj, mesh.facets[base_fct])]                               # remove coplanars
-        
-        # print(adj)
-        
-        # simplex = None
-        # for f in adj:
-        #     cand_f = mesh.faces[f, :]               # candidate face
-        #     cand_v = cand_f[~np.isin(cand_f, base)] # get vertex index
-
-        #     base_isol = base[~np.isin(base, cand_f)] # isolated base point
-
-        #     new_edge = np.array([cand_v, base_isol], dtype = int) # get new edge that would be created
-        #     mid_point = mesh.vertices[new_edge, :].mean(axis = 0)
-        #     print(f)
-            
-        #     if mesh.contains_naive(mid_point): # if mid point is out, the simplex would add volume to the geometry
-        #         print('contained')
-        #         is_edge  = np.any(np.all(np.isin(mesh.edges, new_edge), axis = 1))
-                
-        #         if is_edge: # if it is an edge, use it to create the simplex
-        #             print('is_edge')
-        #             simplex = np.append(base, cand_v)
-        #             break
-        #         else: # if not
-        #             print('not edge')
-        #             # same_facet = np.any([np.all(np.isin(new_edge, fct)) for fct in mesh.facets]) # check if they are together in any facet
-                    
-        #             edge_direction = (self.vertices[new_edge[0], :] - self.vertices[new_edge[1], :]) # edge direction
-        #             edge_direction /= np.linalg.norm(edge_direction)                                 # normalised
-
-        #             # checking possible conflicts
-        #             psbl_confl_faces = np.any(np.isin(mesh.faces, new_edge), axis = 1).nonzero()[0] # possible face, which contain at least one new_edge vertex
-        #             coplanar = np.nonzero(np.absolute(np.sum(mesh.face_normals[psbl_confl_faces, :]*edge_direction, axis = 1)) <= 1e-4)[0] # conflicts are when edge perpendicular with the normal
-        #             in_face = np.any(np.isin(mesh.closest_facet(mid_point)[0], mesh.face_facets[coplanar]))
-
-        #             # print(psbl_confl_faces[confl])
-        #             # print(np.sum(mesh.face_normals[psbl_confl_faces, :]*edge_direction, axis = 1))
-
-        #             if not in_face:
-        #             # if not same_facet: # if they are not together in any facet
-        #                 # print('not same facet')
-        #                 print('not_confl')
-        #                 simplex = np.append(base, cand_v)
-        #                 break
-        #                 # if they were in the same facet and there was no edge composed by them,
-        #                 # it means there must be another edge that cuts trhough and linking them is impossible.
-
-        # if simplex is None:
-        #     raise Exception('No available vertex to triangulate. Maybe the mesh is not watertight?')
-
-        # # adjusting faces on the new mesh
-        # simplex_faces = np.sort(np.array(tuple(combinations(simplex, 3))), axis = 1)
-        # new_mesh_faces = np.sort(copy.copy(mesh.faces), axis = 1)
-        
-        # comparison = np.all(new_mesh_faces == np.expand_dims(simplex_faces, 1), axis = 2) # (Fs, Fm) - which mesh faces are a face of the simplex
-
-        # equal_s, equal_m = comparison.nonzero() # getting their indexes
-        
-        # new_mesh_faces = new_mesh_faces[~np.isin(np.arange(new_mesh_faces.shape[0]), equal_m), :]
-
-        # to_add = np.arange(4)[~np.isin(np.arange(4), equal_s)]
-        # new_mesh_faces = np.vstack((new_mesh_faces, simplex_faces[to_add, :]))
-        
-        # mesh = Mesh(vertices = mesh.vertices, faces = new_mesh_faces, remove_unref = False, triangulate_volume = False)
-
-        # return simplex, mesh
+        with open(path+'/'+name+'.stl', 'w') as file:
+            file.write(content)

@@ -2,9 +2,17 @@ import os
 import argparse
 import sys
 
-# Imports classes used and sets the work folder
+# NOTES:
+# I propose to remove from user access the following parameters:
+# --energy_norm --> let the standard be "mean" and leave "fixed" only for debugging. More stable and lower uncertainty for the same result.
+# --offset      --> 1e-3 works fine and there is no need to change.
+# --reservoir_gen --> one-to-one should be used only for debugging and fixed-rate should be the norm.
+# --bound_facets and --connect_facets --> facets are unstable and can change depending on how the mesh is processed. Positions do not depend on the mesh,
+# and the facets are adjusted accordingly.
+# --particle_dist --> another parameters that can be left only for debugging, with random_subvol as standard.
+# --subvol_material --> this will be probably changed and will never be used;
+# 
 
-# changing the working directory to be the same as the mcphonon folder
 
 def initialise_parser():
 
@@ -27,8 +35,9 @@ def initialise_parser():
     parser.add_argument('--particles'      , '-p' , default = ['pmps', 1],
                                       nargs = 2   , help    = 'Number of particles. First argument is a string: "total" for total number, "pmps" for number per mode, per ' +
                                                               'subvolume, "pv" for particles per cubic angstrom. Second is the number.')
-    parser.add_argument('--part_dist'      , '-pd', default = ['random_subvol'], choices = ['random_domain', 'random_subvol', 'center_domain', 'center_subvol'],
-                        type = str  , nargs = 1   , help    = 'How to distribute particles. random/center _ domain/subvol')
+    parser.add_argument('--part_dist'      , '-pd', default = ['random_subvol'],
+                        type = str  , nargs = 1   , help    = 'How to distribute particles. It can be used any combination of random/center _ domain/subvol, or input an external file' +\
+                                                              'of particle data. The file should have the same structure as particle_data.txt given in the results.')
     parser.add_argument('--empty_subvols'  , '-es', default = [],
                         type = int  , nargs = '*' , help    = 'Subvolumes indexes to keep empty at initialisation.')
     parser.add_argument('--subvol_material', '-sm', default = [],
@@ -41,7 +50,7 @@ def initialise_parser():
     parser.add_argument('--max_sim_time'   , '-mt', default = ['1-00:00:00'],
                         type = str  , nargs = 1   , help    = 'Maximum simulation time. If the iterations are not done when -mt is reached, simulation stops and final data is saved. ' +
                                                               ' Declared as D-HH:MM:SS. Useful to avoid losing data in cluster simulations.')
-    parser.add_argument('--subvolumes'     , '-sv', default = ['slice', 10, 0],
+    parser.add_argument('--subvolumes'     , '-sv', default = [],
                                       nargs = '*' , help    = 'Type of subvolumes, number of subvolumes and slicing axis when the case (x = 0, y = 1, z = 2). ' +
                                                               'Accepts "slice", "grid" and "voronoi" as subvolume types.')
     parser.add_argument('--reference_temp' , '-rt', default = [0],
@@ -54,18 +63,16 @@ def initialise_parser():
                         type = str  , nargs = '*' , help    = 'Set boundary conditions to each specific facet. Choose between "T" for temperature, "F" for flux, '+
                                                               '"R" for roughness or "P" for periodic. The respective values need to be set in --bound_values '+
                                                               '(not for periodic boundary condition).')
-    parser.add_argument('--bound_facets'  , '-bf' , default = [0, 3],
+    parser.add_argument('--bound_facets'  , '-bf' , default = [],
                         type = int  , nargs = '*' , help    = 'Set the FACETS on which to apply the specific boundary conditions. Nargs depends on what was specified on --bound_cond. '+
                                                              'If --bound_cond/--bound_values has more values than --bound_facets, the last boundary condition will be applied to all non-specified facets.')
     parser.add_argument('--bound_pos'     , '-bp'    , default = [],
                                       nargs = '*' , help    = 'Set the POSITIONS from which to find the closest facet to apply the specific boundary conditions. Nargs depends on what was specified on --bound_cond.' + 
                                                              'First value is a keyword "relative" - considers all points in the mesh between 0 and 1 - or "absolute" - direct positions. Set points as kw x1 y1 z1 x2 y2 z2 etc.' +
                                                              'If --bound_cond/--bound_values has more values than --bound_pos, the last boundary condition will be applied to all non-specified facets.')
-    parser.add_argument('--bound_values'  , '-bv' , default = [310, 290],
+    parser.add_argument('--bound_values'  , '-bv' , default = [],
                         type = float, nargs = '*' , help    = 'Set boundary conditions values to be imposed (temperature [K], flux [W/m^2] or roughness [angstrom]).')
-    parser.add_argument('--scatter_model' , '-sc' , default = ['all'],
-                        type = str, nargs = '*' , help    = 'Set which properties to restrict on specular reflections. Choose any number among FBZ, k, omega and velocity.')
-    parser.add_argument('--connect_facets', '-cf' , default = [1, 5, 2, 4],
+    parser.add_argument('--connect_facets', '-cf' , default = [],
                         type = int  , nargs = '*' , help    = 'Set the facets that are connected to apply periodicity. Faces are connected in pairs, or 0-1, 2-3, and so on.')
     parser.add_argument('--connect_pos'   , '-cp' , default = [],
                                       nargs = '*' , help    = 'Set the POSITIONS from which to find the closest facet to apply the connections between facets. Nargs depends on what was specified on --bound_cond.' + 
