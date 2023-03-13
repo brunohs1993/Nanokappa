@@ -670,8 +670,13 @@ class Visualisation(Constants):
         # particle data
         omega    = self.phonon.omega[self.q_point, self.branch]
         velocity = self.phonon.group_vel[self.q_point, self.branch, self.geometry.slice_axis]
-        occupation = self.occupation
         slice_id = self.geometry.subvol_classifier.predict(self.position)
+
+        if self.args.reference_temp[0] == 'local':
+            occupation = self.occupation - self.phonon.calculate_occupation(self.mean_T[slice_id], omega)
+        else:    
+            occupation = self.occupation
+        
         
         n = self.n_mean
         slice_res_T = np.zeros(self.n_of_subvols+2)

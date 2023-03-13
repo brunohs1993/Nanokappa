@@ -80,7 +80,10 @@ class Phonon(Constants):
     def load_base_properties(self):
         '''Initialise all phonon properties from input files.'''
         
-        self.T_reference = self.args.reference_temp[0]
+        if self.args.reference_temp[0] == 'local':
+            self.T_reference = 0
+        else:
+            self.T_reference = float(self.args.reference_temp[0])
 
         #### we have to discuss for the following ####
         poscar_file = self.mat_folder + self.args.poscar_file[self.mat_index]
@@ -339,21 +342,18 @@ class Phonon(Constants):
 
         self.lifetime_function = RegularGridInterpolator((T, q_array, j_array), tau)
 
-    def calculate_occupation(self, T, omega, reference = False):
+    def calculate_occupation(self, T, omega, T_ref = 0):
         '''Calculate the Bose-Einstein occupation number of a given frequency at temperature T.'''
 
         flag = (T>0) & (omega>0)
         with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
-            if reference:
-                occupation = np.where(~flag, 0, 1/( np.exp( omega*self.hbar/ (T*self.kb) ) - 1) - 1/( np.exp( omega*self.hbar/ (self.T_reference*self.kb) ) - 1) )
-            elif not reference:
-                occupation = np.where(~flag, 0, 1/( np.exp( omega*self.hbar/ (T*self.kb) ) - 1) )
+            occupation = np.where(~flag, 0, 1/( np.exp( omega*self.hbar/ (T*self.kb) ) - 1) - 1/( np.exp( omega*self.hbar/ (T_ref*self.kb) ) - 1) )
         
         return occupation
 
-    def calculate_energy(self, T, omega, reference = False):
+    def calculate_energy(self, T, omega, T_ref = 0):
         '''Energy of a mode given T and omega due to its occupation (ignoring zero-point energy).'''
-        n = self.calculate_occupation(T, omega, reference = reference)
+        n = self.calculate_occupation(T, omega, T_ref)
         return self.hbar*omega*n    # eV
     
     def calculate_crystal_energy(self, T):

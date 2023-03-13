@@ -54,7 +54,7 @@ def initialise_parser():
                                       nargs = '*' , help    = 'Type of subvolumes, number of subvolumes and slicing axis when the case (x = 0, y = 1, z = 2). ' +
                                                               'Accepts "slice", "grid" and "voronoi" as subvolume types.')
     parser.add_argument('--reference_temp' , '-rt', default = [0],
-                        type = float, nargs = 1   , help    = 'Set reference temperature to be considered in the system, in Kelvin.') 
+                                      nargs = 1   , help    = 'Set reference temperature to be considered in the system, in Kelvin. Also accepts "local", so deltas are calculated in relation to local temperature.') 
     parser.add_argument('--temp_dist'      , '-td', default = ['cold'], choices = ['cold', 'hot', 'linear', 'mean', 'random', 'custom'],
                         type = str  , nargs = '*' , help    = 'Set how to distribute initial temperatures.')
     parser.add_argument('--subvol_temp'    , '-st', default = [],

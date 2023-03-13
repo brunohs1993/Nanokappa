@@ -95,7 +95,11 @@ class Population(Constants):
         self.offset = float(self.args.offset[0]) # offset margin to avoid problems with collision detection
         
         self.T_distribution   = self.args.temp_dist[0]
-        self.T_reference      = float(self.args.reference_temp[0])
+        
+        if self.args.reference_temp[0] != 'local':
+            self.T_reference = float(self.args.reference_temp[0])
+        else:
+            self.T_reference = 'local'
 
         self.colormap = self.args.colormap[0]
         self.fig_plot = self.args.fig_plot
@@ -284,8 +288,11 @@ class Population(Constants):
             self.temperatures, self.subvol_temperature = self.assign_temperatures(self.positions, geometry)
 
             # occupation considering reference
-            self.occupation        = phonon.calculate_occupation(self.temperatures, self.omega, reference = True)
-            self.energies          = self.hbar*self.omega*self.occupation
+            if self.T_reference == 'local':
+                self.occupation = phonon.calculate_occupation(self.temperatures, self.omega)
+            else:
+                self.occupation = phonon.calculate_occupation(self.temperatures, self.omega, self.T_reference)
+            self.energies = self.hbar*self.omega*self.occupation
         else:
             try:
                 data = np.loadtxt(self.args.part_dist[0], delimiter = ',', comments = '#', dtype = float)
@@ -507,7 +514,11 @@ class Population(Constants):
         self.res_momentum_balance = np.zeros((self.n_of_reservoirs, 3))
 
         if self.res_modes.shape[0]>0:
-            self.res_occupation = phonon.calculate_occupation(self.res_temperatures, self.res_omega, reference = True)
+            if self.T_reference == 'local':
+                self.res_occupation = phonon.calculate_occupation(self.res_temperatures, self.res_omega)
+            else:
+                self.res_occupation = phonon.calculate_occupation(self.res_temperatures, self.res_omega, self.T_reference)
+
             self.res_energies   = self.hbar*self.res_omega*self.res_occupation
             self.res_momentum   = self.hbar*self.res_wavevectors*self.res_occupation.reshape(-1, 1)
 
@@ -515,10 +526,11 @@ class Population(Constants):
                 facet  = self.res_facet[i]
 
                 indexes = self.res_facet_id == facet
-
-                self.res_energy_balance[i]      = self.res_energies[indexes].sum()
-                self.res_momentum_balance[i, :] = self.res_momentum[indexes, :].sum(axis = 0)
-                self.res_heat_flux[i, :]        = (self.res_group_vel[indexes, :]*self.res_energies[indexes].reshape(-1, 1)).sum(axis = 0)
+                
+                if self.T_reference != 'local':
+                    self.res_energy_balance[i] = self.res_energies[indexes].sum()
+                    self.res_heat_flux[i, :]   = (self.res_group_vel[indexes, :]*self.res_energies[indexes].reshape(-1, 1)).sum(axis = 0)
+                    self.res_momentum_balance[i, :] = self.res_momentum[indexes, :].sum(axis = 0)
         
     def add_reservoir_particles(self, geometry):
         '''Add the particles that came from the reservoir to the main population. Calculates flux balance for each reservoir.'''
@@ -666,9 +678,16 @@ class Population(Constants):
     def calculate_energy(self, geometry, phonon):
 
         self.subvol_energy = np.zeros(self.n_of_subvols)
-        for sv in range(self.n_of_subvols):
-            i = np.nonzero(self.subvol_id == sv)[0]
-            self.subvol_energy[sv] = self.energies[i].sum()
+        if self.T_reference == 'local':
+            for sv in range(self.n_of_subvols):
+                i = np.nonzero(self.subvol_id == sv)[0]
+                self.subvol_energy[sv] = (self.energies[i] - phonon.calculate_energy(self.temperatures[i], self.omega[i])).sum()
+            ref = phonon.calculate_crystal_energy(self.subvol_temperature)
+        else:
+            for sv in range(self.n_of_subvols):
+                i = np.nonzero(self.subvol_id == sv)[0]
+                self.subvol_energy[sv] = self.energies[i].sum()
+            ref = phonon.reference_energy
 
         if self.norm == 'fixed':
             normalisation = phonon.number_of_active_modes/(self.particle_density*geometry.subvol_volume)
@@ -678,16 +697,21 @@ class Population(Constants):
         self.subvol_energy = self.subvol_energy*normalisation
         
         self.subvol_energy = phonon.normalise_to_density(self.subvol_energy)
-
-        self.subvol_energy += phonon.reference_energy
+        
+        self.subvol_energy += ref
 
     def calculate_heat_flux(self, geometry, phonon):
         
         heat_flux = np.zeros((self.n_of_subvols, 3))
 
+        if self.T_reference == 'local':
+            delta_e = self.energies - phonon.calculate_energy(self.temperatures, self.omega)
+        else:
+            delta_e = self.energies
+
         for i in range(self.n_of_subvols):
             ind = np.nonzero(self.subvol_id == i)[0] # 1d subvol id
-            heat_flux[i, :] = np.sum(self.group_vel[ind, :]*self.energies[ind].reshape(-1, 1), axis = 0)
+            heat_flux[i, :] = np.sum(self.group_vel[ind, :]*delta_e[ind].reshape(-1, 1), axis = 0)
 
         if self.norm == 'fixed':
             normalisation = phonon.number_of_active_modes/(self.particle_density*geometry.subvol_volume.reshape(-1, 1))
@@ -911,7 +935,10 @@ class Population(Constants):
             sv_diff = self.get_subvol_id(col_pos[indexes_diff, :], geometry, get_np = False)
             T_diff = self.subvol_temperature[sv_diff]
             omega_out[indexes_diff] = phonon.omega[out_modes[indexes_diff, 0], out_modes[indexes_diff, 1]]
-            n_out[indexes_diff] = phonon.calculate_occupation(T_diff, omega_out[indexes_diff], reference = True)
+            if self.T_reference == 'local':
+                n_out[indexes_diff] = phonon.calculate_occupation(T_diff, omega_out[indexes_diff])
+            else:
+                n_out[indexes_diff] = phonon.calculate_occupation(T_diff, omega_out[indexes_diff], self.T_reference)
         
         return out_modes, n_out, omega_out
 
@@ -1299,7 +1326,10 @@ class Population(Constants):
                         self.N_leaving[i] += int((rand_res_index == i).sum())
 
                         # subtracting energy
-                        energies = self.energies[indexes_del][indexes_res]
+                        if self.T_reference == 'local':
+                            energies = self.energies[indexes_del][indexes_res] - phonon.calculate_energy(self.res_facet_temperature[i], self.omega[indexes_del][indexes_res])
+                        else:
+                            energies = self.energies[indexes_del][indexes_res]
                         self.res_energy_balance[i] -= energies.sum()
 
                         # adding heat flux
@@ -1411,7 +1441,11 @@ class Population(Constants):
         tau = phonon.lifetime_function(Tqj)
 
         occupation_ad = copy.deepcopy(self.occupation)             # getting current occupation
-        occupation_BE = phonon.calculate_occupation(self.temperatures, self.omega, reference = True) # calculating Bose-Einstein occcupation
+
+        if self.T_reference == 'local':
+            occupation_BE = phonon.calculate_occupation(self.temperatures, self.omega) # calculating Bose-Einstein occcupation
+        else:
+            occupation_BE = phonon.calculate_occupation(self.temperatures, self.omega, self.T_reference) # calculating Bose-Einstein occcupation
 
         with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
             occupation_as = np.where(tau>0, occupation_ad + (self.dt/tau) *(occupation_BE - occupation_ad), occupation_ad)
@@ -1438,7 +1472,7 @@ class Population(Constants):
             self.write_final_state(geometry)
             self.view.postprocess(verbose = False)
             self.update_residue(geometry)
-            # self.contains_check(geometry)
+            self.contains_check(geometry)
             self.plot_figures(geometry, phonon, property_plot = self.args.fig_plot, colormap = self.args.colormap[0])
 
             info ='Timestep {:>5d} - max residue: {:>9.3e} ({:<9s}) ['.format(int(self.current_timestep), self.max_residue, self.max_residue_qt)
@@ -1568,8 +1602,8 @@ class Population(Constants):
                 T = np.concatenate((self.res_bound_values[self.res_bound_cond == 'T'], self.subvol_temperature))
             else:
                 T = self.subvol_temperature
-            vmin = phonon.calculate_energy(T.min()-1, phonon.omega, reference = True).min()
-            vmax = phonon.calculate_energy(T.max()+1, phonon.omega, reference = True).max()
+            vmin = phonon.calculate_energy(T.min()-1, phonon.omega).min()
+            vmax = phonon.calculate_energy(T.max()+1, phonon.omega).max()
             label = r'Energy density deviation $\hbar \omega \delta n$ [eV/angstrom$^3$]'
             format = '{:.2e}'
         elif self.rt_plot[0] in ['omega', 'angular_frequency', 'frequency']:
@@ -1782,14 +1816,15 @@ class Population(Constants):
                 format = '{:.2e}'
             elif property_plot[i] in ['e', 'energy', 'energies']:
                 figname = 'fig_energy'
-                colors = self.energies
                 if self.n_of_reservoirs > 0:
                     T = np.concatenate((self.res_bound_values[self.res_bound_cond == 'T'], self.subvol_temperature))
                 else:
                     T = self.subvol_temperature
                 
-                emin = phonon.calculate_energy(T.min()-1, phonon.omega, reference = True).min()
-                emax = phonon.calculate_energy(T.max()+1, phonon.omega, reference = True).max()
+                colors = self.energies - phonon.calculate_energy(T.mean(), self.omega)
+
+                emin = (phonon.calculate_energy(T.min()-1, phonon.omega) - phonon.calculate_energy(T.mean(), phonon.omega)).min()
+                emax = (phonon.calculate_energy(T.min()+1, phonon.omega) - phonon.calculate_energy(T.mean(), phonon.omega)).max()
 
                 order = [np.floor( np.log10(np.absolute(emin)) ), np.floor( np.log10(emax) )]
                 vmin = (10**order[0])*np.ceil(emin/(10**order[0]))
