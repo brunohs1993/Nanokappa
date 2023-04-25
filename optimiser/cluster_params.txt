@@ -2,9 +2,10 @@ mail-user        bruno.hartmann-da-silva@univ-lorraine.fr
 job-name         nanokappa
 partition        std
 nodes            1
-ntasks           8
+ntasks           31
 cpus-per-task    1
 mail-type        ALL
 mem              100G
 nanokappa_folder /home/dcc70/tmr51/Nanokappa
 conda_env        nanokappa
+constraint       NOPREEMPT

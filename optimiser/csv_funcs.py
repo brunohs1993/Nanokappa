@@ -96,7 +96,6 @@ def time_for_cluster(t, margin = '0-01:00:00', return_timedelta = False):
         all_t = copy.copy(t)
         del(t)
         for i, t in enumerate(all_t):
-            print(t)
             t_list = re.split('-|:', t)
 
             t_list = [int(i) for i in t_list]
@@ -190,7 +189,7 @@ def generate_script(cluster_options,
                     chunk,
                     chunk_index):
 
-    '''THIS HAS BEEN TESTED ON UNIVERSITÉ DE LORRAINE'S CLUSTER EXPLOR ONLY.
+    '''THIS HAS BEEN TESTED ON UNIVERSITE DE LORRAINE'S CLUSTER EXPLOR ONLY.
     
     - cluster_options is a dict with all options to be added at the beginning of the script;
     - params_csv is the name of the csv file to copy and execute'''
@@ -251,15 +250,24 @@ def generate_script(cluster_options,
     s += 'cd $WORKDIR\n' + \
          'mkdir results\n' +\
          'conda activate {:s}\n'.format(cluster_options['conda_env'])
-    
+    # s += 'pid=()\n' +\
+    #      'chunk=('
+    # for i in chunk:
+    #     s += ' {:d}'.format(i)
+    # s += ')\n' +\
+    #      'for i in ${chunk[@]}; do\n' +\
+    #      'python Nanokappa/nanokappa.py -ff parameters_$i.txt > results/output_$i.txt &\n' +\
+    #      'ipid=$!\n' +\
+    #      'pid=(${pid[@]} $ipid)\n' +\
+    #      'done\n' +\
+    #      'wait ${pid[@]}\n'
+
     for i in chunk[:-1]:
         s += 'python {:s}/nanokappa.py -ff parameters_{:d}.txt > results/output_{:d}.txt & '.format(os.path.basename(cluster_options['nanokappa_folder']), i, i)
     s += 'python {:s}/nanokappa.py -ff parameters_{:d}.txt > results/output_{:d}.txt\n'.format(os.path.basename(cluster_options['nanokappa_folder']), chunk[-1], chunk[-1])
     
     s += 'wait\n'
     s += 'cp -rf results*/* $SLURM_SUBMIT_DIR/.\n'
-    s += 'rm -rf $WORKDIR/*\n' + \
-         'rmdir $WORKDIR'
 
     # save script
     with open('script_{:d}'.format(chunk_index), 'w') as f:

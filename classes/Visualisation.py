@@ -1,30 +1,34 @@
 # calculations
 import numpy as np
-import warnings
+from scipy.interpolate.ndgriddata import NearestNDInterpolator
+from scipy.interpolate import interp1d, RBFInterpolator
 
 # plotting and animation
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
+
 # import matplotlib.cm as cm
 # import matplotlib.gridspec as gridspec
 
 # other
 import copy
+import warnings
 
 # simulation
-from classes.Constants import Constants
+from classes.Constants  import Constants
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 class Visualisation(Constants):
-    def __init__(self, args, geometry, phonon):
+    def __init__(self, args, geometry, phonon, population = None):
         super(Visualisation, self).__init__()
         print('Initialising visualisation class...')
 
         self.args = args
         self.phonon = phonon
         self.geometry = geometry
+        self.population = population
 
         self.folder = self.args.results_folder
 
@@ -34,8 +38,6 @@ class Visualisation(Constants):
         self.subvol_file      = self.folder+'subvol_data.txt'
 
         self.dt         = self.args.timestep[0]
-
-        self.unique_modes = np.stack(np.meshgrid( np.arange(phonon.number_of_qpoints), np.arange(phonon.number_of_branches) ), axis = -1 ).reshape(-1, 2).astype(int)
 
         self.set_style_dicts()
     
@@ -91,52 +93,55 @@ class Visualisation(Constants):
                                      linestyle = '--')
         
     def preprocess(self):
-        print('Generating preprocessing plots...')
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
         
-        print('Scattering probability...')
-        self.scattering_probability()
-        print('Density of states...')
-        self.density_of_states()
+            print('Generating preprocessing plots...')
+            
+            print('Scattering probability...')
+            self.scattering_probability()
+            print('Density of states...')
+            self.density_of_states()
 
     def postprocess(self, verbose = True):
-        # convergence data
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+        
+            # convergence data
 
-        if verbose: print('Reading convergence data')
-        self.read_convergence()
+            if verbose: print('Reading convergence data')
+            self.read_convergence()
 
-        if self.sim_time.shape[0] > 1:
-        #     if verbose: print('Plotting convergence...')
-            self.plot_convergence_general(property_list = ['e', 'T', 'Np', 'phi', 'kappa'], cmap = None)
+            if self.sim_time.shape[0] > 1:
+            #     if verbose: print('Plotting convergence...')
+                self.plot_convergence_general(property_list = ['e', 'T', 'Np', 'phi', 'kappa'], cmap = None)
 
-        if self.n_of_reservoirs >0 :
-            if verbose: print('Plotting energy balance convergence...')
-            self.convergence_energy_balance()
+            if self.n_of_reservoirs >0 :
+                if verbose: print('Plotting energy balance convergence...')
+                self.convergence_energy_balance()
 
-        # final particles states
-        if self.n_of_reservoirs >0 :
-            if verbose: print('Reading particle data...')
-            self.read_particles(verbose)
-            if self.args.subvolumes[0] == 'slice':
-                if verbose: print('Plotting thermal conductivity with frequency...')
+            # final particles states
+            if self.n_of_reservoirs >0 :
+                if verbose: print('Reading particle data...')
+                self.read_particles(verbose)
+                # if self.args.subvolumes[0] == 'slice':
+                #     if verbose: print('Plotting thermal conductivity with frequency...')
                 with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
                     self.flux_contribution()
-        self.plot_kappa_path()
+            self.plot_kappa_path()
 
     def scattering_probability(self):
         '''Plots the scattering probability of the maximum temperature (in which scattering mostly occurs)
         and gives information about simulation instability due to de ratio dt/tau.'''
 
-        max_res_T = max([self.geometry.res_values[i] for i, bc in enumerate(self.geometry.res_bound_cond) if bc == 'T'])
-        T = max(self.phonon.T_reference, max_res_T)
+        T = max([self.geometry.res_values[i] for i, bc in enumerate(self.geometry.res_bound_cond) if bc == 'T'])
         
-        fig = plt.figure(figsize = (8,8), dpi = 200)
+        fig, ax = plt.subplots(nrows = 1, ncols = 1, figsize = (8,8), dpi = 200)
         
-        x_data = self.phonon.omega[self.unique_modes[:, 0], self.unique_modes[:, 1]]
+        x_data = self.phonon.omega[self.phonon.unique_modes[:, 0], self.phonon.unique_modes[:, 1]]
 
         # calculating y data
-        ax = fig.add_subplot(111)
-
-        Tqj = np.hstack( ( ( np.ones(self.unique_modes.shape[0])*T).reshape(-1, 1), self.unique_modes ) )
+        Tqj = np.hstack( ( ( np.ones(self.phonon.unique_modes.shape[0])*T).reshape(-1, 1), self.phonon.unique_modes ) )
         
         lifetime = self.phonon.lifetime_function(Tqj)
 
@@ -213,7 +218,7 @@ class Visualisation(Constants):
 
     def density_of_states(self):
 
-        omega = self.phonon.omega[self.unique_modes[:, 0], self.unique_modes[:, 1]]
+        omega = self.phonon.omega[self.phonon.unique_modes[:, 0], self.phonon.unique_modes[:, 1]]
 
         n_bins    = 200
         
@@ -271,18 +276,18 @@ class Visualisation(Constants):
         self.total_en = data[:, 3].astype(float)
         self.en_res   = data[:, 4                                            : 4+  self.n_of_reservoirs                     ].astype(float)
         self.phi_res  = data[:, 4+  self.n_of_reservoirs                     : 4+4*self.n_of_reservoirs                     ].astype(float)
-        self.mtm_res  = data[:, 4+4*self.n_of_reservoirs                     : 4+7*self.n_of_reservoirs                     ].astype(float)
-        self.N_p      = data[:, 4+7*self.n_of_reservoirs                                                                    ].astype(int  )
-        self.T        = data[:, 5+7*self.n_of_reservoirs                     : 5+7*self.n_of_reservoirs+   self.n_of_subvols].astype(float)
-        self.sv_en    = data[:, 5+7*self.n_of_reservoirs+   self.n_of_subvols: 5+7*self.n_of_reservoirs+ 2*self.n_of_subvols].astype(float)
-        self.sv_phi   = data[:, 5+7*self.n_of_reservoirs+ 2*self.n_of_subvols: 5+7*self.n_of_reservoirs+ 5*self.n_of_subvols].astype(float)
-        self.sv_mtm   = data[:, 5+7*self.n_of_reservoirs+ 5*self.n_of_subvols: 5+7*self.n_of_reservoirs+ 8*self.n_of_subvols].astype(float)
-        self.sv_Np    = data[:, 5+7*self.n_of_reservoirs+ 8*self.n_of_subvols: 5+7*self.n_of_reservoirs+ 9*self.n_of_subvols].astype(float)
+        
+        self.N_p      = data[:, 4+4*self.n_of_reservoirs                                                                    ].astype(int  )
+        self.T        = data[:, 5+4*self.n_of_reservoirs                     : 5+4*self.n_of_reservoirs+   self.n_of_subvols].astype(float)
+        self.sv_en    = data[:, 5+4*self.n_of_reservoirs+   self.n_of_subvols: 5+4*self.n_of_reservoirs+ 2*self.n_of_subvols].astype(float)
+        self.sv_phi   = data[:, 5+4*self.n_of_reservoirs+ 2*self.n_of_subvols: 5+4*self.n_of_reservoirs+ 5*self.n_of_subvols].astype(float)
+        
+        self.sv_Np    = data[:, 5+4*self.n_of_reservoirs+ 5*self.n_of_subvols: 5+4*self.n_of_reservoirs+ 6*self.n_of_subvols].astype(float)
         if self.geometry.subvol_type == 'slice':
-            self.sv_k = data[:, 5+7*self.n_of_reservoirs+ 9*self.n_of_subvols: 5+7*self.n_of_reservoirs+10*self.n_of_subvols].astype(float)
-            self.k    = data[:, 5+7*self.n_of_reservoirs+10*self.n_of_subvols                                               ].astype(float)
+            self.sv_k = data[:, 5+4*self.n_of_reservoirs+ 6*self.n_of_subvols: 5+4*self.n_of_reservoirs+7*self.n_of_subvols].astype(float)
+            self.k    = data[:, 5+4*self.n_of_reservoirs+7*self.n_of_subvols                                               ].astype(float)
         else:
-            self.con_k  = data[:, 5+7*self.n_of_reservoirs+ 9*self.n_of_subvols: 5+7*self.n_of_reservoirs+ 9*self.n_of_subvols+self.n_of_subvol_con].astype(float)
+            self.con_k  = data[:, 5+4*self.n_of_reservoirs+ 6*self.n_of_subvols: 5+4*self.n_of_reservoirs+ 6*self.n_of_subvols+self.n_of_subvol_con].astype(float)
 
         del(data)
 
@@ -293,12 +298,12 @@ class Visualisation(Constants):
         self.mean_total_en = self.total_en[-N:].mean(axis = 0)
         self.mean_en_res   = self.en_res[-N:, :].mean(axis = 0)
         self.mean_phi_res  = self.phi_res[-N:, :].mean(axis = 0)
-        self.mean_mtm_res  = self.mtm_res[-N:, :].mean(axis = 0)
+        
         self.mean_Np       = self.N_p[-N:].mean(axis = 0)
         self.mean_T        = self.T[-N:, :].mean(axis = 0)
         self.mean_sv_en    = self.sv_en[-N:, :].mean(axis = 0)
         self.mean_sv_phi   = self.sv_phi[-N:, :].mean(axis = 0)
-        self.mean_sv_mtm   = self.sv_mtm[-N:, :].mean(axis = 0)
+        
         self.mean_sv_Np    = self.sv_Np[-N:, :].mean(axis = 0)
         if self.geometry.subvol_type == 'slice':
             self.mean_sv_k  = np.nanmean(self.sv_k[-N:, :], axis = 0)
@@ -316,12 +321,12 @@ class Visualisation(Constants):
         self.std_total_en = self.total_en[-N:].std(axis = 0)
         self.std_en_res   = self.en_res[-N:, :].std(axis = 0)
         self.std_phi_res  = self.phi_res[-N:, :].std(axis = 0)
-        self.std_mtm_res  = self.mtm_res[-N:, :].std(axis = 0)
+        
         self.std_Np       = self.N_p[-N:].std(axis = 0)
         self.std_T        = self.T[-N:, :].std(axis = 0)
         self.std_sv_en    = self.sv_en[-N:, :].std(axis = 0)
         self.std_sv_phi   = self.sv_phi[-N:, :].std(axis = 0)
-        self.std_sv_mtm   = self.sv_mtm[-N:, :].std(axis = 0)
+        
         self.std_sv_Np    = self.sv_Np[-N:, :].std(axis = 0)
         if self.geometry.subvol_type == 'slice':
             self.std_sv_k  = np.nanstd(self.sv_k[-N:, :], axis = 0)
@@ -342,32 +347,66 @@ class Visualisation(Constants):
             self.std_con_k[i]  = np.nan
 
     def read_particles(self, verbose = True):
-
-        data = np.loadtxt(self.particle_file, delimiter = ',')
-
-        if verbose: print('Finished reading particle data')
-
-        if data.shape[0] > 0:
-            self.q_point    = data[:, 0].astype(int)
-            self.branch     = data[:, 1].astype(int)
-            self.position   = data[:, 2:5].astype(float)
-            self.occupation = data[:, 5].astype(float)
-        else:
-            self.q_point    = np.zeros(0).astype(int)
-            self.branch     = np.zeros(0).astype(int)
-            self.position   = np.zeros((0, 3))
-            self.occupation = np.zeros(0)
-
-        del(data)
-
-    def read_subvols(self):
-        print('Reading subvol data')
         
-        data           = np.loadtxt(self.subvol_file, delimiter = ',')
-        self.sv_center = data[:, 1:4]
-        self.sv_vol    = data[:, 4]
+        if self.population is not None:
+            self.q_point = self.population.modes[:, 0]
+            self.branch = self.population.modes[:, 1]
+            self.positions = self.population.positions
+            self.occupation = self.population.occupation
+            self.omega = self.population.omega
+            self.velocity = self.population.group_vel
+            self.subvol_id = self.population.subvol_id
+            
+            self.temp_interp_type = self.args.temp_interp[0]
+            self.temperature_interpolator = self.population.temperature_interpolator
+            self.temperatures = self.population.temperatures
+        else:
+            data = np.loadtxt(self.particle_file, delimiter = ',')
 
-        del(data)
+            if verbose: print('Finished reading particle data')
+
+            if data.shape[0] > 0:
+                self.q_point    = data[:, 0].astype(int)
+                self.branch     = data[:, 1].astype(int)
+                self.positions   = data[:, 2:5].astype(float)
+                self.occupation = data[:, 5].astype(float)
+            else:
+                self.q_point    = np.zeros(0).astype(int)
+                self.branch     = np.zeros(0).astype(int)
+                self.positions   = np.zeros((0, 3))
+                self.occupation = np.zeros(0)
+
+            del(data)
+
+            self.omega     = self.phonon.omega[self.q_point, self.branch]
+            self.velocity  = self.phonon.group_vel[self.q_point, self.branch, :]
+            self.subvol_id = self.geometry.subvol_classifier.predict(self.positions)
+            
+            self.set_temperature_interpolator()
+            if self.temp_interp_type in ['nearest', 'linear'] and self.geometry.subvol_type == 'slice':
+                self.temperatures = self.temperature_interpolator(self.positions[:, self.geometry.slice_axis])
+            else:
+                self.temperatures = self.temperature_interpolator(self.positions)
+        
+    def set_temperature_interpolator(self):
+
+        self.temp_interp_type = self.args.temp_interp[0]
+
+        if self.temp_interp_type in ['nearest', 'linear'] and self.geometry.subvol_type == 'slice':
+            self.temperature_interpolator = interp1d(self.geometry.subvol_center[:, self.geometry.slice_axis], self.mean_T, kind = self.temp_interp_type, fill_value = 'extrapolate')
+        elif self.temp_interp_type == 'nearest':
+            self.temperature_interpolator = NearestNDInterpolator(self.geometry.subvol_center, self.mean_T)
+        elif self.temp_interp_type == 'radial':
+            self.temperature_interpolator = RBFInterpolator(self.geometry.subvol_center, self.mean_T, kernel = 'linear')
+        elif self.temp_interp_type == 'linear':
+            warnings.warn(Warning('Linear T interpolation is currently valid for slice subvolumes only. Defaulting to RBF interpolation to avoid extrapolation problems.'))
+            self.temperature_interpolator = RBFInterpolator(self.geometry.subvol_center, self.mean_T, kernel = 'linear')
+        else:
+            raise Exception('Invalid T interpolator type.')
+        
+    def update_population(self, population, verbose = True):
+        self.population = population
+        self.read_particles(verbose)
     
     def adjust_style_dict(self, plot, dict):
         if plot == 'profile':
@@ -406,6 +445,7 @@ class Visualisation(Constants):
             if prop in ['temperature', 'T']:
                 data             = self.T
                 n_plot           = data.shape[1]
+                plot_mean        = False
                 mean_prof        = self.mean_T
                 std_prof         = self.std_T
                 filename         = 'convergence_T'
@@ -422,6 +462,7 @@ class Visualisation(Constants):
             elif prop in ['flux', 'phi']:
                 data             = self.sv_phi
                 n_plot           = int(data.shape[1]/3)
+                plot_mean        = True
                 mean_prof        = self.mean_sv_phi
                 std_prof         = self.std_sv_phi
                 filename         = 'convergence_phi'
@@ -438,6 +479,7 @@ class Visualisation(Constants):
             elif prop in ['particles', 'Np']:
                 data             = self.sv_Np
                 n_plot           = data.shape[1]
+                plot_mean        = True
                 mean_prof        = self.mean_sv_Np
                 std_prof         = self.std_sv_Np
                 filename         = 'convergence_Np'
@@ -454,6 +496,7 @@ class Visualisation(Constants):
             elif prop in ['energy', 'e']:
                 data             = self.sv_en
                 n_plot           = data.shape[1]
+                plot_mean        = False
                 mean_prof        = self.mean_sv_en
                 std_prof         = self.std_sv_en
                 filename         = 'convergence_e'
@@ -473,6 +516,7 @@ class Visualisation(Constants):
                 if self.geometry.subvol_type == 'slice':
                     data             = self.sv_k
                     data_total       = self.k
+                    plot_mean        = True
                     n_plot           = data.shape[1]
                     mean_prof        = self.mean_sv_k
                     std_prof         = self.std_sv_k
@@ -488,6 +532,7 @@ class Visualisation(Constants):
                 else:
                     data             = self.con_k*np.where(np.isnan(self.mean_con_k), np.nan, 1)
                     n_plot           = data.shape[1]
+                    plot_mean        = False
                     mean_prof        = self.mean_con_k
                     std_prof         = self.std_con_k
                     ylabel           = [r'Local $\kappa$ [W/m$\cdot$K]']
@@ -548,6 +593,8 @@ class Visualisation(Constants):
                     for i in range(n_plot):
                         ax[d, 0].plot(conv_x, data[:, 3*i+d], **conv_dict)
                         ax[d, 0].set_ylabel(ylabel[d])
+                    if plot_mean:
+                        ax[d, 0].plot(conv_x, data[:, np.arange(n_plot)*3+d].mean(axis = 1), **mean_dict)
                     ax[d, 1].errorbar(prof_x, mean_prof[np.arange(n_plot)*3+d], yerr = std_prof[np.arange(n_plot)*3+d], **prof_dict)
                 ax[-1, 0].set_xlabel(conv_xlabel)
                 ax[-1, 1].set_xlabel(prof_xlabel)
@@ -564,6 +611,8 @@ class Visualisation(Constants):
             elif nrows == 2:
                 for i in range(n_plot):
                     ax['left'].plot(conv_x, data[:, i], **conv_dict)
+                if plot_mean:
+                    ax['left'].plot(conv_x, data.mean(axis = 1), **mean_dict)
                 ax['right'].errorbar(prof_x, mean_prof, yerr = std_prof, **prof_dict)
                 ax['bottom'].plot(conv_x, data_total, **conv_dict)
 
@@ -602,6 +651,8 @@ class Visualisation(Constants):
             else:
                 for i in range(n_plot):
                     ax[0].plot(conv_x, data[:, i], **conv_dict)
+                if plot_mean:
+                    ax[0].plot(conv_x, data.mean(axis = 1), **mean_dict)
                 ax[0].set_xlabel(conv_xlabel)
                 ax[0].set_ylabel(ylabel[0])
 
@@ -668,112 +719,81 @@ class Visualisation(Constants):
     def flux_contribution(self):
         
         # particle data
-        omega    = self.phonon.omega[self.q_point, self.branch]
-        velocity = self.phonon.group_vel[self.q_point, self.branch, self.geometry.slice_axis]
-        slice_id = self.geometry.subvol_classifier.predict(self.position)
-
+        
         if self.args.reference_temp[0] == 'local':
-            occupation = self.occupation - self.phonon.calculate_occupation(self.mean_T[slice_id], omega)
-        else:    
-            occupation = self.occupation
+            ref = self.phonon.calculate_occupation(self.temperatures, self.omega)
+        else:
+            ref = self.population.reference_occupation[self.q_point, self.branch]
         
-        
-        n = self.n_mean
-        slice_res_T = np.zeros(self.n_of_subvols+2)
-        slice_res_T[ 0]   = self.geometry.res_values[0]   # THIS IS A PLACEHOLDER. CORRECT LATER FOR THE GENERAL CASE
-        slice_res_T[1:-1] = self.T[-n:, :].mean(axis = 0)
-        slice_res_T[-1]   = self.geometry.res_values[1]
-
-        subvol_Np = self.sv_Np[-n:, :].mean(axis = 0)
+        dn = self.occupation - ref
 
         # calculating contributions
-        mode_flux = self.phonon.normalise_to_density(self.hbar*occupation*omega*velocity) # eV/ps a² - (SV, Q, J)
+        phi = self.phonon.normalise_to_density(self.hbar*dn.reshape(-1, 1)*self.omega.reshape(-1, 1)*self.velocity) # eV/ps a²
+        phi *= self.eVpsa2_in_Wm2                         # W/m²
 
-        mode_flux = mode_flux*self.eVpsa2_in_Wm2                        # W/m² - (SV, Q, J)
+        dX = self.geometry.subvol_con_vectors*self.a_in_m # m
+        dT = self.mean_T[self.geometry.subvol_connections[:, 1]] - self.mean_T[self.geometry.subvol_connections[:, 0]]
 
-        dX = 2*self.geometry.slice_length*self.a_in_m                   # m
+        bins = np.histogram_bin_edges(self.phonon.omega, 100)
+        centers = (bins[:-1] + bins[1:])/2
 
-        dT = slice_res_T[2:] - slice_res_T[:-2]  # K
-
-        dT = dT[slice_id]
+        if self.geometry.subvol_type == 'slice':
+            mean_k = (self.mean_sv_k[self.geometry.subvol_connections[:, 0]]*self.mean_sv_Np[self.geometry.subvol_connections[:, 0]] + 
+                        self.mean_sv_k[self.geometry.subvol_connections[:, 1]]*self.mean_sv_Np[self.geometry.subvol_connections[:, 1]])
+            mean_k /= self.mean_sv_Np[self.geometry.subvol_connections].sum(axis = 1)
+            
+            std_k = (self.std_sv_k[self.geometry.subvol_connections[:, 0]]*self.mean_sv_Np[self.geometry.subvol_connections[:, 0]] + 
+                        self.std_sv_k[self.geometry.subvol_connections[:, 1]]*self.mean_sv_Np[self.geometry.subvol_connections[:, 1]])
+            std_k /= self.mean_sv_Np[self.geometry.subvol_connections].sum(axis = 1)
         
-        mode_k = mode_flux*(-dX/dT) # (W/m²) * (m/K) = W/m K ; Central difference --> [T(+1) - T(-1)]/[x(+1) - x(-1)] - - (SV, Q, J)
+            plot_con = ~np.logical_and(mean_k + std_k > 0, mean_k - std_k < 0)
+        else:
+            plot_con = ~np.isnan(self.mean_con_k)
 
-        # flux considering all the domain
-        dX_total = self.geometry.slice_length*(self.n_of_subvols-1)*self.a_in_m # m
-        dT_total = slice_res_T[-1] - slice_res_T[0]                             # K
-
-        mode_k_total = mode_flux*(-dX_total/dT_total) # W/m² - (Q, J)
-        
-        # defining bins
-
-        n_bins = 100
-
-        step = self.phonon.omega.max()/(n_bins-1)
-
-        omega_bins = np.linspace(0-step/2, self.phonon.omega.max()+step/2, n_bins+1)
-        omega_center = (omega_bins[:-1] + omega_bins[1:])/2
-
-        # generating figure
-
+        # Starting plot figure
         fig, ax = plt.subplots(nrows = 2, ncols = 1, figsize = (15, 20), dpi = 100, sharex = 'all')
 
-        k_omega = np.zeros((self.n_of_subvols, n_bins))
-        k_omega_total = np.zeros(n_bins)
-
-        for b in range(n_bins):
-        
-            bin_mask = (omega >= omega_bins[b]) & (omega < omega_bins[b+1]) # identifying omega bin - (Q, J,)
-
-            k_omega_total[b] = mode_k[bin_mask].sum()*self.phonon.number_of_modes/subvol_Np.sum()
-        
-            for sv in range(self.n_of_subvols):
-                i = (slice_id == sv) & bin_mask
-                k_omega[sv, b] = mode_k[i].sum()*self.phonon.number_of_modes/subvol_Np[sv]
+        for c, con in enumerate(self.geometry.subvol_connections):
+            if plot_con[c]:
+                i = np.logical_or(self.subvol_id == con[0], self.subvol_id == con[1]).nonzero()[0]
+                k = -np.sum(phi[i, :]*dX[c, :], axis = 1)/dT[c]
+                k *= self.phonon.number_of_active_modes/k.shape[0]
+                y, _, _ = ax[0].hist(self.omega[i], bins = bins, weights = k, label = 'Con. {:d}-{:d}'.format(con[0], con[1]), histtype = 'step')
                 
-        for sv in range(self.n_of_subvols):
-            
-            ax[0].plot(omega_center, k_omega[sv, :], alpha = 0.5, linewidth = 3)
-            ax[1].plot(omega_center, np.cumsum(k_omega[sv, :]), alpha = 0.5, linewidth = 3)
+                ax[1].plot(np.cumsum(y), label = 'Con. {:d}-{:d}'.format(con[0], con[1]))
         
-        ax[0].plot(omega_center, k_omega_total           , color = 'k', linestyle = '--')
-        ax[1].plot(omega_center, np.cumsum(k_omega_total), color = 'k', linestyle = '--')
-        
-        labels = ['Slice {:d}'.format(i+1) for i in range(self.n_of_subvols)]
-        labels += ['Domain']
-        if len(labels) < 25:
-            ax[0].legend(labels, fontsize = 'x-large')
+        if self.n_of_subvol_con < 25:
+            ax[0].legend(fontsize = 'x-large')
         ax[0].set_xlabel(r'Angular Frequency $\omega$ [rad THz]', fontsize = 'x-large')
         ax[0].set_ylabel(r'Thermal conductivity in band $k(\omega)$ [W/mK]', fontsize = 'x-large')
 
         ax[0].ticklabel_format(axis = 'y', style = 'sci', scilimits=(0,0), useOffset = False)
         ax[0].ticklabel_format(axis = 'x', useOffset = False)
 
-        if len(labels) < 25:
-            ax[1].legend(labels, fontsize = 'x-large')
+        if self.n_of_subvol_con < 25:
+            ax[1].legend(fontsize = 'x-large')
         ax[1].set_xlabel(r'Angular Frequency $\omega$ [rad THz]', fontsize = 'x-large')
         ax[1].set_ylabel(r'Cumulated Thermal conductivity in band $k(\omega)$ [W/mK]', fontsize = 'x-large')
 
         ax[1].ticklabel_format(axis = 'y', style = 'sci', scilimits=(0,0), useOffset = False)
         ax[1].ticklabel_format(axis = 'x', useOffset = False)
 
-        text_x = ax[1].get_xlim()[1]-np.array(ax[1].get_xlim()).ptp()*0.05
-        text_y = ax[1].get_ylim()[0]+np.array(ax[1].get_ylim()).ptp()*0.05
+        # text_x = ax[1].get_xlim()[1]-np.array(ax[1].get_xlim()).ptp()*0.05
+        # text_y = ax[1].get_ylim()[0]+np.array(ax[1].get_ylim()).ptp()*0.05
 
-        ax[1].text(text_x, text_y, r'$\kappa$ = {:.3e} W/mK'.format(k_omega_total.sum()),
-                 verticalalignment   = 'bottom',
-                 horizontalalignment = 'right',
-                 fontsize = 'xx-large')
-        
+        # ax[1].text(text_x, text_y, r'$\kappa$ = {:.3e} W/mK'.format(k_omega_total.sum()),
+        #             verticalalignment   = 'bottom',
+        #             horizontalalignment = 'right',
+        #             fontsize = 'xx-large')
+            
         for a in ax:
             a.tick_params(axis = 'both', labelsize = 'x-large')
             a.grid(True)
         
-        plt.suptitle('Contribution of each frequency band to thermal conductivity. {:d} bands.'.format(n_bins), fontsize = 'xx-large')
+        plt.suptitle('Contribution of each frequency band to thermal conductivity. {:d} bands.'.format(centers.shape[0]), fontsize = 'xx-large')
 
         plt.tight_layout(pad = 3)
         plt.savefig(self.folder + 'k_contribution.png')
-
         plt.close(fig)
 
     def convergence_energy_balance(self):
@@ -840,8 +860,9 @@ class Visualisation(Constants):
         cmap = matplotlib.colormaps['jet']
 
         if self.geometry.subvol_type == 'slice':
-            k = (self.mean_sv_k[self.geometry.subvol_connections[:, 0]] + 
-                 self.mean_sv_k[self.geometry.subvol_connections[:, 1]])/2
+            k = (self.mean_sv_k[self.geometry.subvol_connections[:, 0]]*self.mean_sv_Np[self.geometry.subvol_connections[:, 0]] + 
+                 self.mean_sv_k[self.geometry.subvol_connections[:, 1]]*self.mean_sv_Np[self.geometry.subvol_connections[:, 1]])
+            k /= self.mean_sv_Np[self.geometry.subvol_connections].sum(axis = 1)
         else:
             k = np.copy(self.mean_con_k)
         

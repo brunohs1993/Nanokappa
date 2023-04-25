@@ -11,3 +11,6 @@ paper_plots.ipynb
 kappa_plots.ipynb
 .vscode
 .pytest_cache
+corr_0606.stl
+corr_095095.stl
+coned.stl

@@ -4,15 +4,11 @@ import sys
 
 # NOTES:
 # I propose to remove from user access the following parameters:
-# --energy_norm --> let the standard be "mean" and leave "fixed" only for debugging. More stable and lower uncertainty for the same result.
-# --offset      --> 1e-3 works fine and there is no need to change.
-# --reservoir_gen --> one-to-one should be used only for debugging and fixed-rate should be the norm.
-# --bound_facets and --connect_facets --> facets are unstable and can change depending on how the mesh is processed. Positions do not depend on the mesh,
-# and the facets are adjusted accordingly.
-# --particle_dist --> another parameters that can be left only for debugging, with random_subvol as standard.
-# --subvol_material --> this will be probably changed and will never be used;
-# 
-
+# --energy_norm     --> let the standard be "mean" and leave "fixed" only for debugging. More stable and lower uncertainty for the same result.
+# --reservoir_gen   --> one-to-one should be used only for debugging and constant should be the norm.
+# --particle_dist   --> another parameters that can be left only for debugging, with random_subvol as standard.
+# --subvol_material --> think about how to define materials. Define interfaces first, with the geometry and then material, or assign material to subvolumes
+#                       and then generate interfaces;
 
 def initialise_parser():
 
@@ -29,9 +25,14 @@ def initialise_parser():
     parser.add_argument('--geo_rotation'   , '-gr' , default = [0, 0, 0, 'xyz'],
                                       nargs = '*'  , help    = 'Euler angles in degrees to be applied to given geometry (see scipy.rotation.from_euler) and the order to ' +
                                                               'be applied (see scipy.rotation.from_euler).')
-    parser.add_argument('--mat_rotation'   , '-mr', default = [0, 0, 0, 'xyz'],
+    parser.add_argument('--mat_rotation'   , '-mr', default = [],
                                       nargs = '*' , help    = 'Material index, Euler angles in degrees to be applied to given material and ' +
                                                               'the order to be applied (see scipy.rotation.from_euler).')
+    parser.add_argument('--isotope_scat'   , '-is', default = [],
+                        type = int,   nargs = '*' , help    = 'Which materials need to consider mass scattering. Default is none.')
+    parser.add_argument('--bound_scat'     , '-bs', default = ['velocity'], 
+                        type = str,   nargs = '*' , help    = 'Which restriction to impose on the boundary scattering for specular reflections: reflect on velocity ["velocity", "vel", "v", "groupvel", "group_vel"] '+
+                                                              'or on wavevector ["k", "wavevector", "wave_vector"]')
     parser.add_argument('--particles'      , '-p' , default = ['pmps', 1],
                                       nargs = 2   , help    = 'Number of particles. First argument is a string: "total" for total number, "pmps" for number per mode, per ' +
                                                               'subvolume, "pv" for particles per cubic angstrom. Second is the number.')
@@ -47,7 +48,7 @@ def initialise_parser():
                         type = float, nargs = 1   , help    = 'Timestep size in picoseconds')
     parser.add_argument('--iterations'     , '-i' , default = [10000],
                         type = int  , nargs = 1   , help    = 'Number of timesteps (iterations) to be run')
-    parser.add_argument('--max_sim_time'   , '-mt', default = ['1-00:00:00'],
+    parser.add_argument('--max_sim_time'   , '-mt', default = '1-00:00:00',
                         type = str  , nargs = 1   , help    = 'Maximum simulation time. If the iterations are not done when -mt is reached, simulation stops and final data is saved. ' +
                                                               ' Declared as D-HH:MM:SS. Useful to avoid losing data in cluster simulations.')
     parser.add_argument('--subvolumes'     , '-sv', default = [],
@@ -57,23 +58,21 @@ def initialise_parser():
                                       nargs = 1   , help    = 'Set reference temperature to be considered in the system, in Kelvin. Also accepts "local", so deltas are calculated in relation to local temperature.') 
     parser.add_argument('--temp_dist'      , '-td', default = ['cold'], choices = ['cold', 'hot', 'linear', 'mean', 'random', 'custom'],
                         type = str  , nargs = '*' , help    = 'Set how to distribute initial temperatures.')
+    parser.add_argument('--temp_interp'    , '-ti', default = ['nearest'], choices = ['nearest', 'linear', 'radial'],
+                        type = str  , nargs = 1   , help    = 'How to interpolate temperatures for particles located between subvolumes. Choose among "nearest", "linear" and "radial". ' +
+                                                              'The "linear" option only works with slices and defaults to "radial" when used with other types of subvolumes.')
     parser.add_argument('--subvol_temp'    , '-st', default = [],
                         type = float, nargs = '*' , help    = 'Set subvolumes temperatures when custom profile is selected.')
     parser.add_argument('--bound_cond'     , '-bc', default = ['T', 'T', 'P'], choices = ['T', 'P', 'F', 'R'],
                         type = str  , nargs = '*' , help    = 'Set boundary conditions to each specific facet. Choose between "T" for temperature, "F" for flux, '+
                                                               '"R" for roughness or "P" for periodic. The respective values need to be set in --bound_values '+
                                                               '(not for periodic boundary condition).')
-    parser.add_argument('--bound_facets'  , '-bf' , default = [],
-                        type = int  , nargs = '*' , help    = 'Set the FACETS on which to apply the specific boundary conditions. Nargs depends on what was specified on --bound_cond. '+
-                                                             'If --bound_cond/--bound_values has more values than --bound_facets, the last boundary condition will be applied to all non-specified facets.')
     parser.add_argument('--bound_pos'     , '-bp'    , default = [],
                                       nargs = '*' , help    = 'Set the POSITIONS from which to find the closest facet to apply the specific boundary conditions. Nargs depends on what was specified on --bound_cond.' + 
                                                              'First value is a keyword "relative" - considers all points in the mesh between 0 and 1 - or "absolute" - direct positions. Set points as kw x1 y1 z1 x2 y2 z2 etc.' +
                                                              'If --bound_cond/--bound_values has more values than --bound_pos, the last boundary condition will be applied to all non-specified facets.')
     parser.add_argument('--bound_values'  , '-bv' , default = [],
                         type = float, nargs = '*' , help    = 'Set boundary conditions values to be imposed (temperature [K], flux [W/m^2] or roughness [angstrom]).')
-    parser.add_argument('--connect_facets', '-cf' , default = [],
-                        type = int  , nargs = '*' , help    = 'Set the facets that are connected to apply periodicity. Faces are connected in pairs, or 0-1, 2-3, and so on.')
     parser.add_argument('--connect_pos'   , '-cp' , default = [],
                                       nargs = '*' , help    = 'Set the POSITIONS from which to find the closest facet to apply the connections between facets. Nargs depends on what was specified on --bound_cond.' + 
                                                              'First value is a keyword "relative" - considers all points in the mesh between 0 and 1 - or "absolute" - direct positions. Set points as kw x1 y1 z1 x2 y2 z2 etc.' +
@@ -81,8 +80,8 @@ def initialise_parser():
     parser.add_argument('--reservoir_gen' , '-gn' , default = ['fixed_rate'], choices = ['fixed_rate', 'one_to_one', 'constant'],
                         type = str  , nargs = '*' , help    = 'Set the type of generation of particles in the reservoir. "fixed_rate" means the generation is independent from the particles leaving the domain. '+
                                                               '"one_to_one" means that a particle will be generated only when a particle leaves the domain (one leaves, one enters).')
-    parser.add_argument('--offset'        , '-os' , default = [1e-3],
-                        type = float, nargs = 1   , help    = 'The offset margin from facets to avoid problems with Trimesh collision detection. Default is 2*trimesh.tol.merge = 2e-8.')
+    # parser.add_argument('--offset'        , '-os' , default = [1e-3],
+    #                     type = float, nargs = 1   , help    = 'The offset margin from facets to avoid problems with Trimesh collision detection. Default is 2*trimesh.tol.merge = 2e-8.')
 
     parser.add_argument('--path_points'  , '-pp'  , default = [],
                                       nargs = '*' , help    = 'Set the points where the path to calculate kappa should go through. Declared the same way as --bound_pos')

@@ -51,11 +51,6 @@ class Phonon(Constants):
         if len(self.args.mat_rotation) > 0:
             self.rotate_crystal()
         
-        self.calculate_reference(self.T_reference)
-
-        print('Generating p_ref = f(T)...')
-        self.initialise_ref_momentum_function()
-        
         self.plot_FBZ()
 
         print('Material initialisation done!')
@@ -80,11 +75,6 @@ class Phonon(Constants):
     def load_base_properties(self):
         '''Initialise all phonon properties from input files.'''
         
-        if self.args.reference_temp[0] == 'local':
-            self.T_reference = 0
-        else:
-            self.T_reference = float(self.args.reference_temp[0])
-
         #### we have to discuss for the following ####
         poscar_file = self.mat_folder + self.args.poscar_file[self.mat_index]
         unitcell, _ = read_crystal_structure(poscar_file, interface_mode='vasp')
@@ -328,6 +318,11 @@ class Phonon(Constants):
     def load_gamma(self):
         '''gamma = temperatures X q-pointsX p-branches'''
         self.gamma = np.array(self.data_hdf['gamma'])   # THz
+        if self.mat_index in self.args.isotope_scat:
+            try:
+                self.gamma += np.array(self.data_hdf['gamma_isotope'])
+            except:
+                raise Exception('hdf file does not contain the field "gamma_isotope".')
         self.gamma = np.where(self.gamma > 0 , self.gamma, -1)
 
     def calculate_lifetime(self):
@@ -342,18 +337,18 @@ class Phonon(Constants):
 
         self.lifetime_function = RegularGridInterpolator((T, q_array, j_array), tau)
 
-    def calculate_occupation(self, T, omega, T_ref = 0):
+    def calculate_occupation(self, T, omega):
         '''Calculate the Bose-Einstein occupation number of a given frequency at temperature T.'''
 
         flag = (T>0) & (omega>0)
         with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
-            occupation = np.where(~flag, 0, 1/( np.exp( omega*self.hbar/ (T*self.kb) ) - 1) - 1/( np.exp( omega*self.hbar/ (T_ref*self.kb) ) - 1) )
+            occupation = np.where(~flag, 0, 1/( np.exp( omega*self.hbar/ (T*self.kb) ) - 1))
         
         return occupation
 
-    def calculate_energy(self, T, omega, T_ref = 0):
+    def calculate_energy(self, T, omega):
         '''Energy of a mode given T and omega due to its occupation (ignoring zero-point energy).'''
-        n = self.calculate_occupation(T, omega, T_ref)
+        n = self.calculate_occupation(T, omega)
         return self.hbar*omega*n    # eV
     
     def calculate_crystal_energy(self, T):
@@ -376,41 +371,6 @@ class Phonon(Constants):
 
         return zero
     
-    def calculate_reference(self, T):
-        '''Calculate occupation and energy at reference temperatures for each modes, as well as the 
-           equilibrium momentum function at different temperatures.'''
-
-        self.reference_occupation = self.calculate_occupation(T, self.omega)        # shape = q_points x branches
-        self.reference_energy = self.calculate_crystal_energy(self.T_reference)     # float, eV/a³
-
-    def calculate_crystal_momentum(self, T):
-        
-        T = np.array(T)             # ensuring right type
-        T = T.reshape( (-1, 1, 1) ) # ensuring right dimensionality
-
-        n = (self.calculate_occupation(T, self.omega)*~self.inactive_modes_mask).sum(axis = 2).T # (Q, T)
-
-        momentum = (self.hbar*self.wavevectors.reshape(3, -1, 1)*n).sum(axis = 1).T # (T, D)
-
-        return momentum
-    
-    def initialise_ref_momentum_function(self):
-
-        # interval
-        T_min = self.temperature_array.min()
-        T_max = self.temperature_array.max()
-
-        # Temperature array
-        dT = 0.1
-        T_array = np.arange(T_min, T_max+dT, dT)
-
-        # momentum array
-        momentum_array = np.array( list( map(self.calculate_crystal_momentum, T_array) ) ).squeeze()
-
-        self.reference_momentum_function_x = interp1d( T_array.reshape(-1), momentum_array[:, 0], kind = 'linear', fill_value = '' )
-        self.reference_momentum_function_y = interp1d( T_array.reshape(-1), momentum_array[:, 1], kind = 'linear', fill_value = '' )
-        self.reference_momentum_function_z = interp1d( T_array.reshape(-1), momentum_array[:, 2], kind = 'linear', fill_value = '' )
-
     def initialise_temperature_function(self):
         '''Calculate an array of energy density levels and initialises the function to recalculate T = f(E)'''
 
@@ -475,7 +435,6 @@ class Phonon(Constants):
         
         files = os.listdir(self.mat_folder)
         
-        # short_fname = self.name + '_{:d}'.format(int(self.T_reference)) + '.pickle'
         short_fname = '{}.pickle'.format(self.name)
 
         pickled_file = self.mat_folder + short_fname
@@ -541,6 +500,7 @@ def expand_FBZ(axis,weight,qpoints,tensor,rank,rotations,reciprocal_lattice):
                                                                return_inverse=True,
                                                                return_counts=True,
                                                                axis=0)
+           
            if weight[i] != len(return_index) :
                sys.exit("error in expand_FBZ")
 

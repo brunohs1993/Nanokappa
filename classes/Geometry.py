@@ -47,7 +47,6 @@ class Geometry:
         self.subvol_type     = args.subvolumes[0]
         
         self.folder          = args.results_folder
-        self.offset          = float(args.offset[0])
         
         self.path_points     = np.array(self.args.path_points[1:]).astype(float).reshape(-1, 3)
 
@@ -57,12 +56,13 @@ class Geometry:
         self.load_geo_file(self.shape) # loading
         self.transform_mesh()          # transforming
         self.get_mesh_properties()
+        self.plot_triangulation(linestyle = ':')
         self.get_bound_facets(args)    # get boundary conditions facets
         self.check_facet_connections(args)   # check if all connections are valid and adjust vertices
         # self.save_reservoir_meshes(engine = 'earcut')   # save meshes of each reservoir after adjust vertices
         self.plot_mesh_bc()
         self.set_subvolumes()          # define subvolumes and save their meshes and properties
-
+        
         self.get_path()
 
         print('Geometry processing done!')
@@ -227,7 +227,7 @@ class Geometry:
             #                                           xc = self.scale_positions(self.subvol_center))
             self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
                                                       xc = self.subvol_center)
-            self.subvol_volume = self.calculate_subvol_volume(algorithm = 'mc', return_centers = False)
+            self.subvol_volume = self.calculate_subvol_volume(algorithm = 'mc', tol = 1e-4, return_centers = False)
 
             # try: # try slicing the mesh first
             #     self.subvol_volume, self.subvol_center = self.calculate_subvol_volume(return_centers = True)
@@ -276,7 +276,7 @@ class Geometry:
 
             self.subvol_center = (np.vstack(list(map(np.ravel, g))).T)*self.bounds.ptp(axis = 0)+self.bounds[0, :] # create centers
 
-            passed = self.mesh.closest_point(self.subvol_center)[1] > self.offset
+            passed = self.mesh.closest_point(self.subvol_center)[1] > 0
 
             self.subvol_center = self.subvol_center[passed, :]
 
@@ -309,7 +309,9 @@ class Geometry:
             print('Calculating volumes... Algorithm:', algorithm)
         # calculating subvol cover and volume
 
-        if algorithm in ['submesh', 'submesh_qmc']:
+        if self.subvol_type in ['slice', 'grid'] and self.shape in ['cuboid', 'box']:
+            subvol_volume = self.volume*np.ones(self.n_of_subvols)/self.n_of_subvols
+        elif algorithm in ['submesh', 'submesh_qmc']:
             ################ TRYING TO CALCULATE VOLUME BY SLICING MESH #####################
             origins = (self.subvol_center+np.expand_dims(self.subvol_center, axis = 1))/2
             normals = self.subvol_center-np.expand_dims(self.subvol_center, axis = 1)
@@ -424,12 +426,11 @@ class Geometry:
 
                 scaled_samples = self.scale_positions(new_samples)
                 
-                # r = self.subvol_classifier.predict(scaled_samples)
                 r = self.subvol_classifier.predict(new_samples)
 
                 nr = np.array([(r == i).sum(dtype = int) for i in range(self.n_of_subvols)])
 
-                new_cover = (cover*nt + r.sum(axis = 0))/(nt+ns)
+                new_cover = (cover*nt + nr)/(nt+ns)
 
                 nt += ns
 
@@ -462,32 +463,23 @@ class Geometry:
         # initialize boundary condition array with the last one
         self.bound_cond = np.array([args.bound_cond[-1] for _ in range(self.n_of_facets)])
 
-        if len(args.bound_facets) > 0:
-            # correct for the specified facets
-            self.bound_facets = args.bound_facets
-            for i in range(len(args.bound_facets)):
-                self.bound_cond[self.bound_facets[i]] = args.bound_cond[i]
-        elif len(args.bound_pos) > 0:
-            # correct for specified positions
-            try:
-                self.bound_pos = np.array(args.bound_pos[1:]).reshape(-1, 3).astype(float)
-            except:
-                raise Exception('Boundary positions ill defined. Check input parameters.')
-            
-            if   args.bound_pos[0] == 'relative':
-                    self.bound_pos = self.scale_positions(self.bound_pos, True)
-            elif args.bound_pos[0] == 'absolute':
-                pass
-            else:
-                raise Exception('Please specify the type of position for BC with the keyword "absolute" or "relative".')
-
-            self.bound_facets, _, _ = self.mesh.closest_facet(self.bound_pos)
-
-            for j, i in enumerate(self.bound_facets):
-                self.bound_cond[i] = args.bound_cond[j]
-
+        # correct for specified positions
+        try:
+            self.bound_pos = np.array(args.bound_pos[1:]).reshape(-1, 3).astype(float)
+        except:
+            raise Exception('Boundary positions ill defined. Check input parameters.')
+        
+        if   args.bound_pos[0] == 'relative':
+                self.bound_pos = self.scale_positions(self.bound_pos, True)
+        elif args.bound_pos[0] == 'absolute':
+            pass
         else:
-            self.bound_facets = np.array([])
+            raise Exception('Please specify the type of position for BC with the keyword "absolute" or "relative".')
+
+        self.bound_facets, _, _ = self.mesh.closest_facet(self.bound_pos)
+
+        for j, i in enumerate(self.bound_facets):
+            self.bound_cond[i] = args.bound_cond[j]
 
         self.res_facets     = np.arange(self.n_of_facets, dtype = int)[np.logical_or(self.bound_cond == 'T', self.bound_cond == 'F')]
         self.res_bound_cond = self.bound_cond[np.logical_or(self.bound_cond == 'T', self.bound_cond == 'F')]
@@ -508,19 +500,21 @@ class Geometry:
             self.rough_facets_values[:] = args.bound_values[-1]
         
         # saving values
-        for i, bound_facet in enumerate(self.bound_facets):                               # for each specified facet
+        for i, bound_facet in enumerate(self.bound_facets):          # for each specified facet
             
-            if bound_facet in self.res_facets:                                # if it is a reservoir
-                j = self.res_facets == bound_facet                            # get where it is
-                self.res_values[j] = args.bound_values[i]               # save the value in res array
+            if bound_facet in self.res_facets:                       # if it is a reservoir
+                j = self.res_facets == bound_facet                   # get where it is
+                self.res_values[j] = args.bound_values[i]            # save the value in res array
                 
-            elif bound_facet in self.rough_facets:                            # if it is a rough facet
-                j = self.rough_facets == bound_facet                          # get the facet location
+            elif bound_facet in self.rough_facets:                   # if it is a rough facet
+                j = self.rough_facets == bound_facet                 # get the facet location
                 self.rough_facets_values[j] = args.bound_values[i]   # save roughness (eta)
 
     def check_facet_connections(self, args):
 
         print('Checking connected faces...')
+
+        self.connected_facets = np.zeros((0, 2))
 
         if len(args.connect_pos) > 0:
             points = np.array(args.connect_pos[1:], dtype = float).reshape(-1, 3)
@@ -531,19 +525,17 @@ class Geometry:
             else:
                 raise Exception("Wrong option in --connect_pos. Choose between 'relative' or 'absolute'.")
             
-            args.connect_facets = self.mesh.closest_facet(points)[0]
+            self.connected_facets = self.mesh.closest_facet(points)[0].reshape(-1, 2)
 
-        connections = np.array(args.connect_facets).reshape(-1, 2)
-
-        for i in range(connections.shape[0]):
-            normal_1 = self.facets_normal[connections[i, 0], :]
-            normal_2 = self.facets_normal[connections[i, 1], :]
+        for i in range(self.connected_facets.shape[0]):
+            normal_1 = self.facets_normal[self.connected_facets[i, 0], :]
+            normal_2 = self.facets_normal[self.connected_facets[i, 1], :]
             normal_check = np.all(np.absolute(normal_1+normal_2) < 10**-self.tol_decimals)
 
             if normal_check:
 
-                faces_1 = self.facets[connections[i, 0]]
-                faces_2 = self.facets[connections[i, 1]]
+                faces_1 = self.facets[self.connected_facets[i, 0]]
+                faces_2 = self.facets[self.connected_facets[i, 1]]
 
                 mesh_1 = Mesh(vertices = self.mesh.vertices, faces = self.mesh.faces[faces_1, :])
                 mesh_2 = Mesh(vertices = self.mesh.vertices, faces = self.mesh.faces[faces_2, :])
@@ -574,7 +566,7 @@ class Geometry:
                     Exception('Connection {:d} is wrong! Check arguments!'.format(i))
             else:
                 Exception('Connected facets normals do not agree!!')
-    
+            
     def plot_mesh_bc(self):
         
         fig, ax = self.plot_facet_boundaries(self.mesh, l_color = 'lightgrey', number_facets = False)
@@ -996,6 +988,16 @@ class Geometry:
             plt.close(fig)
 
             return path
+
+    def plot_triangulation(self, mesh = None, fig = None, ax = None, l_color = 'k', linestyle = '-', dpi = 200):
+        if mesh is None:
+            mesh = self.mesh
+        
+        fig, ax = self.mesh.plot_triangulation(fig = fig, ax = ax, l_color = l_color, linestyle = linestyle, dpi = dpi)
+
+        fig.savefig(self.args.results_folder + 'triangulation.png')
+        plt.close(fig)
+        
 
 class SubvolClassifier():
     def __init__(self, n, xc = None, a = None):

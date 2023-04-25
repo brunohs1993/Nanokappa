@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 from itertools import combinations
 import os
 
-# import gc
 from scipy.spatial import Delaunay
 
 #=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=
@@ -389,8 +388,9 @@ class Mesh:
                 X = np.cross(v1, v2, axis = 1)
 
                 A = np.linalg.norm(X, axis = 1)/2
-
-                n = X/np.linalg.norm(X, axis = 1, keepdims = True)
+                
+                with np.errstate(divide = 'ignore', invalid = 'ignore', over = 'ignore'):
+                    n = X/np.linalg.norm(X, axis = 1, keepdims = True)
 
                 h = np.absolute(np.sum(v3*n, axis = 1))
 
@@ -433,6 +433,34 @@ class Mesh:
             h = np.absolute(np.sum(v3*n, axis = 1))
             self.simplices_volumes = A*h/3
 
+    def plot_triangulation(self, fig = None, ax = None, l_color = 'k', linestyle = '-', dpi = 200):
+
+        if ax is None or fig is None:
+            fig, ax = plt.subplots(nrows = 1, ncols = 1, dpi = dpi, subplot_kw={'projection':'3d'}, layout = 'constrained')
+            ax.set_box_aspect( np.ptp(self.bounds, axis = 0) )
+            ax.tick_params(labelsize = 5)
+            ax.set_xlabel('x')
+            ax.set_ylabel('y')
+            ax.set_zlabel('z')
+        
+        simp = np.sort(self.simplices, axis = 1)
+
+        lines = np.vstack((np.unique(simp[:, [0, 1]], axis = 0),
+                           np.unique(simp[:, [0, 2]], axis = 0),
+                           np.unique(simp[:, [0, 3]], axis = 0),
+                           np.unique(simp[:, [1, 2]], axis = 0),
+                           np.unique(simp[:, [1, 3]], axis = 0),
+                           np.unique(simp[:, [2, 3]], axis = 0)))
+        
+        lines = np.unique(lines, axis = 0)
+
+        for l in lines:
+            ax.plot(self.simplices_points[l, 0],
+                    self.simplices_points[l, 1],
+                    self.simplices_points[l, 2], color = l_color, linestyle = linestyle, linewidth = 1)
+        
+        return fig, ax
+    
     def contains(self, x):
         '''Check if one or more points are inside the mesh by
            calculating their barycentric coordinates in relation
@@ -458,7 +486,8 @@ class Mesh:
     def get_volume_properties(self):
         '''Calculate volume and center of mass.'''
 
-        self.triangulate_volume()
+        # self.triangulate_volume()
+        self.triangulate_volume(max_edge_div=1000, sample_volume = 0, sample_surface=0)
         if self.simplices.shape[0] == 0:
             self.volume = 0
             self.center_mass = self.facet_centroid[0, :]
