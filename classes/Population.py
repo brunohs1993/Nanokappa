@@ -1655,14 +1655,13 @@ class Population(Constants):
         
         if self.current_timestep == 0:
             print('Simulating...')
-        
-        self.contains_check(geometry)
 
         if (self.current_timestep % 100) == 0:
             self.write_final_state(geometry, phonon)
             self.view.update_population(self, verbose = False)
             self.view.postprocess(verbose = False)
             self.update_residue(geometry)
+            self.contains_check(geometry)
             self.plot_figures(geometry, phonon, property_plot = self.args.fig_plot, colormap = self.args.colormap[0])
 
             info ='Timestep {:>5d} - max residue: {:>9.3e} ({:<9s}) ['.format(int(self.current_timestep), self.max_residue, self.max_residue_qt)
@@ -1967,7 +1966,7 @@ class Population(Constants):
         n = len(property_plot)
 
         ax.set_box_aspect( np.ptp(geometry.bounds, axis = 0) )
-        ax.view_init(elev = 90, azim = -90)
+        # ax.view_init(elev = 90, azim = -90)
         
         graph = ax.scatter(self.positions[:, 0],
                            self.positions[:, 1],

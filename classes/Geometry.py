@@ -499,13 +499,11 @@ class Geometry:
         elif args.bound_cond[-1] == 'R':
             self.rough_facets_values[:] = args.bound_values[-1]
         
-        bound_indices = []
+        bound_indices = [-1 for _ in range(len(self.bound_cond))]
         i = 0
-        for c in self.bound_cond:
-            if c == 'P':
-                bound_indices.append(-1)
-            else:
-                bound_indices.append(i)
+        for f, facet in enumerate(self.bound_facets):
+            if self.bound_cond[facet] != 'P':
+                bound_indices[f] = i
                 i += 1
 
         # saving values
@@ -518,7 +516,7 @@ class Geometry:
             elif bound_facet in self.rough_facets:                   # if it is a rough facet
                 j = self.rough_facets == bound_facet                 # get the facet location
                 self.rough_facets_values[j] = args.bound_values[bound_indices[i]]   # save roughness (eta)
-
+        
     def check_facet_connections(self, args):
 
         print('Checking connected faces...')
