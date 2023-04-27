@@ -487,7 +487,7 @@ class Mesh:
         '''Calculate volume and center of mass.'''
 
         # self.triangulate_volume()
-        self.triangulate_volume(max_edge_div=1000, sample_volume = 0, sample_surface=0)
+        self.triangulate_volume(max_edge_div=1000, sample_volume = 100, sample_surface=100)
         if self.simplices.shape[0] == 0:
             self.volume = 0
             self.center_mass = self.facet_centroid[0, :]

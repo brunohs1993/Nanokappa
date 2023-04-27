@@ -499,16 +499,25 @@ class Geometry:
         elif args.bound_cond[-1] == 'R':
             self.rough_facets_values[:] = args.bound_values[-1]
         
+        bound_indices = []
+        i = 0
+        for c in self.bound_cond:
+            if c == 'P':
+                bound_indices.append(-1)
+            else:
+                bound_indices.append(i)
+                i += 1
+
         # saving values
         for i, bound_facet in enumerate(self.bound_facets):          # for each specified facet
             
             if bound_facet in self.res_facets:                       # if it is a reservoir
                 j = self.res_facets == bound_facet                   # get where it is
-                self.res_values[j] = args.bound_values[i]            # save the value in res array
+                self.res_values[j] = args.bound_values[bound_indices[i]]            # save the value in res array
                 
             elif bound_facet in self.rough_facets:                   # if it is a rough facet
                 j = self.rough_facets == bound_facet                 # get the facet location
-                self.rough_facets_values[j] = args.bound_values[i]   # save roughness (eta)
+                self.rough_facets_values[j] = args.bound_values[bound_indices[i]]   # save roughness (eta)
 
     def check_facet_connections(self, args):
 

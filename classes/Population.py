@@ -1235,6 +1235,11 @@ class Population(Constants):
                 correspondent_modes = np.vstack((correspondent_modes, np.vstack((np.ones(n_ts)*n.reshape(-1, 1), spec_q_in, spec_j_in, spec_q_out, spec_j_out)).T))
         
         elif self.scat_model in ['v', 'vel', 'velocity', 'groupvel', 'group_vel']:
+            
+            k_grid = phonon.q_to_k(np.absolute(1/(2*phonon.data_mesh))) # size of the grid in each direction
+
+            delta_omega = np.sum((phonon.group_vel*k_grid)**2, axis = 2)**0.5 # the acceptable variation of omega from the central value for each mode
+            
             for i_n, n in enumerate(normals):
                 gc.collect()
                 v_dot_n = np.sum(v*n, axis = 2) 
@@ -1244,86 +1249,60 @@ class Population(Constants):
                 in_modes = np.vstack(s_in.nonzero()).T
                 out_modes = np.vstack(s_out.nonzero()).T
                 del s_in, s_out
+                
+                omega_in  = phonon.omega[ in_modes[:, 0],  in_modes[:, 1]]
+                omega_out = phonon.omega[out_modes[:, 0], out_modes[:, 1]]
 
-                omega_in,  in_inv  = np.unique(phonon.omega[ in_modes[:, 0],  in_modes[:, 1]], return_inverse = True)
-                omega_out, out_inv = np.unique(phonon.omega[out_modes[:, 0], out_modes[:, 1]], return_inverse = True)
+                delta_omega_in  = delta_omega[ in_modes[:, 0],  in_modes[:, 1]]
+                delta_omega_out = delta_omega[out_modes[:, 0], out_modes[:, 1]]
 
-                omega_diff = np.absolute(np.expand_dims(omega_in, 1) - omega_out)/np.expand_dims(omega_in, 1)
-
-                valid_matrix = omega_diff < 1e-2
-                del omega_diff
-
-                valid_indices = np.vstack(valid_matrix.nonzero()).T # indices of the unique arrays
-
-                keep = np.zeros(in_inv.shape, dtype = bool)
-                all_inv = np.vstack((in_inv, out_inv)).T
+                v_in_norm  = np.linalg.norm(phonon.group_vel[in_modes[:, 0], in_modes[:, 1], :], axis = 1)
+                v_out_norm = np.linalg.norm(phonon.group_vel[out_modes[:, 0], out_modes[:, 1], :], axis = 1)
 
                 i = 0
                 N = 1000
-                while i*N < in_inv.shape[0]:
-                    valid_compare = np.expand_dims(valid_indices[i*N:(i+1)*N, :], 1) 
-                    new_keep = np.any(np.all(all_inv[~keep, :] == valid_compare, axis = 2), axis = 0)
-                    keep[~keep] = new_keep
-                    i += 1
+                crit = 1e-5
+                possible_reflections = np.zeros((0, 4))
+                while i*N < omega_out.shape[0]:
+                    gc.collect()
+                    diff = np.absolute(omega_in - np.expand_dims(omega_out[i*N:(i+1)*N], 1))
+                    delta = delta_omega_in + np.expand_dims(delta_omega_out[i*N:(i+1)*N], 1)
+                    
+                    keep = diff < delta
+                    del diff, delta
 
-                del valid_matrix, valid_indices
+                    possible_indices = np.vstack(keep.nonzero()).T
 
-                # incoming and outgoing modes with similar frequency
-                print(in_modes.shape)
-                in_modes  =  in_modes[keep, :]
-                out_modes = out_modes[keep, :]
-                print(in_modes.shape)
+                    same_norm = np.absolute(1 - v_out_norm[possible_indices[:, 0]+i*N]/v_in_norm[possible_indices[:, 1]]) < crit
+                    keep[possible_indices[:, 0], possible_indices[:, 1]] = same_norm
+                    del same_norm
+
+                    possible_indices = np.vstack(keep.nonzero()).T
+                    del keep
+                    possible_reflections = np.vstack((possible_reflections,
+                                                      np.hstack((in_modes[possible_indices[:, 1], :],
+                                                                 out_modes[possible_indices[:, 0]+i*N, :]))))
+                    del possible_indices
+
+                    i+=1
                 
-                # get their velocity
-                v_in  = v[ in_modes[:, 0],  in_modes[:, 1], :]
-                v_out = v[out_modes[:, 0], out_modes[:, 1], :]
-
-                v_in_norm = np.linalg.norm(v_in, axis = 1)
-                v_out_norm = np.linalg.norm(v_out, axis = 1)
-
-                # removing v = 0
-                valid = np.logical_and(v_in_norm > 0, v_out_norm > 0)
-
-                in_modes = in_modes[valid, :]
-                out_modes = out_modes[valid, :]
+                in_modes  = possible_reflections[:, [0,1]].astype(int)
+                out_modes = possible_reflections[:, [2,3]].astype(int)
+                del possible_reflections
 
                 v_in  = v[ in_modes[:, 0],  in_modes[:, 1], :]
                 v_out = v[out_modes[:, 0], out_modes[:, 1], :]
 
+                v_in  /= np.linalg.norm(v_in , axis = 1, keepdims = True)
+                v_out /= np.linalg.norm(v_out, axis = 1, keepdims = True)
+                
                 v_try = v_in - 2*n*np.sum(v_in*n, axis = 1, keepdims = True) # reflect
 
-                # fig, ax = plt.subplots(nrows = 1, ncols = 3, figsize = (10, 5))
-                # for i in range(3):
-                #     ax[i].scatter(v_try[:, i], v_out[:, i], c = np.arange(v_try.shape[0]), s = 1)
-                # plt.tight_layout()
-                # plt.show()
-
-                # valid_indices = (np.linalg.norm(v_try - v_out, axis = 1) < 1e-2).nonzero()[0] # compare
-
-                v_try_norm = np.linalg.norm(v_try, axis = 1)
-                v_out_norm = np.linalg.norm(v_out, axis = 1)
-
-                valid_norm = np.logical_and(v_try_norm > 0, v_out_norm > 0)
-
-                valid_norm = np.absolute((v_try_norm - v_out_norm)/v_try_norm) < 1e-5
-                
-                angle = np.arccos(np.sum(v_try*v_out, axis = 1)/(v_try_norm*v_out_norm))
+                angle = np.arccos(np.sum(v_try*v_out, axis = 1))
                 angle[np.isnan(angle)] = np.pi
-                plt.hist(angle, bins = 180)
-                plt.show()
-                print(angle[:10])
-                print(angle.min(), angle.mean(), angle.max(), angle.std())
 
-                valid_angle = np.arccos(np.sum(v_try*v_out, axis = 1)/(v_try_norm*v_out_norm)) < 1e-5
-                valid_indices = np.logical_and(valid_norm, valid_angle)
-                
-                input((valid_norm.sum(), valid_angle.sum(), valid_indices.sum()))
-                del v_in, v_out, v_try
-                
-                # and keep the valid reflections
-                in_modes  =  in_modes[valid_indices, :]
-                out_modes = out_modes[valid_indices, :]
-                print(in_modes.shape)
+                in_modes  =  in_modes[angle < crit, :]
+                out_modes = out_modes[angle < crit, :]
 
                 omega_diff = np.absolute(phonon.omega[ in_modes[:, 0],  in_modes[:, 1]] - phonon.omega[out_modes[:, 0], out_modes[:, 1]])
 
