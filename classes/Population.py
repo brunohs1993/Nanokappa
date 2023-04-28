@@ -520,11 +520,11 @@ class Population(Constants):
             if self.T_reference == 'local':
                 self.res_energies = np.zeros(self.res_omega.shape)
             else:
-                dn = self.reference_occupation[self.res_modes[:, 0], self.res_modes[:, 1]]
+                dn = phonon.calculate_occupation(self.res_temperatures, self.res_omega) - self.reference_occupation[self.res_modes[:, 0], self.res_modes[:, 1]]
 
                 self.res_energies = self.hbar*self.res_omega*dn
                 for i in range(self.n_of_reservoirs):
-                    facet  = self.res_facet[i]
+                    facet   = self.res_facet[i]
                     indexes = self.res_facet_id == facet
                     self.res_energy_balance[i] = self.res_energies[indexes].sum()
                     self.res_heat_flux[i, :]   = (self.res_group_vel[indexes, :]*self.res_energies[indexes].reshape(-1, 1)).sum(axis = 0)
@@ -919,9 +919,10 @@ class Population(Constants):
                         self.creation_rate[ii_f, unique_out[mu, 3].astype(int), unique_out[mu, 4].astype(int)] -= specular_D[ii_f, in_q[corr_indices][repeated], in_j[corr_indices][repeated]].sum()
 
             self.find_degeneracies(phonon)
+            if self.scat_model in ['k', 'wavevector', 'wave_vector']:
 
-            for i in range(self.degeneracies.shape[0]):
-                self.creation_rate[:, self.degeneracies[i, 0], self.degeneracies[i, [1, 2]]] = self.creation_rate[:, self.degeneracies[i, 0], self.degeneracies[i, [1, 2]]].mean(axis = -1, keepdims = True)
+                for i in range(self.degeneracies.shape[0]):
+                    self.creation_rate[:, self.degeneracies[i, 0], self.degeneracies[i, [1, 2]]] = self.creation_rate[:, self.degeneracies[i, 0], self.degeneracies[i, [1, 2]]].mean(axis = -1, keepdims = True)
 
             self.creation_rate = np.around(self.creation_rate, decimals = 10) # DEBUG
 
@@ -950,12 +951,13 @@ class Population(Constants):
 
             out_spec_modes = self.specular_function(a).astype(int)
             
-            # Distributing energy equally among degenerate modes
-            deg_indices = self.degen_index[out_spec_modes[:, 0], out_spec_modes[:, 1]].astype(int)
+            if self.scat_model in ['k', 'wavevector', 'wave_vector']: # TESTE TESTE TESTE TESTE TESTE TESTE TESTE TESTE TESTE TESTE TESTE TESTE 
+                # Distributing energy equally among degenerate modes
+                deg_indices = self.degen_index[out_spec_modes[:, 0], out_spec_modes[:, 1]].astype(int)
 
-            indexes_change = np.logical_and(deg_indices > -1, np.random.rand(deg_indices.shape[0]) >= 0.5) # random assignment of any branch with equal probability
-            
-            out_spec_modes[indexes_change, 1] = self.degeneracies[deg_indices[indexes_change], 2]
+                indexes_change = np.logical_and(deg_indices > -1, np.random.rand(deg_indices.shape[0]) >= 0.5) # random assignment of any branch with equal probability
+                
+                out_spec_modes[indexes_change, 1] = self.degeneracies[deg_indices[indexes_change], 2]
 
             out_modes[indexes_spec, :] = out_spec_modes
 
@@ -1532,7 +1534,7 @@ class Population(Constants):
                         if self.T_reference == 'local':
                             dn = self.occupation[indexes_del][indexes_res] - phonon.calculate_occupation(self.res_facet_temperature[i], self.omega[indexes_del][indexes_res])
                         else:
-                            dn = self.energies[indexes_del][indexes_res] - self.reference_occupation[self.modes[indexes_del, 0][indexes_res], self.modes[indexes_del, 1][indexes_res]]
+                            dn = self.occupation[indexes_del][indexes_res] - self.reference_occupation[self.modes[indexes_del, 0][indexes_res], self.modes[indexes_del, 1][indexes_res]]
                         
                         energies = self.hbar*self.omega[indexes_del][indexes_res]*dn
                         self.res_energy_balance[i] -= energies.sum()

@@ -449,7 +449,7 @@ class Visualisation(Constants):
                 mean_prof        = self.mean_T
                 std_prof         = self.std_T
                 filename         = 'convergence_T'
-                suptitle         = r'Temperatures for each subvolume: evolution over time and local $\mu$ and $\sigma$.'
+                suptitle         = r'Temperatures for each subvolume: evolution over time and local mean and standard deviation.'
                 ylabel           = ['Local T [K]']
                 nrows            = 1
                 sharey           = True
@@ -466,7 +466,7 @@ class Visualisation(Constants):
                 mean_prof        = self.mean_sv_phi
                 std_prof         = self.std_sv_phi
                 filename         = 'convergence_phi'
-                suptitle         = r'Heat flux for each subvolume: evolution over time and local $\mu$ and $\sigma$.'
+                suptitle         = r'Heat flux for each subvolume: evolution over time and local mean and standard deviation.'
                 ylabel           = [r'Local $\phi_{{{}}}$ [W/m²]'.format(i) for i in ['x', 'y', 'z']]
                 nrows            = 3
                 sharey           = 'all'
@@ -483,7 +483,7 @@ class Visualisation(Constants):
                 mean_prof        = self.mean_sv_Np
                 std_prof         = self.std_sv_Np
                 filename         = 'convergence_Np'
-                suptitle         = r'Number of particles for each subvolume: evolution over time and local $\mu$ and $\sigma$.'
+                suptitle         = r'Number of particles for each subvolume: evolution over time and local mean and standard deviation.'
                 ylabel           = [r'$N_p$ [-]']
                 nrows            = 1
                 sharey           = True
@@ -500,7 +500,7 @@ class Visualisation(Constants):
                 mean_prof        = self.mean_sv_en
                 std_prof         = self.std_sv_en
                 filename         = 'convergence_e'
-                suptitle         = r'Energy density for each subvolume: evolution over time and local $\mu$ and $\sigma$.'
+                suptitle         = r'Energy density for each subvolume: evolution over time and local mean and standard deviation.'
                 ylabel           = [r'Local $e$ [eV/$\AA^3$]']
                 nrows            = 1
                 sharey           = True
@@ -512,7 +512,7 @@ class Visualisation(Constants):
                 conv_labels      = ['Sv {:d}'.format(i) for i in np.arange(self.geometry.n_of_subvols, dtype = int)]
             elif prop in ['conductivity', 'kappa']:
                 filename  = 'convergence_kappa'
-                suptitle  = r'Thermal conductivity: evolution over time and local $\mu$ and $\sigma$.'
+                suptitle  = r'Thermal conductivity: evolution over time and local mean and standard deviation.'
                 if self.geometry.subvol_type == 'slice':
                     data             = self.sv_k
                     data_total       = self.k
@@ -634,7 +634,7 @@ class Visualisation(Constants):
                 ax['right'].set_xlabel(prof_xlabel)
                 ax['right'].set_xticklabels(prof_xticklabels, fontdict = prof_xtick_fontdict)
 
-                ax['bottom'].legend(['Instantaneous', r'Rolling $\mu$ ({} datapoints)'.format(N), r'Rolling $\sigma$ ({} datapoints)'.format(N)],
+                ax['bottom'].legend(['Instantaneous', r'Rolling mean ({} datapoints)'.format(N), r'Rolling stdev ({} datapoints)'.format(N)],
                                     facecolor = self.ax_style['facecolor'],
                                     edgecolor = self.ax_style['axiscolor'],
                                     labelcolor = self.ax_style['textcolor'])
