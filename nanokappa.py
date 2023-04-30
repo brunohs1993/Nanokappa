@@ -78,7 +78,7 @@ while flag:
         flag = flag and datetime.now()-start_time < max_time
 
 print('Saving end of run particle data...')
-pop.write_final_state(geo, phonons)
+pop.write_final_state(geo)
 
 pop.f.close()
 

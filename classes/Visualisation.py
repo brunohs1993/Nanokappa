@@ -717,7 +717,10 @@ class Visualisation(Constants):
             plt.close(fig)
 
     def flux_contribution(self):
-        
+        # Since the conductivity contribution is calculated on particles, it is
+        # preferred to keep the calculation on the connections between subvolumes
+        # to not assume phonon statistics in the reservoirs
+
         # particle data
         
         if self.args.reference_temp[0] == 'local':
@@ -760,7 +763,7 @@ class Visualisation(Constants):
                 k *= self.phonon.number_of_active_modes/k.shape[0]
                 y, _, _ = ax[0].hist(self.omega[i], bins = bins, weights = k, label = 'Con. {:d}-{:d}'.format(con[0], con[1]), histtype = 'step')
                 
-                ax[1].plot(np.cumsum(y), label = 'Con. {:d}-{:d}'.format(con[0], con[1]))
+                ax[1].plot(centers, np.cumsum(y), label = 'Con. {:d}-{:d}'.format(con[0], con[1]))
         
         if self.n_of_subvol_con < 25:
             ax[0].legend(fontsize = 'x-large')
@@ -778,14 +781,6 @@ class Visualisation(Constants):
         ax[1].ticklabel_format(axis = 'y', style = 'sci', scilimits=(0,0), useOffset = False)
         ax[1].ticklabel_format(axis = 'x', useOffset = False)
 
-        # text_x = ax[1].get_xlim()[1]-np.array(ax[1].get_xlim()).ptp()*0.05
-        # text_y = ax[1].get_ylim()[0]+np.array(ax[1].get_ylim()).ptp()*0.05
-
-        # ax[1].text(text_x, text_y, r'$\kappa$ = {:.3e} W/mK'.format(k_omega_total.sum()),
-        #             verticalalignment   = 'bottom',
-        #             horizontalalignment = 'right',
-        #             fontsize = 'xx-large')
-            
         for a in ax:
             a.tick_params(axis = 'both', labelsize = 'x-large')
             a.grid(True)
@@ -811,7 +806,7 @@ class Visualisation(Constants):
         ax1.set_xlabel('Simulation time [ps]', fontsize = 12)
         ax1.set_ylabel('Energy balance on surface [eV]', fontsize = 12)
         
-        labels = ['Surface {}'.format(i+1) for i in range(self.n_of_reservoirs)]
+        labels = ['Res {}'.format(i) for i in range(self.n_of_reservoirs)]
         labels.append('Balance')
 
         if self.n_of_reservoirs <=10:
@@ -828,16 +823,10 @@ class Visualisation(Constants):
         for i in range(self.n_of_reservoirs*3):
             ax2.plot(x_axis, y_axis[:, i])
         
-        # line = ['--', ':', '-.']
-        # for d in range(3):
-        #     i = np.arange(self.n_of_reservoirs)*3+d
-        #     ax2.plot(x_axis, np.sum(y_axis[:, i], axis = 1), linestyle = line[d], color = 'k')
-        
         ax2.set_xlabel('Simulation time [ps]', fontsize = 12)
         ax2.set_ylabel('Heat flux balance on surface [W/m²]', fontsize = 12)
         
         phi_labels = [r'$\phi_{}$, Res {}'.format(a, r) for r in range(self.n_of_reservoirs) for a in ['x', 'y', 'z']]
-        # phi_labels += ['Balance {}'.format(d) for d in ['x', 'y', 'z']]
 
         if self.n_of_reservoirs <=10:
             ax2.legend(phi_labels)

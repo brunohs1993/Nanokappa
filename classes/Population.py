@@ -157,13 +157,15 @@ class Population(Constants):
         '''Calculates the probability of a particle with the modes of a given material (phonon)
         to enter the facets of a given geometry (geometry) with imposed boundary conditions.'''
 
+        bound_thickness = phonon.number_of_active_modes/(self.particle_density*geometry.facets_area[self.res_facet])
+
         vel = np.transpose(phonon.group_vel, (0, 2, 1))           # shape = (Q, 3, J) - Group velocities of each mode
         normals = -geometry.facets_normal[self.res_facet, :] # shape = (R, 3)    - unit normals of each facet with boundary conditions
                                                                   # OBS: normals are reversed to point inwards (in the direction of entering particles).
         group_vel_parallel = np.dot(normals, vel)                 # shape = (R, Q, J) - dot product = projection of velocity over normal
         
         # Probability of a particle entering the domain
-        enter_prob = group_vel_parallel*self.dt/self.bound_thickness.reshape(-1, 1, 1)   # shape = (R, Q, J)
+        enter_prob = group_vel_parallel*self.dt/bound_thickness.reshape(-1, 1, 1)   # shape = (R, Q, J)
         enter_prob = np.where(enter_prob < 0, 0, enter_prob)
 
         return enter_prob
@@ -350,18 +352,19 @@ class Population(Constants):
         self.res_facet_temperature[mask_temp] = facets_temp                   # attribute imposed temperatures
         self.res_facet_temperature[mask_flux] = facets_temp.mean()            # initialising with the mean of the imposed temperatures
 
-        # The virtual volume of the reservoir is considered a extrusion of the facet.
-        # The extrusion thickness is calculated such that one particle per mode is created,
-        # obbeying the density of particles generated (i.e. thickness = number_of_modes/(particle_density*facet_area) );
-        
-        self.bound_thickness = phonon.number_of_active_modes/(self.particle_density*geometry.facets_area[self.res_facet])
-
         self.enter_prob = self.enter_probability(geometry, phonon)
         self.res_counter = np.random.rand(*self.enter_prob.shape)
         self.N_leaving  = np.sum(self.enter_prob, axis = (1, 2)).round().astype(int)
 
         self.res_energy_balance   = np.zeros(self.n_of_reservoirs)
         self.res_heat_flux        = np.zeros((self.n_of_reservoirs, 3))
+
+        self.res_norm = np.zeros(self.n_of_reservoirs)
+        if self.norm == 'fixed':
+            for i in range(self.n_of_reservoirs):
+                self.res_norm[i] = np.absolute(np.sum(phonon.group_vel[1:, :, :]*geometry.facets_normal[self.res_facet[i]], axis = 2)).mean()
+
+            self.res_norm *= self.dt*geometry.facets_area[self.res_facet]*self.particle_density
 
     def fill_reservoirs(self, geometry, phonon, n_leaving = None):
 
@@ -515,10 +518,16 @@ class Population(Constants):
         self.res_energy_balance   = np.zeros(self.n_of_reservoirs)
         self.res_heat_flux        = np.zeros((self.n_of_reservoirs, 3))
 
+        if self.norm == 'mean':
+            self.res_norm = np.zeros(self.n_of_reservoirs)
+
         if self.res_modes.shape[0]>0:
             self.res_occupation = phonon.calculate_occupation(self.res_temperatures, self.res_omega)
             if self.T_reference == 'local':
                 self.res_energies = np.zeros(self.res_omega.shape)
+                if self.norm == 'mean':
+                    for i in range(self.n_of_reservoirs):
+                        self.res_norm[i] += indexes.sum()
             else:
                 dn = phonon.calculate_occupation(self.res_temperatures, self.res_omega) - self.reference_occupation[self.res_modes[:, 0], self.res_modes[:, 1]]
 
@@ -528,6 +537,9 @@ class Population(Constants):
                     indexes = self.res_facet_id == facet
                     self.res_energy_balance[i] = self.res_energies[indexes].sum()
                     self.res_heat_flux[i, :]   = (self.res_group_vel[indexes, :]*self.res_energies[indexes].reshape(-1, 1)).sum(axis = 0)
+
+                    if self.norm == 'mean':
+                        self.res_norm[i] += indexes.sum()
 
     def add_reservoir_particles(self, geometry):
         '''Add the particles that came from the reservoir to the main population. Calculates flux balance for each reservoir.'''
@@ -838,7 +850,7 @@ class Population(Constants):
         self.collision_facets    = np.delete(self.collision_facets   , indexes, axis = 0)
         self.collision_positions = np.delete(self.collision_positions, indexes, axis = 0)
         self.collision_cond      = np.delete(self.collision_cond     , indexes, axis = 0)
-        self.subvol_id           = np.delete(self.subvol_id     , indexes, axis = 0)
+        self.subvol_id           = np.delete(self.subvol_id          , indexes, axis = 0)
     
     def calculate_fbz_specularity(self, geometry, phonon):
 
@@ -1539,6 +1551,9 @@ class Population(Constants):
                         energies = self.hbar*self.omega[indexes_del][indexes_res]*dn
                         self.res_energy_balance[i] -= energies.sum()
 
+                        if self.norm == 'mean':
+                            self.res_norm[i] += indexes_res.sum()
+
                         # adding heat flux
                         hflux = energies.reshape(-1, 1)*self.group_vel[indexes_del, :][indexes_res, :]
                         self.res_heat_flux[i, :] += hflux.sum(axis = 0)
@@ -1626,8 +1641,11 @@ class Population(Constants):
         
         if self.n_of_reservoirs > 0:
             
-            self.res_energy_balance   = phonon.normalise_to_density(self.res_energy_balance)
-            self.res_heat_flux        = phonon.normalise_to_density(self.res_heat_flux)*self.eVpsa2_in_Wm2
+            self.res_energy_balance   = phonon.normalise_to_density(self.res_energy_balance)/self.res_norm
+            self.res_heat_flux        = phonon.normalise_to_density(self.res_heat_flux)*self.eVpsa2_in_Wm2/self.res_norm.reshape(-1, 1)
+
+            self.res_energy_balance *= phonon.number_of_active_modes/2
+            self.res_heat_flux      *= phonon.number_of_active_modes/2
 
     def lifetime_scattering(self, phonon):
         '''Performs lifetime scattering.'''
@@ -1659,7 +1677,7 @@ class Population(Constants):
             print('Simulating...')
 
         if (self.current_timestep % 100) == 0:
-            self.write_final_state(geometry, phonon)
+            self.write_final_state(geometry)
             self.view.update_population(self, verbose = False)
             self.view.postprocess(verbose = False)
             self.update_residue(geometry)
@@ -2188,7 +2206,7 @@ class Population(Constants):
 
         self.f.close()
 
-    def write_final_state(self, geometry, phonon):
+    def write_final_state(self, geometry):
         
         time = datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f')
         
