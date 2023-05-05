@@ -44,6 +44,8 @@ class Population(Constants):
         self.args = arguments
         self.results_folder_name = self.args.results_folder
         
+        self.n_dt_to_conv = 10 # number of timesteps for each convergence datapoint
+
         self.norm = self.args.energy_normal[0]
         
         self.n_of_subvols   = geometry.n_of_subvols
@@ -364,7 +366,7 @@ class Population(Constants):
             for i in range(self.n_of_reservoirs):
                 self.res_norm[i] = np.absolute(np.sum(phonon.group_vel[1:, :, :]*geometry.facets_normal[self.res_facet[i]], axis = 2)).mean()
 
-            self.res_norm *= self.dt*geometry.facets_area[self.res_facet]*self.particle_density
+            self.res_norm *= self.dt*self.particle_density*geometry.facets_area[self.res_facet]*self.n_dt_to_conv
 
     def fill_reservoirs(self, geometry, phonon, n_leaving = None):
 
@@ -515,11 +517,11 @@ class Population(Constants):
 
         self.res_temperatures = self.res_facet_temperature[indexes] # impose temperature values to the right particles
 
-        self.res_energy_balance   = np.zeros(self.n_of_reservoirs)
-        self.res_heat_flux        = np.zeros((self.n_of_reservoirs, 3))
+        # self.res_energy_balance   = np.zeros(self.n_of_reservoirs)
+        # self.res_heat_flux        = np.zeros((self.n_of_reservoirs, 3))
 
-        if self.norm == 'mean':
-            self.res_norm = np.zeros(self.n_of_reservoirs)
+        # if self.norm == 'mean':
+        #     self.res_norm = np.zeros(self.n_of_reservoirs)
 
         if self.res_modes.shape[0]>0:
             self.res_occupation = phonon.calculate_occupation(self.res_temperatures, self.res_omega)
@@ -1275,7 +1277,7 @@ class Population(Constants):
 
                 i = 0
                 N = 1000
-                crit = 1e-5
+                crit = 1e-3
                 possible_reflections = np.zeros((0, 4))
                 while i*N < omega_out.shape[0]:
                     gc.collect()
@@ -1287,7 +1289,10 @@ class Population(Constants):
 
                     possible_indices = np.vstack(keep.nonzero()).T
 
-                    same_norm = np.absolute(1 - v_out_norm[possible_indices[:, 0]+i*N]/v_in_norm[possible_indices[:, 1]]) < crit
+                    in_over_out = v_in_norm[possible_indices[:, 1]]/v_out_norm[possible_indices[:, 0]+i*N]
+
+                    same_norm = np.logical_or(np.absolute(1-in_over_out) < crit, np.absolute(1-1/in_over_out) < crit)
+
                     keep[possible_indices[:, 0], possible_indices[:, 1]] = same_norm
                     del same_norm
 
@@ -1318,24 +1323,6 @@ class Population(Constants):
                 in_modes  =  in_modes[angle < crit, :]
                 out_modes = out_modes[angle < crit, :]
 
-                omega_diff = np.absolute(phonon.omega[ in_modes[:, 0],  in_modes[:, 1]] - phonon.omega[out_modes[:, 0], out_modes[:, 1]])
-
-                _, in_inv, in_counts = np.unique(in_modes, axis = 0, return_inverse = True, return_counts = True)
-
-                repeated = (in_counts > 1).nonzero()[0] # get the indices of the incoming modes that have more than one outgoing candidate
-
-                rep_in  = in_inv[repeated] # where they are
-
-                keep = np.in1d(in_inv, (in_counts == 1).nonzero()[0]) # array to keep track of which reflections to keep
-
-                for i in np.unique(rep_in): # for each repeated mode
-                    indices = (in_inv == i).nonzero()[0]   # get where they are in the general array
-                    min_out = np.argmin(omega_diff[indices]) # where is the minimum omega
-                    keep = np.append(keep, indices[min_out])
-                
-                in_modes = in_modes[keep, :]
-                out_modes = out_modes[keep, :]
-                
                 spec_q_in = in_modes[:, 0]           # in qpoints
                 spec_q_out = out_modes[:, 0] # out qpoints (Qa,)
 
@@ -1638,14 +1625,28 @@ class Population(Constants):
                 calculated_ts[indexes_drift]     = 1
             
         self.n_timesteps = copy.copy(new_n_timesteps)
-        
+    
+    def adjust_reservoir_balance(self, geometry, phonon):
         if self.n_of_reservoirs > 0:
             
-            self.res_energy_balance   = phonon.normalise_to_density(self.res_energy_balance)/self.res_norm
-            self.res_heat_flux        = phonon.normalise_to_density(self.res_heat_flux)*self.eVpsa2_in_Wm2/self.res_norm.reshape(-1, 1)
+            # the sum over all particles that cross the reservoir facet is an integration over time and over area.
+            # This makes the final unit of the flux sum ev/a²ps * ps * a² = eV
+            # To recover the flux, we average this energy over the area and interval of time integrated.
+            # The energy is this quantity in the direction of the normal.
 
-            self.res_energy_balance *= phonon.number_of_active_modes/2
-            self.res_heat_flux      *= phonon.number_of_active_modes/2
+            self.res_heat_flux      = phonon.normalise_to_density(self.res_heat_flux)/self.res_norm.reshape(-1, 1) # average energy crossing the boundary
+            self.res_heat_flux     *= phonon.number_of_active_modes                                                # considering the contribution of several modes
+            
+            self.res_energy_balance = np.sum(self.res_heat_flux*-geometry.facets_normal[self.res_facet, :], axis = 1)
+            
+            self.res_heat_flux      /= (self.n_dt_to_conv*self.dt*geometry.facets_area[self.res_facet].reshape(-1, 1))                # divide by area and time to convert in rate
+            self.res_heat_flux      *= self.eVpsa2_in_Wm2 # convert eV/a²ps to W/m²
+
+    def restart_reservoir_balance(self):
+        self.res_heat_flux = np.zeros((self.n_of_reservoirs, 3))
+        self.res_energy_balance = np.zeros(self.n_of_reservoirs)
+        if self.norm == 'mean':
+            self.res_norm = np.zeros(self.n_of_reservoirs)
 
     def lifetime_scattering(self, phonon):
         '''Performs lifetime scattering.'''
@@ -1710,7 +1711,9 @@ class Population(Constants):
         if ( self.current_timestep % self.n_dt_to_conv) == 0:
             self.subvol_heat_flux = self.calculate_heat_flux(geometry, phonon)
             self.calculate_kappa(geometry)
+            self.adjust_reservoir_balance(geometry, phonon)
             self.write_convergence(geometry)      # write data on file
+            self.restart_reservoir_balance()
 
         if (len(self.rt_plot) > 0) and (self.current_timestep % self.n_dt_to_plot == 0):
             self.plot_real_time(phonon)
@@ -2118,9 +2121,6 @@ class Population(Constants):
         n_dt_to_conv = np.floor( np.log10( self.args.iterations[0] ) ) - 2    # number of timesteps to save convergence data
         n_dt_to_conv = int(10**n_dt_to_conv)
         n_dt_to_conv = max([10, n_dt_to_conv])
-
-        self.n_dt_to_conv = 10
-
 
         filename = self.results_folder_name+'convergence.txt'
 

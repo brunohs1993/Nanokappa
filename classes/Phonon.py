@@ -111,6 +111,7 @@ class Phonon(Constants):
         self.load_group_vel()
         qpoints_FBZ,group_vel=expand_FBZ(0,self.weights,self.q_points,self.group_vel,1,rotations,reciprocal_lattice)
         self.group_vel=np.around(group_vel, decimals = 8)
+        # self.group_vel -= self.group_vel.mean(axis = (0, 1)) # TEST
 
         self.load_temperature()
         # print('Expanding heat capacity to FBZ...')  # Do we need heat capacity? For now it is not used anywhere...  
