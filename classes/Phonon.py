@@ -142,6 +142,11 @@ class Phonon(Constants):
 
         self.unique_modes = np.stack(np.meshgrid( np.arange(self.number_of_qpoints), np.arange(self.number_of_branches) ), axis = -1 ).reshape(-1, 2).astype(int)
 
+        # np.savetxt('scat_dataset.txt', np.hstack((self.unique_modes,
+        #                                          self.omega[self.unique_modes[:, 0], self.unique_modes[:, 1]].reshape(-1, 1),
+        #                                          self.group_vel[self.unique_modes[:, 0], self.unique_modes[:, 1], :])), delimiter = ',', fmt = '%d %d %+23.16e %+23.16e %+23.16e %+23.16e')
+        # quit()
+
         self.get_wavevectors()
         self.get_norms()
 
@@ -159,6 +164,8 @@ class Phonon(Constants):
         self.initialise_temperature_function()
 
         self.initialise_density_of_states()
+
+        
 
     def load_hdf_data(self, hdf_file):
         ''' Get all data from hdf file.

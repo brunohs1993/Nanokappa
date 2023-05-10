@@ -17,6 +17,7 @@ import sys
 import os
 import copy
 import gc
+import time
 
 from classes.Constants     import Constants
 from classes.Visualisation import Visualisation
@@ -1255,7 +1256,7 @@ class Population(Constants):
             k_grid = phonon.q_to_k(np.absolute(1/(2*phonon.data_mesh))) # size of the grid in each direction
 
             delta_omega = np.sum((phonon.group_vel*k_grid)**2, axis = 2)**0.5 # the acceptable variation of omega from the central value for each mode
-            
+
             for i_n, n in enumerate(normals):
                 gc.collect()
                 v_dot_n = np.sum(v*n, axis = 2) 
@@ -1272,42 +1273,138 @@ class Population(Constants):
                 delta_omega_in  = delta_omega[ in_modes[:, 0],  in_modes[:, 1]]
                 delta_omega_out = delta_omega[out_modes[:, 0], out_modes[:, 1]]
 
-                v_in_norm  = np.linalg.norm(phonon.group_vel[in_modes[:, 0], in_modes[:, 1], :], axis = 1)
-                v_out_norm = np.linalg.norm(phonon.group_vel[out_modes[:, 0], out_modes[:, 1], :], axis = 1)
+                v_in = phonon.group_vel[in_modes[:, 0], in_modes[:, 1], :]
+                v_in = v_in - 2*n*(np.sum(v_in*n, axis = 1, keepdims = True))
 
-                i = 0
-                N = 1000
+                v_out = phonon.group_vel[out_modes[:, 0], out_modes[:, 1], :]
+
+                v_in_norm = np.linalg.norm(v_in, axis = 1)
+                v_out_norm = np.linalg.norm(v_out, axis = 1)
+
+                # i = 0
+                # N = 1000
                 crit = 1e-3
-                possible_reflections = np.zeros((0, 4))
-                while i*N < omega_out.shape[0]:
-                    gc.collect()
-                    diff = np.absolute(omega_in - np.expand_dims(omega_out[i*N:(i+1)*N], 1))
-                    delta = delta_omega_in + np.expand_dims(delta_omega_out[i*N:(i+1)*N], 1)
+                # possible_reflections = np.zeros((0, 2))
+                start = time.time()
+                # while i*N < omega_out.shape[0]:
+                #     gc.collect()
+
+                #     ref_norm = np.fmax(np.expand_dims(v_in_norm, 1), v_out_norm[i*N:(i+1)*N])
                     
-                    keep = diff < delta
-                    del diff, delta
+                #     # (N, N_in)            (N_in,)             (N, 1)
+                #     diff  = np.absolute(np.expand_dims(v_in[:, 0], 1) - v_out[i*N:(i+1)*N, 0])
+                #     # (N, N_in)                    (N_in,)             (N, 1)
+                #     possible_indices = np.vstack((diff/ref_norm < crit).nonzero()).T
+                #     possible_indices[:, 1] += i*N
 
-                    possible_indices = np.vstack(keep.nonzero()).T
+                #     possible_reflections = np.vstack((possible_reflections,
+                #                                       possible_indices))
+                    
+                #     i+=1
 
-                    in_over_out = v_in_norm[possible_indices[:, 1]]/v_out_norm[possible_indices[:, 0]+i*N]
-
-                    same_norm = np.logical_or(np.absolute(1-in_over_out) < crit, np.absolute(1-1/in_over_out) < crit)
-
-                    keep[possible_indices[:, 0], possible_indices[:, 1]] = same_norm
-                    del same_norm
-
-                    possible_indices = np.vstack(keep.nonzero()).T
-                    del keep
-                    possible_reflections = np.vstack((possible_reflections,
-                                                      np.hstack((in_modes[possible_indices[:, 1], :],
-                                                                 out_modes[possible_indices[:, 0]+i*N, :]))))
-                    del possible_indices
-
-                    i+=1
+                # possible_reflections = possible_reflections.astype(int)
+                ################
+                # sorted vx
+                sorted_i_out = np.argsort(v_out[:, 0])
+                sorted_vx_out = v_out[sorted_i_out, 0]
                 
-                in_modes  = possible_reflections[:, [0,1]].astype(int)
-                out_modes = possible_reflections[:, [2,3]].astype(int)
-                del possible_reflections
+                sorted_i_in = np.argsort(v_in[:, 0])
+                sorted_vx_in = v_in[sorted_i_in, 0]
+
+                sorted_norm_out = v_out_norm[sorted_i_out]
+                sorted_norm_in = v_in_norm[sorted_i_in]
+
+                right_i = np.searchsorted(sorted_vx_out, sorted_vx_in, side = 'right')
+                # going to the right
+                far_right = right_i == sorted_vx_out.shape[0]
+
+                norm = np.fmax(sorted_norm_out[right_i[~far_right]], sorted_norm_in[~far_right])
+
+                far_right[~far_right] = (sorted_vx_out[right_i[~far_right]] - sorted_vx_in[~far_right])/norm > crit
+                done = np.copy(far_right)
+                while not np.all(done):
+                    done[~done] = right_i[~done] == sorted_vx_out.shape[0] # check the ones not done are at the border and mark them as done
+
+                    norm = np.fmax(sorted_norm_out[right_i[~done] + 1], sorted_norm_in[~done])
+                    
+                    take_step = (sorted_vx_out[right_i[~done] + 1] - sorted_vx_in[~done])/norm < crit # check if the ones not done can take a step
+                    
+                    ind = (~done).nonzero()[0][take_step] # indices of the ones that will walk
+
+                    done[~done] = ~take_step # the ones that won't walk are done
+
+                    right_i[ind] += 1
+                
+                left_i = np.searchsorted(sorted_vx_out, sorted_vx_in, side = 'left')-1
+                # going to the left
+                far_left = left_i == -1
+
+                norm = np.fmax(sorted_norm_out[left_i[~far_left]-1], sorted_norm_in[~far_left])
+
+                far_left[~far_left] = (sorted_vx_in[~far_left] - sorted_vx_out[left_i[~far_left]])/norm > crit
+                done = np.copy(far_left)
+                while not np.all(done):
+                    done[~done] = left_i[~done] == 0 # check the ones not done are at the border and mark them as done
+
+                    norm = np.fmax(sorted_norm_out[left_i[~done]-1], sorted_norm_in[~done])
+                    
+                    take_step = (sorted_vx_in[~done] - sorted_vx_out[left_i[~done] - 1])/norm < crit # check if the ones not done can take a step
+                    
+                    ind = (~done).nonzero()[0][take_step] # indices of the ones that will walk
+
+                    done[~done] = ~take_step # the ones that won't walk are done
+
+                    left_i[ind] -= 1
+
+                # saving the possible reflections in vx
+                right_i[far_right] -= 1
+                left_i[far_left] += 1
+                
+                L = right_i - left_i + 1 # how many possible reflections for each incoming mode
+                
+                possible_reflections = np.zeros((L.sum(), 2), dtype = int) # initialise possible reflections array
+                N = 0 # initialise position
+                for i in range(sorted_vx_in.shape[0]): # for each SORTED vx_in
+                    if L[i] > 0:
+                        possible_reflections[N:N+L[i], 0] = sorted_i_in[i]
+                        possible_reflections[N:N+L[i], 1] = sorted_i_out[left_i[i]:right_i[i]+1]
+                        N += L[i]
+                
+                #############
+
+                print(possible_reflections.shape)
+                print('vx', time.time() - start)
+                start = time.time()
+                
+                
+                ref_norm = np.fmax(v_in_norm[possible_reflections[:, 0]], v_out_norm[possible_reflections[:, 1]])
+                # DIRECTION Y
+                diff = np.absolute(v_in[possible_reflections[:, 0], 1] - v_out[possible_reflections[:, 1], 1])
+                possible_reflections = possible_reflections[diff/ref_norm < crit, :]
+                ref_norm = ref_norm[diff/ref_norm < crit]
+                
+                print(possible_reflections.shape)
+                print('vy', time.time() - start)
+                start = time.time()
+
+                # DIRECTION Z
+                diff = np.absolute(v_in[possible_reflections[:, 0], 2] - v_out[possible_reflections[:, 1], 2])
+                possible_reflections = possible_reflections[diff/ref_norm < crit, :]
+
+                print(possible_reflections.shape)
+                print('vz', time.time() - start)
+                start = time.time()
+
+                diff = np.absolute(omega_in[possible_reflections[:, 0]] - omega_out[possible_reflections[:, 1]])
+                delta = delta_omega_in[possible_reflections[:, 0]] + delta_omega_out[possible_reflections[:, 1]]
+
+                possible_reflections = possible_reflections[diff < delta, :]
+                print(possible_reflections.shape)
+                print('omega', time.time() - start)
+                start = time.time()
+
+                in_modes  =  in_modes[possible_reflections[:, 0], :]
+                out_modes = out_modes[possible_reflections[:, 1], :]
 
                 v_in  = v[ in_modes[:, 0],  in_modes[:, 1], :]
                 v_out = v[out_modes[:, 0], out_modes[:, 1], :]
@@ -1322,7 +1419,11 @@ class Population(Constants):
 
                 in_modes  =  in_modes[angle < crit, :]
                 out_modes = out_modes[angle < crit, :]
+                
+                print(possible_reflections.shape)
+                print('angle', time.time() - start)
 
+                ############################
                 spec_q_in = in_modes[:, 0]           # in qpoints
                 spec_q_out = out_modes[:, 0] # out qpoints (Qa,)
 
