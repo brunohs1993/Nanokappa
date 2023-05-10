@@ -17,7 +17,6 @@ import sys
 import os
 import copy
 import gc
-import time
 
 from classes.Constants     import Constants
 from classes.Visualisation import Visualisation
@@ -1281,29 +1280,8 @@ class Population(Constants):
                 v_in_norm = np.linalg.norm(v_in, axis = 1)
                 v_out_norm = np.linalg.norm(v_out, axis = 1)
 
-                # i = 0
-                # N = 1000
                 crit = 1e-3
-                # possible_reflections = np.zeros((0, 2))
-                start = time.time()
-                # while i*N < omega_out.shape[0]:
-                #     gc.collect()
-
-                #     ref_norm = np.fmax(np.expand_dims(v_in_norm, 1), v_out_norm[i*N:(i+1)*N])
-                    
-                #     # (N, N_in)            (N_in,)             (N, 1)
-                #     diff  = np.absolute(np.expand_dims(v_in[:, 0], 1) - v_out[i*N:(i+1)*N, 0])
-                #     # (N, N_in)                    (N_in,)             (N, 1)
-                #     possible_indices = np.vstack((diff/ref_norm < crit).nonzero()).T
-                #     possible_indices[:, 1] += i*N
-
-                #     possible_reflections = np.vstack((possible_reflections,
-                #                                       possible_indices))
-                    
-                #     i+=1
-
-                # possible_reflections = possible_reflections.astype(int)
-                ################
+                
                 # sorted vx
                 sorted_i_out = np.argsort(v_out[:, 0])
                 sorted_vx_out = v_out[sorted_i_out, 0]
@@ -1370,38 +1348,20 @@ class Population(Constants):
                         possible_reflections[N:N+L[i], 1] = sorted_i_out[left_i[i]:right_i[i]+1]
                         N += L[i]
                 
-                #############
-
-                print(possible_reflections.shape)
-                print('vx', time.time() - start)
-                start = time.time()
-                
-                
                 ref_norm = np.fmax(v_in_norm[possible_reflections[:, 0]], v_out_norm[possible_reflections[:, 1]])
                 # DIRECTION Y
                 diff = np.absolute(v_in[possible_reflections[:, 0], 1] - v_out[possible_reflections[:, 1], 1])
                 possible_reflections = possible_reflections[diff/ref_norm < crit, :]
                 ref_norm = ref_norm[diff/ref_norm < crit]
                 
-                print(possible_reflections.shape)
-                print('vy', time.time() - start)
-                start = time.time()
-
                 # DIRECTION Z
                 diff = np.absolute(v_in[possible_reflections[:, 0], 2] - v_out[possible_reflections[:, 1], 2])
                 possible_reflections = possible_reflections[diff/ref_norm < crit, :]
-
-                print(possible_reflections.shape)
-                print('vz', time.time() - start)
-                start = time.time()
 
                 diff = np.absolute(omega_in[possible_reflections[:, 0]] - omega_out[possible_reflections[:, 1]])
                 delta = delta_omega_in[possible_reflections[:, 0]] + delta_omega_out[possible_reflections[:, 1]]
 
                 possible_reflections = possible_reflections[diff < delta, :]
-                print(possible_reflections.shape)
-                print('omega', time.time() - start)
-                start = time.time()
 
                 in_modes  =  in_modes[possible_reflections[:, 0], :]
                 out_modes = out_modes[possible_reflections[:, 1], :]
@@ -1420,10 +1380,6 @@ class Population(Constants):
                 in_modes  =  in_modes[angle < crit, :]
                 out_modes = out_modes[angle < crit, :]
                 
-                print(possible_reflections.shape)
-                print('angle', time.time() - start)
-
-                ############################
                 spec_q_in = in_modes[:, 0]           # in qpoints
                 spec_q_out = out_modes[:, 0] # out qpoints (Qa,)
 
