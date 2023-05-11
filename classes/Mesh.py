@@ -294,7 +294,7 @@ class Mesh:
         edges_count = [np.unique(self.face_edges[fct, :].ravel(), return_counts = True) for fct in self.facets]
         
         self.facets_edges    = [i[0].astype(int) for i in edges_count] # edges composing the facet
-        self.facets_boundary = [i[0][i[1] == 1].astype(int) for i in edges_count] # edges of the facet that are note shared in the facet
+        self.facets_boundary = [i[0][i[1] == 1].astype(int) for i in edges_count] # edges of the facet that are not shared in the facet
 
         self.facets_origin = np.array([self.vertices[self.faces[i[0], 0], :] for i in self.facets])
 
@@ -348,7 +348,7 @@ class Mesh:
         else:
             self.interfaces = np.array([], dtype = int)
     
-    def triangulate_volume(self, max_edge_div = 100, sample_volume = 100, sample_surface = 100):
+    def triangulate_volume(self, max_edge_div = 100, sample_volume = 0, sample_surface = 0):
         '''Delaunay triangulation of the mesh volume, keeping the simplices for volume calculations.
            Arguments:
            - max_edge_div (bool) : maximum length between points to subdivde mesh edges;
@@ -364,8 +364,11 @@ class Mesh:
         else:
             inv_failed = True
             while inv_failed:
+                
                 self.simplices_points = np.zeros((0, 3))
-                for e in self.edges:
+                
+                edges = np.unique(np.concatenate(self.facets_boundary))
+                for e in self.edges[edges, :]:
                     n = int(np.ceil(np.linalg.norm(self.vertices[e[1], :] - self.vertices[e[0], :])/max_edge_div))
                     new = self.vertices[e[0], :] + (self.vertices[e[1], :] - self.vertices[e[0], :])*np.arange(1, n).reshape(-1, 1)/n
                     self.simplices_points = np.vstack((self.simplices_points, new))
@@ -399,7 +402,7 @@ class Mesh:
                 to_del = V <= 1e-6
 
                 c = self.simplices_points[tri.simplices].mean(axis = 1)
-                
+
                 contains = self.contains_naive(c)
 
                 to_del = np.logical_or(to_del, ~contains)
@@ -415,7 +418,6 @@ class Mesh:
                 v1 = self.simplices_points[self.simplices[:, 1], :] - self.simplices_points[self.simplices[:, 0], :]
                 v2 = self.simplices_points[self.simplices[:, 2], :] - self.simplices_points[self.simplices[:, 0], :]
                 v3 = self.simplices_points[self.simplices[:, 3], :] - self.simplices_points[self.simplices[:, 0], :]
-
 
                 A = np.concatenate((np.expand_dims(v1, 1),
                                     np.expand_dims(v2, 1),
@@ -486,8 +488,7 @@ class Mesh:
     def get_volume_properties(self):
         '''Calculate volume and center of mass.'''
 
-        # self.triangulate_volume()
-        self.triangulate_volume(max_edge_div=1000, sample_volume = 100, sample_surface=100)
+        self.triangulate_volume(max_edge_div=1000, sample_volume = 0, sample_surface=0)
         if self.simplices.shape[0] == 0:
             self.volume = 0
             self.center_mass = self.facet_centroid[0, :]
@@ -503,7 +504,6 @@ class Mesh:
             n = X/np.linalg.norm(X, axis = 1, keepdims = True)
 
             h = np.absolute(np.sum(v3*n, axis = 1, keepdims = True))
-
             V = A*h/3
 
             self.volume = np.sum(V)

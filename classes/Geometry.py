@@ -56,10 +56,9 @@ class Geometry:
         self.load_geo_file(self.shape) # loading
         self.transform_mesh()          # transforming
         self.get_mesh_properties()
-        self.plot_triangulation(linestyle = ':')
+        self.plot_triangulation(linestyle = '-')
         self.get_bound_facets(args)    # get boundary conditions facets
         self.check_facet_connections(args)   # check if all connections are valid and adjust vertices
-        # self.save_reservoir_meshes(engine = 'earcut')   # save meshes of each reservoir after adjust vertices
         self.plot_mesh_bc()
         self.set_subvolumes()          # define subvolumes and save their meshes and properties
         
@@ -223,16 +222,9 @@ class Geometry:
             
             self.slice_length = np.ptp(self.bounds[:, self.slice_axis])/self.n_of_subvols
 
-            # self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
-            #                                           xc = self.scale_positions(self.subvol_center))
             self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
                                                       xc = self.subvol_center)
             self.subvol_volume = self.calculate_subvol_volume(algorithm = 'mc', tol = 1e-4, return_centers = False)
-
-            # try: # try slicing the mesh first
-            #     self.subvol_volume, self.subvol_center = self.calculate_subvol_volume(return_centers = True)
-            # except: # if it gives an error, try with quasi monte carlo / sobol sampling
-            #     self.subvol_volume, self.subvol_center = self.calculate_subvol_volume(algorithm = 'qmc', return_centers = True)
 
             self.get_subvol_connections()
 
@@ -249,8 +241,6 @@ class Geometry:
             
             self.get_subvol_connections()
 
-            # self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
-            #                                       xc = self.scale_positions(self.subvol_center))
             self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
                                                       xc = self.subvol_center)
 
@@ -288,16 +278,10 @@ class Geometry:
 
             self.get_subvol_connections()
 
-            # self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
-            #                                           xc = self.scale_positions(self.subvol_center))
             self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
                                                       xc = self.subvol_center)
 
             self.subvol_volume = self.calculate_subvol_volume(algorithm = 'mc', tol = 1e-4, verbose = False)
-            # try: # try slicing the mesh first
-            #     self.subvol_volume = self.calculate_subvol_volume(verbose = False)
-            # except: # if it gives an error, try with quasi monte carlo / sobol sampling
-            #     self.subvol_volume = self.calculate_subvol_volume(algorithm = 'qmc', tol = 1e-4, verbose = False)
 
         else:
             print('Invalid subvolume type!')
@@ -446,8 +430,6 @@ class Geometry:
             subvol_volume = cover*self.volume
 
             if return_centers:
-                # scaled_samples = self.scale_positions(samples)                
-                # r = np.argmax(self.subvol_classifier.predict(scaled_samples), axis = 1)
                 r = self.subvol_classifier.predict(samples)
                 subvol_center = np.zeros((self.n_of_subvols, 3))
                 for sv in range(self.n_of_subvols):
@@ -887,7 +869,6 @@ class Geometry:
 
     def snap_path(self, points):
 
-        # sv_points = np.argmax(self.subvol_classifier.predict(self.scale_positions(points)), axis = 1)
         sv_points = self.subvol_classifier.predict(points)
         
         if np.unique(sv_points).shape[0] == 1:
@@ -954,7 +935,6 @@ class Geometry:
                     best_start = psbl_start[i_start]
                 
                     i_end = (dot_end == dot_end.max()).nonzero()[0]
-                    # time.sleep(1)
                     if i_end.shape[0] > 1:
                         total_dot_end = (local_v_end[i_end, :]*-total_v).sum(axis = 1)
                         i_end = i_end[total_dot_end == total_dot_end.max()][0]
@@ -967,16 +947,12 @@ class Geometry:
                         if best_start != local_end:
                             if path[i-1] != best_start or local_start == sv_points[i_start]:
                                 path = np.insert(path, i+1, best_start)
-                            # else:
-                            #     path = np.delete(path, i)
                         local_start = best_start
                     else:
                         i = (path == local_end).nonzero()[0][-1]
                         if best_end != local_start:
                             if path[i-1] != best_end or local_end == sv_points[i_end]:
                                 path = np.insert(path, i, best_end)
-                            # else:
-                            #     path = np.delete(path, i-1, best_end)
                         local_end = best_end
                 
                 all_paths.append(path)
@@ -999,12 +975,9 @@ class Geometry:
     def plot_triangulation(self, mesh = None, fig = None, ax = None, l_color = 'k', linestyle = '-', dpi = 200):
         if mesh is None:
             mesh = self.mesh
-        
         fig, ax = self.mesh.plot_triangulation(fig = fig, ax = ax, l_color = l_color, linestyle = linestyle, dpi = dpi)
-
         fig.savefig(self.args.results_folder + 'triangulation.png')
         plt.close(fig)
-        
 
 class SubvolClassifier():
     def __init__(self, n, xc = None, a = None):
