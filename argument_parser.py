@@ -4,11 +4,7 @@ import sys
 
 # NOTES:
 # I propose to remove from user access the following parameters:
-# --energy_norm     --> let the standard be "mean" and leave "fixed" only for debugging. More stable and lower uncertainty for the same result.
-# --reservoir_gen   --> one-to-one should be used only for debugging and constant should be the norm.
 # --particle_dist   --> another parameters that can be left only for debugging, with random_subvol as standard.
-# --subvol_material --> think about how to define materials. Define interfaces first, with the geometry and then material, or assign material to subvolumes
-#                       and then generate interfaces;
 
 def initialise_parser():
 
@@ -63,16 +59,16 @@ def initialise_parser():
                                                               'The "linear" option only works with slices and defaults to "radial" when used with other types of subvolumes.')
     parser.add_argument('--subvol_temp'    , '-st', default = [],
                         type = float, nargs = '*' , help    = 'Set subvolumes temperatures when custom profile is selected.')
-    parser.add_argument('--bound_cond'     , '-bc', default = ['T', 'T', 'P'], choices = ['T', 'P', 'F', 'R'],
-                        type = str  , nargs = '*' , help    = 'Set boundary conditions to each specific facet. Choose between "T" for temperature, "F" for flux, '+
+    parser.add_argument('--bound_cond'     , '-bc', default = ['T', 'T', 'P'], choices = ['T', 'P', 'R'],
+                        type = str  , nargs = '*' , help    = 'Set boundary conditions to each specific facet. Choose between "T" for temperature,'+
                                                               '"R" for roughness or "P" for periodic. The respective values need to be set in --bound_values '+
                                                               '(not for periodic boundary condition).')
     parser.add_argument('--bound_pos'     , '-bp'    , default = [],
-                                      nargs = '*' , help    = 'Set the POSITIONS from which to find the closest facet to apply the specific boundary conditions. Nargs depends on what was specified on --bound_cond.' + 
+                                      nargs = '*' , help    = 'Set the positions from which to find the closest facet to apply the specific boundary conditions. Nargs depends on what was specified on --bound_cond.' + 
                                                              'First value is a keyword "relative" - considers all points in the mesh between 0 and 1 - or "absolute" - direct positions. Set points as kw x1 y1 z1 x2 y2 z2 etc.' +
                                                              'If --bound_cond/--bound_values has more values than --bound_pos, the last boundary condition will be applied to all non-specified facets.')
     parser.add_argument('--bound_values'  , '-bv' , default = [],
-                        type = float, nargs = '*' , help    = 'Set boundary conditions values to be imposed (temperature [K], flux [W/m^2] or roughness [angstrom]).')
+                        type = float, nargs = '*' , help    = 'Set boundary conditions values to be imposed (temperature [K] or roughness [angstrom]).')
     parser.add_argument('--connect_pos'   , '-cp' , default = [],
                                       nargs = '*' , help    = 'Set the POSITIONS from which to find the closest facet to apply the connections between facets. Nargs depends on what was specified on --bound_cond.' + 
                                                              'First value is a keyword "relative" - considers all points in the mesh between 0 and 1 - or "absolute" - direct positions. Set points as kw x1 y1 z1 x2 y2 z2 etc.' +
@@ -80,13 +76,10 @@ def initialise_parser():
     parser.add_argument('--reservoir_gen' , '-gn' , default = ['fixed_rate'], choices = ['fixed_rate', 'one_to_one', 'constant'],
                         type = str  , nargs = '*' , help    = 'Set the type of generation of particles in the reservoir. "fixed_rate" means the generation is independent from the particles leaving the domain. '+
                                                               '"one_to_one" means that a particle will be generated only when a particle leaves the domain (one leaves, one enters).')
-    # parser.add_argument('--offset'        , '-os' , default = [1e-3],
-    #                     type = float, nargs = 1   , help    = 'The offset margin from facets to avoid problems with Trimesh collision detection. Default is 2*trimesh.tol.merge = 2e-8.')
-
     parser.add_argument('--path_points'  , '-pp'  , default = [],
                                       nargs = '*' , help    = 'Set the points where the path to calculate kappa should go through. Declared the same way as --bound_pos')
 
-    parser.add_argument('--energy_normal' , '-en' , default = ['fixed'],
+    parser.add_argument('--energy_normal' , '-en' , default = ['mean'],
                         type = str  , nargs = 1   , help    = 'Set the energy normalisation in subvolume. "fixed" is divided by the expected number of particles in the subvolume (standard).'+
                                                              ' "mean" is the aritmetic mean.')
                         
@@ -94,9 +87,9 @@ def initialise_parser():
                         type = str  , nargs = '*' , help    = 'Set which property you want to see in the real time plot during simulation. Choose between T, omega, e, n and None (random colors).')
     parser.add_argument('--fig_plot'      , '-fp' , default = ['T', 'omega', 'e'],
                         type = str  , nargs = '*' , help    = 'Save figures with properties distributions. Standard is T, omega and energy.')
-    parser.add_argument('--colormap'      , '-cm' , default = ['viridis'],
-                        type = str  , nargs = 1   , help    = 'Set matplotlib colormap to be used on all plots. Standard is viridis.')
-    parser.add_argument('--theme'         , '-th' , default = ['light'], choices = ['light', 'dark'],
+    parser.add_argument('--colormap'      , '-cm' , default = ['jet'],
+                        type = str  , nargs = 1   , help    = 'Set matplotlib colormap to be used on all plots. Standard is jet.')
+    parser.add_argument('--theme'         , '-th' , default = ['light'], choices = ['white', 'light', 'dark', 'black'],
                         type = str  , nargs = 1   , help    = 'Set theme color for all plots.')
     parser.add_argument('--n_mean'        , '-nm' , default  = [100], 
                         type = int  , nargs = 1   , help    = 'The number of datapoints to consider when calculating mean and stdev values. Each datapoint = 10 iterations. Default is 100.')
@@ -110,8 +103,6 @@ def initialise_parser():
     parser.add_argument('--mat_folder'      , '-mf', default  = ['']   ,  type = str, nargs = '*', help     = 'Set folder with material data.'  ) # lattice properties
     parser.add_argument('--poscar_file'     , '-pf', required = True   , type = str, nargs = '*', help     = 'Set the POSCAR file to be read.' ) # lattice properties
     parser.add_argument('--hdf_file'        , '-hf', required = True   , type = str, nargs = '*', help     = 'Set the hdf5 file to be read.'   ) # phonon properties of the material
-    parser.add_argument('--pickled_mat'     , '-pm', default  = []     , type = int, nargs = '*', help     = 'Inform if any material can be loaded from pickled object.')
-    parser.add_argument('--mat_names'       , '-mn', required = True   , type = str, nargs = '*', help     = 'Set the names of each material.' ) #
 
     parser.add_argument('--results_folder'  , '-rf', default  = []     , type = str,nargs = '*', help     = 'Set the results folder name.'    ) # 
     parser.add_argument('--results_location', '-rl', default  = 'local', type = str, help     = 'Set the results folder location.') # 

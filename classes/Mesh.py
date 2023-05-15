@@ -63,7 +63,7 @@ class Mesh:
         self.n_of_vertices = self.vertices.shape[0]
         self.bounds  = np.vstack((self.vertices.min(axis = 0), self.vertices.max(axis = 0)))
         self.extents = self.bounds.ptp(axis = 0)
-
+        
         if remove_unref:
             self.remove_unref_vertices(update = False)
         self.get_faces_properties()  # faces_centroids, face_normals, face_area, adjacency
@@ -72,6 +72,7 @@ class Mesh:
         self.get_facets_properties() # facets, facet_normals, facet_centroid, facet_area
         self.get_interfaces()
         self.check_winding()
+
         if triangulate_volume:
             self.get_volume_properties()
 
@@ -233,8 +234,14 @@ class Mesh:
 
         self.get_face_k()
 
-        self.face_bounds = np.concatenate((np.expand_dims(self.vertices[self.faces, :].min(axis = 1), 0),
-                                           np.expand_dims(self.vertices[self.faces, :].max(axis = 1), 0)), axis = 0)
+        self.face_bounds = np.zeros((2, 0, 3))
+
+        for f in self.faces:
+            self.face_bounds = np.concatenate((self.face_bounds, np.expand_dims(np.vstack((self.vertices[f, :].min(axis = 0),
+                                                                                           self.vertices[f, :].max(axis = 0))), axis = 1)), axis = 1)
+
+        # self.face_bounds = np.concatenate((np.expand_dims(self.vertices[self.faces, :].min(axis = 1), 0),
+        #                                    np.expand_dims(self.vertices[self.faces, :].max(axis = 1), 0)), axis = 0)
         
     def get_facets_properties(self, tol = None):
         '''Get:
@@ -254,8 +261,6 @@ class Mesh:
 
         coplanar = np.zeros(self.face_adjacency.shape[0], dtype = bool)
         for i, a in enumerate(self.face_adjacency):
-            # s_n = np.linalg.norm(n[a[0], :]-n[a[1], :]) < 1e-10 # same normal
-            # s_k = np.absolute(k[a[0]] - k[a[1]]) < 1e-10        # same constant
 
             s_n = np.absolute((n[a[0], :]*n[a[1], :]).sum()) > (1 - tol)
             s_k = np.absolute(k[a[0]]) - np.absolute(k[a[1]]) < tol        # same constant
@@ -623,7 +628,6 @@ class Mesh:
             for e in self.facets_boundary[fct]:
                 ax.plot(self.vertices[self.edges[e, :], 0], self.vertices[self.edges[e, :], 1], self.vertices[self.edges[e, :], 2], linestyle = linestyle, color = l_color)
             if number_facets:
-                # c = self.get_facet_centroid(int(fct))
                 c = self.facet_centroid[int(fct), :]
                 ax.scatter(c[0], c[1], c[2], marker = markerstyle, c = m_color)
                 ax.text(c[0], c[1], c[2], s = fct)
@@ -641,11 +645,11 @@ class Mesh:
         
         n_p = x.shape[0]
         
-        #        (P, 1, 3)                (F, 3)                  (F, 3)               (P, 1, 3)        (F, 3)
-        pj = np.expand_dims(x, 1) - self.face_normals*np.expand_dims(np.sum(self.face_normals*(np.expand_dims(x, 1)-self.face_origins), axis = -1), 2) #(P, F, 3)
+        #        (P, 1, 3)                (F, 3)                                 (F, 3)               (P, 1, 3)        (F, 3)
+        pj = np.expand_dims(x, 1) - self.face_normals*np.expand_dims(np.sum(self.face_normals*(np.expand_dims(x, 1)-self.face_origins), axis = -1), 2) # (P, F, 3)
         
-        valid = np.logical_and(np.all(pj >= self.face_bounds[0, :, :]-self.tol, axis = 2), # (P, F)
-                               np.all(pj <= self.face_bounds[1, :, :]+self.tol, axis = 2)) # with tolerance margin to avoid numerical errors 
+        valid = np.logical_and(np.all(pj >= (self.face_bounds[0, :, :]-self.tol), axis = 2), # (P, F)
+                               np.all(pj <= (self.face_bounds[1, :, :]+self.tol), axis = 2)) # with tolerance margin to avoid numerical errors 
         
         in_p, in_f = valid.nonzero()
 
@@ -663,7 +667,7 @@ class Mesh:
         d[in_p, in_f] = np.linalg.norm(pj[in_p, in_f, :] - x[in_p, :], axis = 1)
         
         d_min = d.min(axis = 1)
-        f = np.argmax(d == np.expand_dims(d_min, 1), axis = 1)
+        f = np.argmin(d, axis = 1)
         f[np.isinf(d_min)] = -1
 
         return f.astype(int), d[np.arange(n_p), f], pj[np.arange(n_p), f, :]
@@ -733,15 +737,10 @@ class Mesh:
 
     def contains_naive(self, x):
 
-        v = np.mean(self.bounds, axis = 0) - x
-        v /= np.linalg.norm(v, axis = 1, keepdims = True)
-        # _, _, f = self.find_boundary(x, v)
         f, _, p = self.closest_face(x)
 
         contains = f >= 0
         contains[contains] = np.sum(self.face_normals[f[contains], :]*(p[contains, :] - x[contains, :]), axis = 1) > 0
-
-        # contains[contains] = np.sum(self.facets_normal[f[contains], :]*v[contains, :], axis = 1) >= 0
 
         return contains
 

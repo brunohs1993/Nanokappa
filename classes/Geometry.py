@@ -36,14 +36,17 @@ class Geometry:
         self.args            = args
         self.standard_shapes = ['cuboid', 'cillinder', 'sphere']
         self.scale           = args.scale
-        self.dimensions      = args.dimensions             # angstrom
+        
+        self.shape           = args.geometry[0]
+        self.dimensions      = args.dimensions
+        
         if len(args.geo_rotation) > 0:
             self.rotation  = np.array(args.geo_rotation[:-1]).astype(float)
             self.rot_order = args.geo_rotation[-1]
         else:
             self.rotation = None
             self.rot_order = None
-        self.shape           = args.geometry[0]
+        
         self.subvol_type     = args.subvolumes[0]
         
         self.folder          = args.results_folder
@@ -72,19 +75,10 @@ class Geometry:
         
         print('Loading geometry...')
 
-        if shape in ['cuboid', 'box', 'cylinder', 'rod', 'bar']:
+        if shape in ['cuboid', 'box', 'cylinder', 'rod', 'bar', 'star', 'castle']:
             self.mesh = self.generate_primitives(shape, self.dimensions)
         else:
-            if shape == 'cone':
-                prev_mesh = tm.creation.cone( self.dimensions[0], self.dimensions[1] )
-            elif shape == 'capsule':
-                prev_mesh = tm.creation.capsule( self.dimensions[0], self.dimensions[1] )
-            elif shape == 'sphere':
-                prev_mesh = tm.creation.uv_sphere( radius = self.dimensions[0], count = [int(self.dimensions[1]), int(self.dimensions[2])] )
-            elif shape == 'icosphere':
-                prev_mesh = tm.creation.icosphere( radius = float(self.dimensions[0]), subdivisions = int(self.dimensions[1]) )
-            else:
-                prev_mesh = tm.load(shape)
+            prev_mesh = tm.load(shape)
                 
             self.mesh = Mesh(np.around(prev_mesh.vertices, decimals = 10), prev_mesh.faces)
 
@@ -112,8 +106,6 @@ class Geometry:
                               [1, 5, 6],
                               [1, 6, 2]], dtype = int)
 
-        elif shape in ['sphere', 'ball']:
-            pass
         elif shape in ['cylinder', 'rod', 'bar']:
             L = float(dims[0])
             R = float(dims[1])
@@ -148,13 +140,116 @@ class Geometry:
             faces = np.vstack(faces).astype(int)         # group
             faces = np.vstack((faces, faces[:N, :]+N+1)) # upper base
 
-        elif shape in ['zig-zag', 'zigzag', 'corrugated']:
+        elif shape in ['zigzag']:
             pass
+        elif shape in ['corrugated']:
+            pass
+        elif shape in ['castle']:
+            L  = float(dims[0]) # large castle length
+            l  = float(dims[1]) # small castle length
+            R  = float(dims[2]) # outer radius
+            r  = float(dims[3]) # inner radius
+            Ns = int(dims[4])   # number of sides
+            Nc = int(dims[5])   # number of "castles"
+            s  = bool(dims[6])  # start with large castle or not
+
+            if R <= r:
+                raise Exception('Outer radius smaller or equal to the inner radius. Check parameters.')
+            
+            outer_angles = np.arange(Ns)*2*np.pi/Ns
+            inner_angles = np.arange(Ns)*2*np.pi/Ns
+
+            inner_ring = (np.vstack((np.cos(inner_angles), np.sin(inner_angles), np.zeros(Ns)))*r).T
+            outer_ring = (np.vstack((np.cos(outer_angles), np.sin(outer_angles), np.zeros(Ns)))*R).T
+
+            small_lid_faces = np.zeros((Ns, 3), dtype = int)
+            for i in range(Ns-1):
+                small_lid_faces[i, [1, 2]] = np.array([i+1, i+2])
+            small_lid_faces[-1, [1, 2]] =  np.array([Ns, 1])
+
+            ring_lid_faces = np.zeros((2*Ns, 3), dtype = int)
+            for i in range(Ns-1):
+                ring_lid_faces[2*i  , :] = np.array([i, i+Ns, i+Ns+1])
+                ring_lid_faces[2*i+1, :] = np.array([i, i+1, i+Ns+1])
+            ring_lid_faces[-2, :] = np.array([Ns-1, 2*Ns-1, Ns])
+            ring_lid_faces[-1, :] = np.array([Ns-1,      0, Ns])
+
+            side_faces = np.zeros((2*Ns, 3), dtype = int)
+            for i in range(Ns-1):
+                side_faces[2*i  , :] = np.array([i, i   +1, i+2*Ns+1])
+                side_faces[2*i+1, :] = np.array([i, i+2*Ns+1, i+2*Ns])
+            side_faces[-2, :] = np.array([Ns-1, 0, 2*Ns])
+            side_faces[-1, :] = np.array([Ns-1, 3*Ns-1, 2*Ns])
+
+            # first section
+            if s: # if start with large section
+                vertices = np.vstack((np.zeros(3),
+                                      inner_ring,
+                                      outer_ring,
+                                      inner_ring + np.array([0, 0, L]),
+                                      outer_ring + np.array([0, 0, L])))
+                faces = np.vstack((small_lid_faces           ,
+                                    ring_lid_faces        + 1,
+                                        side_faces +   Ns + 1,
+                                    ring_lid_faces + 2*Ns + 1))
+                section = 'small'
+                z = L
+            else:# if start with small section
+                vertices = np.vstack((np.zeros(3),
+                                      inner_ring,
+                                      inner_ring + np.array([0, 0, l])))
+                faces = np.vstack((small_lid_faces,
+                                   side_faces+1))
+                
+                faces = np.where(faces >= 2*Ns+1, faces-Ns, faces)
+
+                section = 'large'
+                z = l
+
+            for i in range(1, Nc):
+                if section == 'small':
+                    z += l
+                    vertices = np.vstack((vertices,
+                                          inner_ring+np.array([0, 0, z])))
+                    
+                    faces = np.vstack((faces,
+                                       side_faces + vertices.shape[0]-3*Ns ))
+
+                    section = 'large'
+
+                elif section == 'large':
+
+                    vertices = np.vstack((vertices,
+                                          outer_ring+np.array([0, 0, z]),
+                                          inner_ring+np.array([0, 0, z+L]),
+                                          outer_ring+np.array([0, 0, z+L])))
+                    
+                    faces = np.vstack((faces,
+                                       ring_lid_faces + vertices.shape[0]-4*Ns,
+                                           side_faces + vertices.shape[0]-3*Ns,
+                                       ring_lid_faces + vertices.shape[0]-2*Ns))
+                    
+                    section = 'small'
+                    z += L
+
+            # closing
+            vertices = np.vstack((vertices,
+                                  np.array([0, 0, z])))
+            if section == 'small':
+                faces = np.vstack((faces,
+                                   np.where(small_lid_faces == 0, vertices.shape[0]-1, small_lid_faces+vertices.shape[0]-2*Ns-2)))
+            if section == 'large':
+                faces = np.vstack((faces,
+                                   np.where(small_lid_faces == 0, vertices.shape[0]-1, small_lid_faces+vertices.shape[0]-Ns-2)))
+
         elif shape in ['star']:
-            r = float(dims[0])
-            R = float(dims[1])
-            H = float(dims[2])
-            N = int(dims[3])
+            H = float(dims[0]) # height 
+            R = float(dims[1]) # outer radius
+            r = float(dims[2]) # inner radius
+            N = int(dims[3])   # number of points
+
+            if R <= r:
+                raise Exception('Outer radius smaller or equal to the inner radius. Check parameters.')
 
             outer_angles = np.arange(N)*2*np.pi/N
             inner_angles = (np.arange(N)-0.5)*2*np.pi/N
@@ -162,8 +257,48 @@ class Geometry:
             inner_ring = (np.vstack((np.cos(inner_angles), np.sin(inner_angles), np.zeros(N)))*r).T
             outer_ring = (np.vstack((np.cos(outer_angles), np.sin(outer_angles), np.zeros(N)))*R).T
 
+            vertices = np.vstack((np.zeros(3),
+                                  inner_ring,
+                                  outer_ring))
+            vertices = np.vstack((vertices,
+                                  vertices + np.array([0, 0, H])))
             
+            lid  = np.zeros((0, 3), dtype = int) # faces of the base 
+            side = np.zeros((0, 3), dtype = int) # faces of the sides 
+            for i in range(N):
+                if i == N-1:
+                    lid = np.vstack((lid,
+                                     np.array([    0, i+1, 1]),
+                                     np.array([i+1+N, i+1, 1])))
+                    
+                    side = np.vstack((side,
+                                      np.array([[i+1  , i+  N+1, i+2*N+2],
+                                                [i+N+1, i+2*N+2, i+3*N+2],
+                                                [    1, i+  N+1,   2*N+2],
+                                                [i+N+1,   2*N+2, i+3*N+2]])))
+                    
+                else:
+                    lid = np.vstack((lid,
+                                     np.array([    0, i+1, i+2]),
+                                     np.array([i+1+N, i+1, i+2])))
 
+                    side = np.vstack((side,
+                                      np.array([[i+1  , i+  N+1, i+2*N+2],
+                                                [i+N+1, i+2*N+2, i+3*N+2],
+                                                [i+2  , i+  N+1, i+2*N+3],
+                                                [i+N+1, i+2*N+3, i+3*N+2]])))
+            
+            faces = np.vstack((lid,
+                               side,
+                               lid + 2*N+1))
+            
+            fig, ax = plt.subplots(nrows = 1, ncols = 1, subplot_kw={'projection':'3d'})
+
+            for f in faces:
+                ax.plot(vertices[f[[0, 1, 2, 0]], 0],
+                        vertices[f[[0, 1, 2, 0]], 1],
+                        vertices[f[[0, 1, 2, 0]], 2])
+            
         return Mesh(vertices, faces)
 
     def transform_mesh(self):

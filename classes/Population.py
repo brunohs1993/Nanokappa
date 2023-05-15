@@ -1301,7 +1301,7 @@ class Population(Constants):
                 far_right[~far_right] = (sorted_vx_out[right_i[~far_right]] - sorted_vx_in[~far_right])/norm > crit
                 done = np.copy(far_right)
                 while not np.all(done):
-                    done[~done] = right_i[~done] == sorted_vx_out.shape[0] # check the ones not done are at the border and mark them as done
+                    done[~done] = right_i[~done] == sorted_vx_out.shape[0]-1 # check the ones not done are at the border and mark them as done
 
                     norm = np.fmax(sorted_norm_out[right_i[~done] + 1], sorted_norm_in[~done])
                     

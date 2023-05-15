@@ -58,10 +58,10 @@ print('---------- o ----------- o ------------- o ------------')
 geo = Geometry(args)
 
 # opening file
-if len(args.mat_names) == 1:
+if len(args.mat_folder) == 1:
     phonons = Phonon(args, 0)
 else:
-    phonons = [Phonon(args, i) for i in range(len(args.mat_names))]
+    phonons = [Phonon(args, i) for i in range(len(args.mat_folder))]
 
 # THIS IMPLEMENTATION OF PHONONS AS A LIST NEEDS TO BE INCLUDED IN THE POPULATION CLASS.
 # FOR NOW ONLY ONE MATERIAL WORKS

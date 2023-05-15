@@ -12,7 +12,7 @@ from phonopy import Phonopy
 from phonopy.interface.calculator import read_crystal_structure
 
 # other
-import sys, os, pickle, re
+import sys, os, re
 
 from classes.Constants import Constants
 
@@ -36,17 +36,9 @@ class Phonon(Constants):
         super(Phonon, self).__init__()
         self.args = arguments
         self.mat_index = int(mat_index)
-        self.name = self.args.mat_names[mat_index]
         self.get_mat_folder()
 
-        self.args.pickled_mat = [int(i) for i in self.args.pickled_mat]
-
-        if self.mat_index in self.args.pickled_mat:
-            self.open_pickled_material()
-        else:
-            self.load_base_properties()
-            print('Pickling...')
-            self.pickle_material()
+        self.load_base_properties()
 
         if len(self.args.mat_rotation) > 0:
             self.rotate_crystal()
@@ -436,42 +428,6 @@ class Phonon(Constants):
                             d = np.vstack((d_q, d_b)).T # array with q
 
                             self.degenerate_modes.append(d)
-
-    def pickle_material(self):
-        
-        del(self.data_hdf)
-        
-        files = os.listdir(self.mat_folder)
-        
-        short_fname = '{}.pickle'.format(self.name)
-
-        pickled_file = self.mat_folder + short_fname
-
-        if short_fname not in files: # if it is not already pickled
-            pickle_out = open(pickled_file, 'wb')
-            pickle.dump(self, pickle_out)
-            pickle_out.close()
-            print('Material ' + self.name + ' pickled!')
-        else:
-            print('Material already pickled! Check your files.')
-    
-    def open_pickled_material(self):
-        
-        short_fname = '{}.pickle'.format(self.name)
-
-        pickled_file = self.mat_folder + short_fname
-
-        files = os.listdir(self.mat_folder)
-
-        if short_fname in files:
-            pickle_in = open(pickled_file, 'rb')
-            self.__dict__.update(pickle.load(pickle_in).__dict__)
-        else:
-            print('Material not yet pickled!')
-            self.load_base_properties()
-            print('Pickling...')
-            self.pickle_material()
-            self.open_pickled_material()
 
 def expand_FBZ(axis,weight,qpoints,tensor,rank,rotations,reciprocal_lattice):
         # expand tensor from IBZ to BZ

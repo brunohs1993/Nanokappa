@@ -50,8 +50,13 @@ class Visualisation(Constants):
         linecolor = 'black'
         gridcolor = 'slategrey'
         textcolor = 'black'
-
-        if self.args.theme[0] == 'dark':
+        
+        if self.args.theme[0] == 'white':
+            self.theme = 'white'
+            
+            figcolor = 'white'
+            facecolor = 'white'
+        elif self.args.theme[0] == 'dark':
             self.theme = 'dark'
 
             facecolor = (np.array([29,34,38])/255)*2
@@ -59,7 +64,7 @@ class Visualisation(Constants):
             linecolor = 'lightsteelblue'
             gridcolor = 'slategrey'
             textcolor = 'lightsteelblue'
-        elif self.args.theme[0] not in ['light', 'dark']:
+        elif self.args.theme[0] not in ['light', 'dark', 'white']:
             Warning('Invalid theme. Defaulting to light theme.')
 
         if self.geometry.subvol_type == 'slice':

@@ -13,7 +13,7 @@ Next, clone this repository or download its files to the desired folder.
 
 The necessary libraries can be installed either automatically or manually.
 
-## **Automatic installation:**
+## **Automatic setting:**
 
 To set the `nanokappa` environment automatically, open a terminal window and run:
 
@@ -23,7 +23,7 @@ To set the `nanokappa` environment automatically, open a terminal window and run
 
 This should ensure that all necessary packages are installed either from Conda repositories or via pip. A test simulation is run at the end to check if everything goes ok. It should take some minutes.
 
-## **Manual installation**
+## **Manual setting**
 
 If you prefer, you can also set the environment manually:
 
@@ -73,45 +73,47 @@ In order to define a study case and run a simulation, several parameters need to
 Here is a list of all parameters that can be set:
 
 | Parameter                 | Keyword              | Reduced | Description | Types | Default |
-| ------------------------- | -------------------- | --------| ----------- | ----- | ------- |
+| ------------------------- | -------------------- | ------- | ----------- | ----- | ------- |
 | Parameters file           | `--from_file`        | `-ff`   | File name with extension of a file containing all input parameters. Used to avoid inputing lots of parameters directly on terminal. Full path advised. | String | | 
 | Material folder           | `--mat_folder`       | `-mf`   | Path of the folders containing the material files. Full path advisable. | String | |
 | hdf5 file                 | `--hdf_file`         | `-hf`   | File names in each `-mf` with extensions. | String | | 
 | POSCAR file               | `--poscar_file`      | `-pf`   | File names in each `-mf` with extensions. | String | |
-| Material names            | `--mat_names`        | `-mn`   | Material name identifier. | String | |
-| Pickled materials         | `--pickled_mat`      | `-pm`   | Material indexes as declared on `-mf` to check whether it is already processed and pickled or not. If it is not, it will be pickled for use next time. Useful to avoid redoing phonon calculations for the same reference temperature. | Integer | |
 | Results folder            | `--results_folder`   | `-rf`   | The name of the folder to be created containing all result files. If none is informed, no folder is created. | String | `''` |
 | Results location          | `--results_location` | `-rl`   | The path where the result folder will be created. It accepts `local` if the results should be saved in the current directory, `main` if they should be saved in the same directory as `nanokappa.py`, or a custom path. | String | `local` |
-| Geometry                  | `--geometry`         | `-g`    | Standard geometry name or file name. Geometry coordinates in angstroms | String | `cuboid` |
-| Dimensions                | `--dimensions`       | `-d`    | Dimensions for standard base geometries as asked by [trimesh.creation](https://trimsh.org/trimesh.creation.html) primitives | Floats | `20e3 1e3 1e3` |
+| Geometry                  | `--geometry`         | `-g`    | Standard geometry name or file name. Geometry coordinates in angstroms. | String | `cuboid` |
+| Dimensions                | `--dimensions`       | `-d`    | Dimensions for the standard base geometries (box, cylinder, etc.). | Floats | `20e3 1e3 1e3` |
 | Scale                     | `--scale`            | `-s`    | Scale factors for the base geometry (x, y, z) | Float x3 | `1 1 1` |
-| Geometry rotation         | `--geo_rotation`     | `-gr`   | Euler angles to rotate the base geometry (see [scipy.rotation.from_euler](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.from_euler.html)) | Float x3 | `0 0 0` |
-| Material rotation         | `--mat_rotation`     | `-mr`   | Euler angles to change crystal orientation (see [scipy.rotation.from_euler](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.from_euler.html)) | Float x3 | `0 0 0` |
-| Boundary conditions       | `--bound_cond`       | `-bc`   | Type of boundary condition for each facet declared in `--bound_facets`. If one condition more is given, it is considered to be the same for all non informed facets. Accepts `T` for temperature, `P` for periodic, `R` for roughness/reflection, `F` for heat flux. | String | `T T P` |
-| Facets with imposed BC    | `--bound_facets`     | `-bf`   | The facets to imposed the boundary conditions on. | Integer | `0 3` | 
+| Geometry rotation         | `--geo_rotation`     | `-gr`   | Euler angles to rotate the base geometry and which axis to apply (see [scipy.rotation.from_euler](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.from_euler.html)) | Float, String | |
+| Material rotation         | `--mat_rotation`     | `-mr`   | Euler angles to change crystal orientation (see [scipy.rotation.from_euler](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.from_euler.html)) | Float, String |  |
+| Boundary conditions       | `--bound_cond`       | `-bc`   | Type of boundary condition for each facet declared in `--bound_facets`. If one condition more is given, it is considered to be the same for all non informed facets. Accepts `T` for temperature, `P` for periodic, `R` for roughness/reflection. | String | |
 | Positions with imposed BC | `--bound_pos`        | `-bp`   | Set the POSITIONS from which to find the closest facet to apply the specific boundary conditions. First value is a keyword `relative` - considers all points in the mesh between 0 and 1 - or `absolute` - direct positions. | String Float | | 
-| Boundary condition values | `--bound_values`     | `-bv`   | Values for each imposed boundary conditions. Temperatures in Kelvin, heat fluxes in W/m<sup>2</sup>, Roughness in angstroms. | Float | `303 297` |
-| Connected faces           | `--connect_facets`   | `-cf`   | Indexes of the connected facets to apply the periodic boundary condition. They are grouped in pairs (first with second, third with fourth, and so on). They must: 1. Have vertices with the same coordinates in relation to their centroids; 2. Have the same area; 3. Have their normals parallel to each other and in opposite directions. | Integer | `1 5 2 4` |
-| Collision offset          | `--offset`           | `-os`   | Offset of the collision detection from the wall to avoid errors in the reflection procedure. Usually unnecessary to change, but useful to have as an option. | Float | `2e-8` |
-| Temperature distribution  | `--temp_dist`        | `-td`   | Shape of the initial temperature profile. Accepts `cold`, `hot`, `mean`, `linear`, `random`, `custom`.    | String     | `cold` |
+| Boundary condition values | `--bound_values`     | `-bv`   | Values for each imposed boundary conditions. Temperatures in Kelvin, roughness in angstroms. | Float | `303 297` |
+| Temperature distribution  | `--temp_dist`        | `-td`   | Shape of the initial temperature profile. Accepts `cold`, `hot`, `mean`, `linear`, `random`, `custom`. | String | `cold` |
 | Subvolume temperature     | `--subvol_temp`      | `-st`   | Initial temperature of each subvolume when `custom` is informed in `-td`, in Kelvin. | Float | |
-| Reference temperature     | `--reference_temp`   | `-rt`   | The temperature at which the occupation number for every mode will be considered zero, in Kelvin. | Float | `0` |
+| Reference temperature     | `--reference_temp`   | `-rt`   | The temperature at which the occupation number for every mode will be considered zero, in Kelvin. Alternatively, the user can set it as "local" to use the local temperature of each particle.| Float/String | `local` |
+| Temperature interpolation | `--temp_interp`      | `-ti`   | How to interpolate the temperature between the subvolumes' reference points. Accepts `nearest`, `linear` (when slice subvolumes are used) or `radial` (for grid or voronoi subvolumes). | String | `nearest` | 
 | N° of particles           | `--particles`        | `-p`    | Number of particles given as `keyword number`. Can be given as the total number (keyworld `total`), the number per-mode-per-subvolume (keyworld `pmps`) and the number per cubic angstom (keyworld `pv`). | String Integer | `pmps 1` |
-| Particle distribution     | `--part_dist`        | `-pd`   | How to distribute particles at the beginning of the simulation. Composed of two keywords: `random/center_subvol/domain`. | String | `random_subvol` |
-| Reservoir generation      | `--reservoir_gen`    | `-rg`   | How to generate particles on the reservoirs. `fixed_rate` means the particles are generated in an approximately fixed rate independently of the leaving particles. `one_to_one` means that the number of particles generated is the same of particles leaving in order to keep the number of particles stable. | String | `fixed_rate` |
 | Timestep                  | `--timestep`         | `-ts`   | Timestep of each iteration in picoseconds | Float | `1` |
 | Iterations                | `--iterations`       | `-i`    | Number of iterations to be performed | Integer | `10000` |
 | Maximum simulation time   | `--max_sim_time`     | `-mt`   | Maximum time the simulation will run. Declared as `D-HH:MM:SS`. If the simulation arrives to this time, the calculation is finished and post processing is executed. If `0-00:00:00` is informed, no time limit is imposed. | String |`0-00:00:00`|
 | Subvolumes                | `--subvolumes`       | `-sv`   | Type of subvolumes, number of subvolumes and slicing axis when the case (x = 0, y = 1, z = 2). Accepts `slice`, `grid` and `voronoi` as subvolume types. | String Integer (Integer Integer) | `slice 10 0` |
-| Empty subvols             | `--empty_subvols`    | `-es`   | Index of subvolumes that are to be initialised as empty (no particles). | Integer | |
-| Energy normalisation      | `--energy_normal`    | `-en`   | The way to normalise energy to energy density. Choose between `fixed` (according to the expected number of particles in the subvolume) and `mean` (arithmetic mean of the particles inside). | String | `fixed`
 | Path points               | `--path_points`      | `-pp`   | Set the approximate points where the path to calculate $\kappa_{path}$ will go through. Declared the same way as `--bound_pos`.| String Float | `relative 0 0.5 0.5 1 0.5 0.5` |
-| Number of datapoints      | `--n_mean`           | `-nm`   | Number of datapoints considered to calculated $\mu$ and $\sigma$ values. | Int | `100` |
-| Real time plot            | `--rt_plot`          | `-rp`   | Property to plot particles in real time (frequency, occupation, etc.)  | String | `random` |
-| Figure plot               | `--fig_plot`         | `-fp`   | Property to plot particles at end of run (frequency, occupation, etc.) | Strings | `T omega e` |
-| Colormap                  | `--colormap`         | `-cm`   | Colormap to use in every plot | String | `viridis` |
+| Number of datapoints      | `--n_mean`           | `-nm`   | Number of datapoints considered to calculated mean and standard deviation values. Each datapoint is 10 timesteps.| Int | `100` |
+| Real time plot            | `--rt_plot`          | `-rp`   | Property to plot particles to generate animations.  | String | |
+| Figure plot               | `--fig_plot`         | `-fp`   | Property to plot particles at end of run (frequency, occupation, etc.) | Strings | `e` |
+| Colormap                  | `--colormap`         | `-cm`   | Matplotlib [colormap](https://matplotlib.org/stable/gallery/color/colormap_reference.html) to be used in geometry plots (not convergence). | String | `jet` |
 | Convergence criteria      | `--conv_crit`        | `-cc`   | Criteria for convergence and stop simulation. | Float | 1e-6 |
-<!-- | Subvol material          | `--subvol_material`  | `-sm`   | Material index of each subvolume, according to the order given at `-pf` and `-hf`. | Integer |  | -->
+
+### Debugging parameters
+
+These should only be used to detect possible errors in the simulation:
+
+| Parameter                 | Keyword              | Reduced | Description | Types | Default |
+| ------------------------- | -------------------- | ------- | ----------- | ----- | ------- |
+| Particle distribution     | `--part_dist`        | `-pd`   | How to distribute particles at the beginning of the simulation. Composed of two keywords: `random/center_subvol/domain`. | String | `random_subvol` | -->
+| Reservoir generation      | `--reservoir_gen`    | `-rg`   | How to generate particles on the reservoirs. With `constant`, particles are generated in a constant rate based in a timestep counter; `fixed_rate` means the particles are generated randomly, but in an approximately fixed rate; `one_to_one` means that the number of particles generated is the same of particles leaving in order to keep the number of particles stable. | String | `fixed_rate` |
+| Empty subvols             | `--empty_subvols`    | `-es`   | Index of subvolumes that are to be initialised as empty (no particles). | Integer | |
+| Energy normalisation      | `--energy_normal`    | `-en`   | The way to normalise energy to energy density. Choose between `fixed` (according to the expected number of particles in the subvolume) and `mean` (arithmetic mean of the particles inside). | String | `mean` |
 
 <p>&nbsp</p>
 
@@ -119,48 +121,39 @@ Here is a list of all parameters that can be set:
 
 The user can input all parameters sequentially directly on terminal, which is easy when there are a few parameters that differ from the standard values. When there is a highly customised simulation to be ran, it is better to use an external input file and use the `--from_file` or `-ff` argument.
 
-All inputs (besides `-ff`, of course) can be given in form of a text file. The following shows an example of the content of a txt file that we are calling `parameters.txt`:
+All inputs can be given in form of a text file. The following shows an example of the content of a txt file that we are calling `parameters.txt`:
 
     --mat_folder       D:\Materials\Si\
     --hdf_file         kappa-m313131.hdf5
     --poscar_file      POSCAR
-    --pickled_mat      0
-    --mat_names        silicon
-    --geometry         cuboid
+    --geometry         box
     --dimensions       10e3 1e3 1e3
     --scale            1 1 1
-    --geo_rotation     0 0 0 xyz
+    --geo_rotation     90 y
     --subvolumes       slice 10 0
-    --bound_facets     0 3 4 2
-    --bound_cond       T T R R P
+    --bound_pos        relative 0 0.5 0.5 1 0.5 0.5 0.5 0 0.5 0.5 1 0.5
+    --bound_cond       T T R
     --bound_values     302 298 10 10
-    --connect_facets   1 5
-    --offset           1e-3
-    --reference_temp   300
-    --energy_normal    fixed
-    --temp_dist        constant_cold
-    --empty_subvols    
-    --subvol_temp      
-    --particles        total 1e7
-    --part_dist        random_subvol
+    --connect_facets   absolute 5e3 5e2 0 5e3 5e2 1e3
+    --reference_temp   local
+    --temp_dist        cold
+    --particles        total 1e5
     --timestep         1
     --iterations       2000
-    --results_folder   box_wire
+    --results_folder   inplane_film
     --results_location D:\Results
     --conv_crit        0
-    --lookup           0 0
-    --colormap         jet
     --fig_plot         subvolumes
     --rt_plot          
     --max_sim_time     0-01:00:00
 
-This file defines a simulation of Silicon, with the material being defined by the material folder, hdf and poscar files being informed. The geometry is a box (cuboid) with dimensions 10e3 ang x 1e3 ang x 1e3 ang. Temperatures (302 K and 298 K) are imposed on facets 0 and 3, and a roughness is set to facets 2 and 4 as being 10 ang. Facets 1 and 5 are conected as periodic. A reference temperature of 300 K is used. The result files will be stored in `D:\Results\box_wire\`. Besides the usual convergence plots, the subvolumes plot will be generated at the beginning using the jet colormap. The simulation will last 1 hour. If the number of iterations is not reached, after 1 hour of calculation it will be shut down and the results will be processed, safely exiting the run.
+This file defines a simulation with the material data contained in the Si folder, being defined by the hdf and poscar files. The geometry is a box with dimensions 10e3 ang, 1e3 ang,  and 1e3 ang in x, y and z directions respectively. Temperatures (302 K and 298 K) are imposed on both extremities in the x direction, and a roughness (10 ang) is set to the opposite facets in y direction. Opposite facets in the z direction are conected as periodic. A local reference temperature is used. The result files will be stored in `D:\Results\inplane_film\`. Besides the usual convergence plots, the subvolumes plot will be generated at the beginning using the default jet colormap. The simulation will last either 2000 iterations or 1 hour, whatever happens first.
 
-Any non-necessary arguments can be left empty. In this example, `--subvol_temp` is left empty since the temperature profile is completely defined by the `constant_cold` keyword used as argument for `--temp_dist`. Since there is no inputs for `--rt_plot`, no real time plots will be produced. It is important to note, however, that passing an empty argument in the file will override the standard values and pass an empty list to the parser. If the user wishes to use standard input value for a given argument, the argument should be omitted in the txt file altogether.
+Any non-necessary arguments can be left empty. In this example, `--subvol_temp` is left empty since the temperature profile is completely defined by the `cold` keyword used as argument for `--temp_dist`. Since there is no inputs for `--rt_plot`, no real time plots will be produced. It is important to note, however, that passing an empty argument in the file will override the standard values and pass an empty list to the parser. If the user wishes to use standard input value for a given argument, the argument should be omitted in the parameters.txt file altogether.
 
 The program could then be executed on terminal by calling:
 
-    $ python nanokappa.py -ff <path-to-file>\parameters.txt
+    $ python <path_to_nanokappa>/nanokappa.py -ff <path-to-file>/parameters.txt
 
 ### Material properties
 
@@ -168,13 +161,16 @@ The properties describing the material are derived from hdf5 and POSCAR files. T
 
 ### Geometry definition
 
-The geometry can be defined from an standard geometry or an external file. The standard geometries are defined by functions in [trimesh.creation](https://trimsh.org/trimesh.creation.html):
+The geometry can be defined from an standard geometry or an external file. The standard geometries are the following:
 
-| Geometry | Key for `--geometry` | [trimesh.creation](https://trimsh.org/trimesh.creation.html) function | Parameters for `--dimensions`         |
-| -------- | -------------------- | --------------------------------------------------------------------- | ------------------------------------- |
-| Cuboid   | `cuboid`             | `trimesh.creation.box`                                                | x, y and z lengths                    |
-| Sphere   | `sphere`             | `trimesh.creation.icosphere`                                          | Radius and subdivisions               |
-| Cylinder | `cylinder`           | `trimesh.creation.cylinder`                                           | Height, radius and sides              |
+| Geometry        | Key for `--geometry`     | Parameters for `--dimensions`         |
+| --------------- | ------------------------ | ------------------------------------- |
+| Box             | `box`, `cuboid`          | Lx, Ly, Lz                    |
+| Cylinder        | `cylinder`, `rod`, `bar` | H, R, N_sides    |
+| Variable cross-section corrugated wire | `corrugated` | L, l, R, r, N_sides, N_sections |
+| Constant cross-section corrugated wire | `zigzag` | H, R, N_sides, N_sections, h|
+| "Castle"        | `castle`                 | L, l, R, r, N_sides, N_sections, S. |
+| Radially corrugated wire | `star`          | H, R, r, N_points. |
 
 <p>&nbsp</p>
 
@@ -182,12 +178,12 @@ These standard geometries can be modified by entering the parameters `--scale` a
 
 1. By directly inputing the dimensions...
 
-        --geometry   cuboid
+        --geometry   box
         --dimensions 100 100 200
 
 2. ...or by inputing any dimensions and scaling it by x, y and z factors, such as:
    
-        --geometry   cuboid
+        --geometry   box
         --dimensions 100 100 100
         --scale      1 1 2
 

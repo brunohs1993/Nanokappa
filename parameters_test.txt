@@ -2,35 +2,33 @@
 --hdf_file         kappa-m313131.hdf5
 --poscar_file      POSCAR
 --mat_names        silicon
---pickled_mat      0
---geometry         cuboid
+--geometry         box
 --dimensions       5e3 1e3 1e3
 --scale            1 1 1
 --geo_rotation     0 0 0 xyz
 --subvolumes       slice 10 0
---bound_facets     
 --bound_pos        relative -0.1 0.5 0.5 1.1 0.5 0.5 0.5 0.5 -0.1 0.5 0.5 1.1
 --bound_cond       T T R R P
---connect_facets   
 --connect_pos      relative 0.5 -0.1 0.5 0.5 1.1 0.5
---reservoir_gen    fixed_rate
+--reservoir_gen    constant
 --bound_values     302 298 0 0
---reference_temp   297
+--reference_temp   local
 --energy_normal    mean
 --temp_dist        cold
+--temp_interp      nearest
 --empty_subvols    
 --subvol_temp      
 --particles        total 1e5
 --part_dist        random_subvol
 --timestep         1
---iterations       500
+--iterations       100
 --n_mean           10
 --path_points      
 --results_folder   test_results/test
 --results_location main
 --conv_crit        0 10
 --colormap         jet
---fig_plot         subvol omega energy
+--fig_plot         energy
 --rt_plot          
 --output           file
 --max_sim_time     0-00:00:00
