@@ -75,7 +75,7 @@ class Geometry:
         
         print('Loading geometry...')
 
-        if shape in ['cuboid', 'box', 'cylinder', 'rod', 'bar', 'star', 'castle', 'zigzag']:
+        if shape in ['cuboid', 'box', 'cylinder', 'rod', 'bar', 'star', 'castle', 'zigzag', 'corrugated']:
             self.mesh = self.generate_primitives(shape, self.dimensions)
         else:
             prev_mesh = tm.load(shape)
@@ -178,7 +178,46 @@ class Geometry:
                                np.where(base_faces == 0, vertices.shape[0]-1, base_faces + vertices.shape[0]-Ns-2)))
             
         elif shape in ['corrugated']:
-            pass
+            L  = float(dims[0]) # section length
+            R  = float(dims[1]) # outer radius
+            r  = float(dims[2]) # inner radius
+            Ns =   int(dims[3]) # number of sides
+            Nc =   int(dims[4]) # number of sections
+
+            angles = np.arange(Ns)*2*np.pi/Ns
+
+            outer_ring = (np.vstack((np.cos(angles), np.sin(angles), np.zeros(Ns)))*R).T
+            inner_ring = (np.vstack((np.cos(angles), np.sin(angles), np.zeros(Ns)))*r).T
+
+            base_faces = np.array([[i, i+1, 0] if i < Ns else [i, 1, 0] for i in range(1, Ns+1)])
+            side_faces = np.zeros((2*Ns, 3), dtype = int)
+            for i in range(Ns-1):
+                side_faces[2*i  , :] = np.array([i, i+1 , i+Ns+1])
+                side_faces[2*i+1, :] = np.array([i, i+Ns, i+Ns+1])
+            side_faces[-2, :] = np.array([Ns-1,      0, Ns])
+            side_faces[-1, :] = np.array([Ns-1, 2*Ns-1, Ns])
+
+            vertices = np.vstack((np.zeros(3), outer_ring))
+            faces = np.copy(base_faces)
+
+            for i in range(1, Nc+1):
+                if i % 2 == 1:
+                    vertices = np.vstack((vertices,
+                                          inner_ring + np.array([0, 0, i*L])))
+                else:
+                    vertices = np.vstack((vertices,
+                                          outer_ring + np.array([0, 0, i*L])))
+                
+                faces = np.vstack((faces,
+                                   side_faces + (i-1)*Ns+1))
+            
+            # closing
+            vertices = np.vstack((vertices,
+                                     np.array([0, 0, Nc*L])))
+
+            faces = np.vstack((faces,
+                               np.where(base_faces == 0, vertices.shape[0]-1, base_faces + vertices.shape[0]-Ns-2)))
+
         elif shape in ['castle']:
             L  = float(dims[0]) # large castle length
             l  = float(dims[1]) # small castle length
