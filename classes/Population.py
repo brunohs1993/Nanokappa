@@ -306,9 +306,6 @@ class Population(Constants):
 
             self.omega, self.group_vel, self.wavevectors = self.assign_properties(self.modes, phonon)
 
-            # self.temperatures = np.zeros(self.occupation.shape)
-            # self.subvol_temperature = np.zeros(self.n_of_subvols)
-
             self.temperatures, self.subvol_temperature = self.assign_temperatures(self.positions, geometry)
             old_T = np.zeros(self.n_of_subvols)
 
@@ -1714,7 +1711,6 @@ class Population(Constants):
         n0 = phonon.calculate_occupation(self.temperatures, self.omega) # calculating Bose-Einstein occcupation
         
         with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
-            # self.occupation = np.where(tau>0, self.occupation + (self.dt/tau) *(n0 - occupation_ad), occupation_ad) # n = n + (n0(T) - n) dt/tau(T) 
             self.occupation = n0 + (self.occupation - n0)*np.exp(-self.dt/tau) # n = n0 + (n - n0(T)) e^(-dt/tau(T))
 
     def contains_check(self, geometry):
@@ -1747,7 +1743,7 @@ class Population(Constants):
                 info += ' {:>7.3f}'.format(self.subvol_temperature[sv])
             info += ' ]'
             print(info)
-        
+
         self.drift()                                    # drift particles
 
         if self.n_of_reservoirs > 0:

@@ -1,33 +1,9 @@
-# from statistics import LinearRegression
-import trimesh as tm
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import copy
 
 from scipy.stats.qmc import Sobol
-
-# AI classifier models
-# from sklearn.neural_network import MLPClassifier
-# from sklearn.preprocessing import OneHotEncoder
-
-def generate_points(geo, n, gen = None):
-
-    if gen is None:
-        points = tm.sample.volume_mesh(geo, n)
-        while points.shape[0]<n:
-            new_points = tm.sample.volume_mesh(geo, n-points.shape[0])
-            points = np.concatenate((points, new_points), axis = 0)
-        return points
-    else:
-        points = gen.random(n)*geo.bounds.ptp(axis = 0) + geo.bounds[0, :]
-        i = geo.contains(points)
-        points = points[i, :]
-        while points.shape[0]<n:
-            new_points = gen.random(n-points.shape[0])*geo.bounds.ptp(axis = 0) + geo.bounds[0, :]
-            i = geo.contains(new_points)
-            points = np.concatenate((points, new_points[i, :]), axis = 0)
-        return points
 
 def get_regions(x_s, x_r):
     
@@ -68,51 +44,7 @@ def update_centers(x_s, r, x_r):
 def normalise(x, geo):
     return (x - geo.bounds[0, :])/np.ptp(geo.bounds, axis = 0)
 
-
-# def train_model(x_r, n_s, geo):
-
-#     n_r = x_r.shape[0]
-#     x_s = generate_points(geo, n_s)
-    
-#     r = get_regions(x_s, x_r)
-    
-#     print('Enconding...')
-    
-#     ohe = OneHotEncoder(sparse = False)
-#     y_train = ohe.fit_transform(r.reshape(-1, 1))
-
-#     print('Training classifier...')
-
-#     hl_size = int(5*n_r)
-
-#     model = MLPClassifier(hidden_layer_sizes = (hl_size, hl_size, hl_size),
-#                           activation         = 'logistic'   ,
-#                           solver             = 'adam'       ,
-#                           verbose            = 1            ,
-#                           max_iter           = 1000         ,
-#                           learning_rate      = 'adaptive'   )
-
-#     x_train = normalise(x_s, geo)
-
-#     model.fit(x_train, y_train) # train model
-
-#     x_test = generate_points(geo, n_s) # generate test samples
-#     r_test = get_regions(x_test, x_r)  # get their regions
-    
-#     x_test = normalise(x_test, geo)         # normalise
-
-#     y_test = ohe.transform(r_test.reshape(-1, 1))
-
-#     score = model.score(x_test, y_test) # calculate model score
-
-#     print('Classifier trained! Estimated score: {:.3e}'.format(score)) # exhibit score
-
-#     return model
-
-
 def distribute(geo, n_r, folder, view = True):
-
-    # geo = get_outer_hull(geo)   # ensure that geometry is watertight
 
     n_s = int(1e3)     # initial number of points to test
     n_s_max = int(1e6) # maximum number of points to test
@@ -131,8 +63,8 @@ def distribute(geo, n_r, folder, view = True):
     
     gen = Sobol(3)
 
-    x_r = generate_points(geo, n_r, gen) # regions coordinates
-    x_s = generate_points(geo, n_s, gen) # samples coordinates
+    x_r = geo.sample_volume(n_r) # regions coordinates
+    x_s = geo.sample_volume(n_s) # samples coordinates
 
     # main loop
     while not solution_found:
@@ -155,7 +87,7 @@ def distribute(geo, n_r, folder, view = True):
 
             if n_s < n_s_max and comparison < criterion:
                 n_s = int(n_s*2)
-                x_s = generate_points(geo, n_s, gen)
+                x_s = geo.sample_volume(n_s)
             if n_s >= n_s_max:
                 n_s = n_s_max
                 solution_found = comparison < criterion
@@ -173,20 +105,6 @@ def distribute(geo, n_r, folder, view = True):
                      cover_conv,
                      displacement_conv)
     
-    # model = train_model(x_r, n_s_max, geo)
-
-    # x_s = normalise(x_s, geo)
-
-    # r = np.argmax(model.predict(x_s), axis = 1)
-
-    # cvr = get_cover(r, n_r)
-
-    # np.savetxt(fname = folder + 'subvolumes.txt',
-    #            X = np.hstack((x_r, cvr.reshape(-1, 1))),
-    #            fmt = '%.3f', delimiter = ',',
-    #            header = 'Distribution of subvolumes. \n Center x, Center y, Center z')
-
-    # return model, cvr, x_r
     return x_r
 
 def view_subvols(geo, folder,
@@ -198,9 +116,6 @@ def view_subvols(geo, folder,
 
     n_r = x_r.shape[0]
     
-    # visualising geometry
-    # geo.show()
-
     # plotting convergence
     centers_conv      = np.array(centers_conv)
     cover_conv        = np.array(  cover_conv)
@@ -211,9 +126,6 @@ def view_subvols(geo, folder,
     ax1 = fig.add_subplot(131, projection='3d')
     ax2 = fig.add_subplot(132)
     ax3 = fig.add_subplot(133)
-
-    # x_s = generate_points(geo, n_s_max)
-    # r   = get_regions(x_s, x_r)
 
     for i in range(n_r):
         ax1.plot(centers_conv[:, i, 0], centers_conv[:, i, 1], centers_conv[:, i, 2])

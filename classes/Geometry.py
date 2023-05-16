@@ -75,7 +75,7 @@ class Geometry:
         
         print('Loading geometry...')
 
-        if shape in ['cuboid', 'box', 'cylinder', 'rod', 'bar', 'star', 'castle']:
+        if shape in ['cuboid', 'box', 'cylinder', 'rod', 'bar', 'star', 'castle', 'zigzag']:
             self.mesh = self.generate_primitives(shape, self.dimensions)
         else:
             prev_mesh = tm.load(shape)
@@ -141,7 +141,42 @@ class Geometry:
             faces = np.vstack((faces, faces[:N, :]+N+1)) # upper base
 
         elif shape in ['zigzag']:
-            pass
+            L  = float(dims[0]) # section length
+            R  = float(dims[1]) # radius
+            dx = float(dims[2]) # dislocation x
+            dy = float(dims[3]) # dislocation y
+            Ns =   int(dims[4]) # number of sides
+            Nc =   int(dims[5]) # number of sections
+
+            angles = np.arange(Ns)*2*np.pi/Ns
+
+            ring = (np.vstack((np.cos(angles), np.sin(angles), np.zeros(Ns)))*R).T
+
+            base_faces = np.array([[i, i+1, 0] if i < Ns else [i, 1, 0] for i in range(1, Ns+1)])
+            side_faces = np.zeros((2*Ns, 3), dtype = int)
+            for i in range(Ns-1):
+                side_faces[2*i  , :] = np.array([i, i+1 , i+Ns+1])
+                side_faces[2*i+1, :] = np.array([i, i+Ns, i+Ns+1])
+            side_faces[-2, :] = np.array([Ns-1,      0, Ns])
+            side_faces[-1, :] = np.array([Ns-1, 2*Ns-1, Ns])
+
+            vertices = np.vstack((np.zeros(3), ring))
+            faces = np.copy(base_faces)
+
+            for i in range(1, Nc+1):
+                vertices = np.vstack((vertices,
+                                      ring + np.array([int(i % 2 == 1)*dx, int(i % 2 == 1)*dy, i*L])))
+                
+                faces = np.vstack((faces,
+                                   side_faces + (i-1)*Ns+1))
+            
+            # closing
+            vertices = np.vstack((vertices,
+                                     np.array([(Nc % 2 == 1)*dx, (Nc % 2 == 1)*dy, Nc*L])))
+
+            faces = np.vstack((faces,
+                               np.where(base_faces == 0, vertices.shape[0]-1, base_faces + vertices.shape[0]-Ns-2)))
+            
         elif shape in ['corrugated']:
             pass
         elif shape in ['castle']:
@@ -382,7 +417,7 @@ class Geometry:
             try: # try slicing the mesh first
                 self.subvol_volume = self.calculate_subvol_volume()
             except: # if it gives an error, try with quasi monte carlo / sobol sampling
-                self.subvol_volume = self.calculate_subvol_volume(algorithm = 'qmc')
+                self.subvol_volume = self.calculate_subvol_volume(algorithm = 'mc')
         
         elif self.subvol_type == 'grid':
             nx = int(self.args.subvolumes[1])
@@ -423,59 +458,59 @@ class Geometry:
             print('Stopping simulation...')
             quit()
         
-    def calculate_subvol_volume(self, algorithm = 'submesh', tol = 1e-4, return_centers = False, verbose = False):
+    def calculate_subvol_volume(self, algorithm = 'mc', tol = 1e-4, return_centers = False, verbose = False):
         if verbose:
             print('Calculating volumes... Algorithm:', algorithm)
         # calculating subvol cover and volume
 
         if self.subvol_type in ['slice', 'grid'] and self.shape in ['cuboid', 'box']:
             subvol_volume = self.volume*np.ones(self.n_of_subvols)/self.n_of_subvols
-        elif algorithm in ['submesh', 'submesh_qmc']:
-            ################ TRYING TO CALCULATE VOLUME BY SLICING MESH #####################
-            origins = (self.subvol_center+np.expand_dims(self.subvol_center, axis = 1))/2
-            normals = self.subvol_center-np.expand_dims(self.subvol_center, axis = 1)
+        # elif algorithm in ['submesh', 'submesh_qmc']:
+        #     ################ TRYING TO CALCULATE VOLUME BY SLICING MESH #####################
+        #     origins = (self.subvol_center+np.expand_dims(self.subvol_center, axis = 1))/2
+        #     normals = self.subvol_center-np.expand_dims(self.subvol_center, axis = 1)
 
-            subvol_volume = np.zeros(self.n_of_subvols)
-            if return_centers:
-                subvol_center = np.zeros((self.n_of_subvols, 3))
+        #     subvol_volume = np.zeros(self.n_of_subvols)
+        #     if return_centers:
+        #         subvol_center = np.zeros((self.n_of_subvols, 3))
 
-            for sv in range(self.n_of_subvols):
-                sv_mesh = copy.copy(self.mesh)
-                for sv_p in [i for i in range(self.n_of_subvols) if i != sv]:
-                    lines = tm.intersections.mesh_plane(sv_mesh, normals[sv_p, sv, :], origins[sv, sv_p, :])
-                    if lines.shape[0] > 0:
-                        sv_mesh = tm.intersections.slice_mesh_plane(sv_mesh, normals[sv_p, sv, :], origins[sv, sv_p, :], cap = True)
+        #     for sv in range(self.n_of_subvols):
+        #         sv_mesh = copy.copy(self.mesh)
+        #         for sv_p in [i for i in range(self.n_of_subvols) if i != sv]:
+        #             lines = tm.intersections.mesh_plane(sv_mesh, normals[sv_p, sv, :], origins[sv, sv_p, :])
+        #             if lines.shape[0] > 0:
+        #                 sv_mesh = tm.intersections.slice_mesh_plane(sv_mesh, normals[sv_p, sv, :], origins[sv, sv_p, :], cap = True)
                 
-                subvol_volume[sv] = sv_mesh.volume # trimesh estimation
-                if return_centers:
-                    subvol_center[sv, :] = sv_mesh.center_mass
+        #         subvol_volume[sv] = sv_mesh.volume # trimesh estimation
+        #         if return_centers:
+        #             subvol_center[sv, :] = sv_mesh.center_mass
             
-            if algorithm == 'submesh_qmc':
-                # submesh quasi monte carlo estimation
-                ns = int(2**20)
-                nt  = 0
-                nin = 0
+        #     if algorithm == 'submesh_qmc':
+        #         # submesh quasi monte carlo estimation
+        #         ns = int(2**20)
+        #         nt  = 0
+        #         nin = 0
 
-                vbox = np.prod(sv_mesh.bounds.ptp(axis = 0))
-                v    = vbox
-                err = 1
+        #         vbox = np.prod(sv_mesh.bounds.ptp(axis = 0))
+        #         v    = vbox
+        #         err = 1
                 
-                while err > tol:
-                    s = np.random.rand(ns, 3)*sv_mesh.bounds.ptp(axis = 0)+sv_mesh.bounds[0, :]
-                    i = sv_mesh.contains(s)
+        #         while err > tol:
+        #             s = np.random.rand(ns, 3)*sv_mesh.bounds.ptp(axis = 0)+sv_mesh.bounds[0, :]
+        #             i = sv_mesh.contains(s)
 
-                    nt  += ns
-                    nin += i.sum()
+        #             nt  += ns
+        #             nin += i.sum()
 
-                    v_new = (nin/nt)*(vbox)
+        #             v_new = (nin/nt)*(vbox)
 
-                    err = np.absolute((v_new - v)/v)
+        #             err = np.absolute((v_new - v)/v)
 
-                    v = v_new
+        #             v = v_new
 
-                subvol_volume[sv] = v_new
-                if verbose:
-                    print('Comparing: tm: {}, mc: {}, ratio-1:{}'.format(sv_mesh.volume, v_new, (v_new/sv_mesh.volume)-1))
+        #         subvol_volume[sv] = v_new
+        #         if verbose:
+        #             print('Comparing: tm: {}, mc: {}, ratio-1:{}'.format(sv_mesh.volume, v_new, (v_new/sv_mesh.volume)-1))
 
         elif algorithm == 'qmc':
             ################# RANDOM SAMPLES ########################
@@ -506,7 +541,10 @@ class Geometry:
                 
                 r = self.subvol_classifier.predict(scaled_samples)
 
-                new_cover = np.mean(r, axis = 0)
+                u_r, counts = np.unique(r, return_counts = True)
+
+                new_cover = np.zeros(self.n_of_subvols)
+                new_cover[u_r] = counts.sum()/counts
                 
                 with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
                     err = np.absolute((new_cover - cover)/cover)
@@ -526,7 +564,6 @@ class Geometry:
                     subvol_center[sv, :] = np.mean(samples[ r == sv, :], axis = 0)
             
         elif algorithm == 'mc':
-            ################# RANDOM SAMPLES ########################
             
             cover = np.zeros(self.n_of_subvols)
             err   = np.ones(self.n_of_subvols)
@@ -894,14 +931,19 @@ class Geometry:
         if self.subvol_type == 'slice':
             sv_con = np.vstack((np.arange(self.n_of_subvols-1), np.arange(self.n_of_subvols-1))).T
             sv_con[:, 1] += 1
-        else:
-            psbl_con = np.ones((self.n_of_subvols, self.n_of_subvols), dtype = bool) # possible connections matrix
-            psbl_con[np.arange(self.n_of_subvols), np.arange(self.n_of_subvols)] = False
+            self.subvol_connections = sv_con
+            self.n_of_subvol_con = self.subvol_connections.shape[0]
+            self.subvol_con_vectors = self.subvol_center[self.subvol_connections[:, 1], :] - self.subvol_center[self.subvol_connections[:, 0], :]
+            self.save_subvol_connections()
+            return
 
-            sv_con = np.vstack(psbl_con.nonzero()).T # get posible connections
-            sv_con = np.sort(sv_con, axis = 1) # remove repetitions
-            sv_con = sv_con[np.lexsort((sv_con[:,1], sv_con[:,0]))]
-            sv_con = np.unique(sv_con, axis = 0)
+        psbl_con = np.ones((self.n_of_subvols, self.n_of_subvols), dtype = bool) # possible connections matrix
+        psbl_con[np.arange(self.n_of_subvols), np.arange(self.n_of_subvols)] = False
+
+        sv_con = np.vstack(psbl_con.nonzero()).T # get posible connections
+        sv_con = np.sort(sv_con, axis = 1) # remove repetitions
+        sv_con = sv_con[np.lexsort((sv_con[:,1], sv_con[:,0]))]
+        sv_con = np.unique(sv_con, axis = 0)
         
         contains = self.mesh.contains(o[sv_con[:, 0], sv_con[:, 1], :])
 

@@ -353,12 +353,13 @@ class Mesh:
         else:
             self.interfaces = np.array([], dtype = int)
     
-    def triangulate_volume(self, max_edge_div = 100, sample_volume = 0, sample_surface = 0):
+    def triangulate_volume(self, max_edge_div = 100, sample_volume = 0, sample_surface = 0, options = 'Qt Qbb Qc Q6'):
         '''Delaunay triangulation of the mesh volume, keeping the simplices for volume calculations.
            Arguments:
            - max_edge_div (bool) : maximum length between points to subdivde mesh edges;
            - sample_volume (bool, int) : number of random points to be created in the volume;
-           - sample_surface (bool, int) : number of random points to be created on the surface.'''
+           - sample_surface (bool, int) : number of random points to be created on the surface.
+           - standard options: Qt = merged coincident points; Qbb = rescaling to [0, max]; Qc = keep coplanar points with nearest facet'''
 
         if self.n_of_facets == 1: # if the mesh is consituted of only one plane
             self.simplices = np.zeros((0, 4))
@@ -384,7 +385,6 @@ class Mesh:
                 if bool(sample_surface):
                     self.simplices_points = np.vstack((self.simplices_points, self.sample_surface(sample_surface)))
 
-                options = 'Qt Qbb Qc' # Qt = merged coincident points; Qbb = rescaling to [0, max]
                 tri = Delaunay(self.simplices_points, qhull_options = options)
                 tri.close()
 
@@ -411,6 +411,8 @@ class Mesh:
                 contains = self.contains_naive(c)
 
                 to_del = np.logical_or(to_del, ~contains)
+
+                
 
                 self.simplices = np.delete(tri.simplices, to_del, axis = 0) # keep the simplices
                 
@@ -493,7 +495,7 @@ class Mesh:
     def get_volume_properties(self):
         '''Calculate volume and center of mass.'''
 
-        self.triangulate_volume(max_edge_div=1000, sample_volume = 0, sample_surface=0)
+        self.triangulate_volume(max_edge_div=1000, sample_volume = 0, sample_surface=0, options = 'Qc Qt')
         if self.simplices.shape[0] == 0:
             self.volume = 0
             self.center_mass = self.facet_centroid[0, :]
@@ -737,10 +739,22 @@ class Mesh:
 
     def contains_naive(self, x):
 
-        f, _, p = self.closest_face(x)
-
+        f, df, pf = self.closest_face(x)
+        e, de, pe = self.closest_edge(x)
+        
         contains = f >= 0
-        contains[contains] = np.sum(self.face_normals[f[contains], :]*(p[contains, :] - x[contains, :]), axis = 1) > 0
+
+        normals = self.face_normals[f[contains], :]
+
+        edge_closer = (df[contains] >= de[contains]).nonzero()[0]
+
+        p = np.copy(pf[contains])
+        p[edge_closer, :] = pe[contains, :][edge_closer, :]
+        
+        for i in edge_closer:
+            normals[i, :] = self.face_normals[self.edges_faces[e[contains][i]], :].mean(axis = 0)
+
+        contains[contains] = np.sum(normals*(p - x[contains, :]), axis = 1) > 0
 
         return contains
 
