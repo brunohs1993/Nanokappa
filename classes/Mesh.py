@@ -353,7 +353,7 @@ class Mesh:
         else:
             self.interfaces = np.array([], dtype = int)
     
-    def triangulate_volume(self, max_edge_div = 100, sample_volume = 0, sample_surface = 0, options = 'Qt Qbb Qc Q6'):
+    def triangulate_volume(self, max_edge_div = 1000, sample_volume = True, sample_surface = True, options = 'Qt Qbb Qc Q6'):
         '''Delaunay triangulation of the mesh volume, keeping the simplices for volume calculations.
            Arguments:
            - max_edge_div (bool) : maximum length between points to subdivde mesh edges;
@@ -380,10 +380,57 @@ class Mesh:
                     self.simplices_points = np.vstack((self.simplices_points, new))
 
                 self.simplices_points = np.vstack((self.simplices_points, self.vertices))
-                if bool(sample_volume):
-                    self.simplices_points = np.vstack((self.simplices_points, self.sample_volume_naive(sample_volume)))
-                if bool(sample_surface):
-                    self.simplices_points = np.vstack((self.simplices_points, self.sample_surface(sample_surface)))
+                if sample_surface or sample_volume:
+                    nx = int(np.ceil(self.extents[0]/max_edge_div))
+                    ny = int(np.ceil(self.extents[1]/max_edge_div))
+                    nz = int(np.ceil(self.extents[2]/max_edge_div))
+                    
+                    dx = 1/nx
+                    dy = 1/ny
+                    dz = 1/nz
+
+                    xx = np.linspace(dx/2, 1-dx/2, nx)
+                    yy = np.linspace(dy/2, 1-dy/2, ny)
+                    zz = np.linspace(dz/2, 1-dz/2, nz)
+
+                    g = np.meshgrid(xx, yy, zz)
+
+                    grid = (np.vstack(list(map(np.ravel, g))).T)*self.bounds.ptp(axis = 0)+self.bounds[0, :] # create centers
+                
+                    if sample_volume:
+
+                        keep = self.contains_naive(grid)
+
+                        _, d = self.closest_point(grid[keep, :])
+
+                        keep[keep] = d > max_edge_div/2
+
+                        self.simplices_points = np.vstack((self.simplices_points, grid[keep, :]))
+
+                    if sample_surface:
+                        # self.simplices_points = np.vstack((self.simplices_points, self.sample_surface(sample_surface)))
+
+                        new_points = np.zeros((0, 3))
+                        
+                        for d, ind in enumerate([[1,2], [0,2], [0,1]]):
+
+                            coords = tuple([xx, yy, zz][i] for i in ind)
+
+                            g = np.meshgrid(*coords)
+
+                            p         = np.zeros((coords[0].shape[0]*coords[1].shape[0], 3))
+                            p[:, d]   = -10*self.tol
+                            p[:, ind] = (np.vstack(list(map(np.ravel, g))).T)*self.extents[ind]+self.bounds[0, ind]
+
+                            v = np.zeros(p.shape)
+
+                            v[:, d] = 1
+
+                            col, _, _, _ = self.find_boundary_multiple(p, v)
+
+                            new_points = np.vstack((new_points, col))
+
+                        self.simplices_points = np.vstack((self.simplices_points, new_points))
 
                 tri = Delaunay(self.simplices_points, qhull_options = options)
                 tri.close()
@@ -411,8 +458,6 @@ class Mesh:
                 contains = self.contains_naive(c)
 
                 to_del = np.logical_or(to_del, ~contains)
-
-                
 
                 self.simplices = np.delete(tri.simplices, to_del, axis = 0) # keep the simplices
                 
@@ -495,7 +540,7 @@ class Mesh:
     def get_volume_properties(self):
         '''Calculate volume and center of mass.'''
 
-        self.triangulate_volume(max_edge_div=1000, sample_volume = 0, sample_surface=0, options = 'Qc Qt')
+        self.triangulate_volume(max_edge_div=1000, options = 'Qc Qt')
         if self.simplices.shape[0] == 0:
             self.volume = 0
             self.center_mass = self.facet_centroid[0, :]
@@ -809,6 +854,38 @@ class Mesh:
         xc = x + np.expand_dims(tc, 1)*v
 
         return xc, tc, fc
+
+    def find_boundary_multiple(self, x, v):
+        """Finds all the boundary collisions from points x in directions v.
+        x = origin points
+        v = directions"""
+
+        N = x.shape[0]
+        
+        indices = np.arange(N)
+
+        xc = np.zeros((0, 3))
+        tc = np.zeros(0)
+        fc = np.zeros(0, dtype = int)
+        ic = np.zeros(0, dtype = int)
+
+        active = np.ones(N, dtype = bool)
+        
+        while np.any(active):
+            xci, tci, fci = self.find_boundary(x[active, :], v[active, :]) # get new collisions
+
+            keep = fci >= 0 # which points to keep
+
+            xc = np.vstack((xc, xci[keep, :]))
+            tc = np.concatenate((tc, tci[keep]))
+            fc = np.concatenate((fc, fci[keep]))
+            ic = np.concatenate((ic, indices[active][keep]))
+
+            active[active] = keep
+
+            x[active, :] = xci[keep, :] + self.tol*v[active, :]
+
+        return xc, tc, fc, ic
 
     def sample_volume(self, n):
         if self.n_of_simplices == 0:

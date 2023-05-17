@@ -1192,6 +1192,7 @@ class Geometry:
         if mesh is None:
             mesh = self.mesh
         fig, ax = self.mesh.plot_triangulation(fig = fig, ax = ax, l_color = l_color, linestyle = linestyle, dpi = dpi)
+        
         fig.savefig(self.args.results_folder + 'triangulation.png')
         plt.close(fig)
 
