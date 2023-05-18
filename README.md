@@ -168,7 +168,7 @@ The geometry can be defined from an standard geometry or an external file. The s
 | Box             | `box`, `cuboid`          | Lx, Ly, Lz                    |
 | Cylinder        | `cylinder`, `rod`, `bar` | H, R, N_sides    |
 | Variable cross-section corrugated wire | `corrugated` | L, l, R, r, N_sides, N_sections |
-| Constant cross-section corrugated wire | `zigzag` | H, R, N_sides, N_sections, h|
+| Constant cross-section corrugated wire | `zigzag` | L, R, dx, dy, N_sides, N_sections|
 | "Castle"        | `castle`                 | L, l, R, r, N_sides, N_sections, S |
 | Radially corrugated wire | `star`          | H, R, r, N_points. |
 | Free shape wire | `freewire`          | R0, L0, R1, L1, R2, L2 ... L(N), R(N+1), N_sides |
