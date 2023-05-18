@@ -132,9 +132,9 @@ All inputs can be given in form of a text file. The following shows an example o
     --geo_rotation     90 y
     --subvolumes       slice 10 0
     --bound_pos        relative 0 0.5 0.5 1 0.5 0.5 0.5 0 0.5 0.5 1 0.5
-    --bound_cond       T T R
+    --bound_cond       T T R R P
     --bound_values     302 298 10 10
-    --connect_facets   absolute 5e3 5e2 0 5e3 5e2 1e3
+    --connect_pos      absolute 5e3 5e2 0 5e3 5e2 1e3
     --reference_temp   local
     --temp_dist        cold
     --particles        total 1e5
@@ -169,8 +169,10 @@ The geometry can be defined from an standard geometry or an external file. The s
 | Cylinder        | `cylinder`, `rod`, `bar` | H, R, N_sides    |
 | Variable cross-section corrugated wire | `corrugated` | L, l, R, r, N_sides, N_sections |
 | Constant cross-section corrugated wire | `zigzag` | H, R, N_sides, N_sections, h|
-| "Castle"        | `castle`                 | L, l, R, r, N_sides, N_sections, S. |
+| "Castle"        | `castle`                 | L, l, R, r, N_sides, N_sections, S |
 | Radially corrugated wire | `star`          | H, R, r, N_points. |
+| Free shape wire | `freewire`          | R0, L0, R1, L1, R2, L2 ... L(N), R(N+1), N_sides |
+
 
 <p>&nbsp</p>
 
@@ -193,19 +195,19 @@ Whatever is the geometry, it is always rezeroed so that all vertices are in the 
 
 ### Boundary conditions
 
-The boundary conditions (BC) consist of heat transfer restrictions (such as imposed temperatures) and boundary surfaces properties (roughness or periodic). The user sets the desired facets on which to apply the BC by passing their indices to `--bound_facets` or `--bound_pos`, the BC type to `--bound_cond` and their respective values to `--bound_values`. For instance, in the previously given example we have:
+The boundary conditions (BC) consist of heat transfer restrictions (such as imposed temperatures) and boundary surfaces properties (roughness or periodic). The user sets the desired facets on which to apply the BC by passing their positions `--bound_pos`, the BC type to `--bound_cond` and their respective values to `--bound_values`. For instance, in the previously given example we have:
 
-    --bound_facets     0 3 4 2
-    --bound_cond       T T R R P
-    --bound_values     302 298 10 10
-    --connect_facets   1 5
+    --bound_pos    relative 0 0.5 0.5 1 0.5 0.5 0.5 0 0.5 0.5 1 0.5
+    --bound_cond   T T R R P
+    --bound_values 302 298 10 10
+    --connect_pos  absolute 5e3 5e2 0 5e3 5e2 1e3
 
 So, in order:
 
-- Facet 0 has an imposed temperature of 302 K;
-- Facet 3 has an imposed temperature of 298 K;
-- Facets 4 and 2 both have a roughness of 10 angstroms;
-- Facets 1 and 5 are not mentioned in `--bound_facets`, hence they pick the last informed boundary condition, which is periodic (`P`). To complete, their connection needs to be informed to `--connect_facets` (alternatively, in `--connect_pos`).
+- Facet located at the relative position [0 0.5 0.5] has an imposed temperature of 302 K;
+- Facet located at the relative position [1 0.5 0.5] has an imposed temperature of 298 K;
+- Facets located at relative positions [0.5 0 0.5] and [0.5 1 0.5] both have a roughness of 10 angstroms;
+- The remaining facets are not mentioned in `--bound_pos`, hence they pick the last informed boundary condition, which is periodic (`P`). To complete, their connection needs to be informed to `--connect_pos`.
 
 The `periodic` BC can only be applied to facets that have vertices in the same relative position, and their normal must be parallel and pointing in opposite directions. This is of vital importance, since crystal orientation is relevant to the phonon properties: an interface between crystals of the same material but in different orientations (such as grain boundaries) _cannot_ be considered periodic. In this configuration, whenever a particle crosses a boundary (that is not with a fixed temperature) it is transported to the same position as it entered on the opposite boundary, as the solid was composed by several cuboid domains side by side (hence, periodic).
 

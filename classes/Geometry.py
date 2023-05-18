@@ -75,7 +75,7 @@ class Geometry:
         
         print('Loading geometry...')
 
-        if shape in ['cuboid', 'box', 'cylinder', 'rod', 'bar', 'star', 'castle', 'zigzag', 'corrugated']:
+        if shape in ['cuboid', 'box', 'cylinder', 'rod', 'bar', 'star', 'castle', 'zigzag', 'corrugated', 'freewire']:
             self.mesh = self.generate_primitives(shape, self.dimensions)
         else:
             prev_mesh = tm.load(shape)
@@ -372,6 +372,41 @@ class Geometry:
                 ax.plot(vertices[f[[0, 1, 2, 0]], 0],
                         vertices[f[[0, 1, 2, 0]], 1],
                         vertices[f[[0, 1, 2, 0]], 2])
+            
+        elif shape in ['freewire']:
+            
+            R = np.array([dims[i] for i in range(0, len(dims)-1, 2)], dtype = float) # radii
+            L = np.array([dims[i] for i in range(1, len(dims)-1, 2)], dtype = float) # section lengths
+            N = int(dims[-1]) # number of sides
+
+            angles = np.arange(N)*2*np.pi/N
+
+            ring = (np.vstack((np.cos(angles), np.sin(angles), np.zeros(N)))).T
+
+            base_faces = np.array([[i, i+1, 0] if i < N else [i, 1, 0] for i in range(1, N+1)])
+            side_faces = np.zeros((2*N, 3), dtype = int)
+            for i in range(N-1):
+                side_faces[2*i  , :] = np.array([i, i+1 , i+N+1])
+                side_faces[2*i+1, :] = np.array([i, i+N, i+N+1])
+            side_faces[-2, :] = np.array([N-1,      0, N])
+            side_faces[-1, :] = np.array([N-1, 2*N-1, N])
+
+            vertices = np.vstack((np.zeros(3), ring*R[0]))
+            faces = np.copy(base_faces)
+
+            for i, r in enumerate(R[1:]):
+                vertices = np.vstack((vertices,
+                                        ring*r + np.array([0, 0, L[:i+1].sum()])))
+                
+                faces = np.vstack((faces,
+                                   side_faces + i*N+1))
+            
+            # closing
+            vertices = np.vstack((vertices,
+                                  np.array([0, 0, L[:(R.shape[0]-1)].sum()])))
+
+            faces = np.vstack((faces,
+                               np.where(base_faces == 0, vertices.shape[0]-1, base_faces + vertices.shape[0]-N-2)))
             
         return Mesh(vertices, faces)
 
