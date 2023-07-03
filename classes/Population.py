@@ -96,7 +96,7 @@ class Population(Constants):
         if self.args.reference_temp[0] != 'local':
             self.T_reference = float(self.args.reference_temp[0])
             self.reference_occupation = phonon.calculate_occupation(self.T_reference, phonon.omega)
-            self.ref_en_density = phonon.calculate_crystal_energy(self.T_reference)
+            self.ref_en_density = phonon.crystal_energy_function(self.T_reference)
         else:
             self.T_reference = 'local'
 
@@ -514,12 +514,6 @@ class Population(Constants):
 
         self.res_temperatures = self.res_facet_temperature[indexes] # impose temperature values to the right particles
 
-        # self.res_energy_balance   = np.zeros(self.n_of_reservoirs)
-        # self.res_heat_flux        = np.zeros((self.n_of_reservoirs, 3))
-
-        # if self.norm == 'mean':
-        #     self.res_norm = np.zeros(self.n_of_reservoirs)
-
         if self.res_modes.shape[0]>0:
             self.res_occupation = phonon.calculate_occupation(self.res_temperatures, self.res_omega)
             if self.T_reference == 'local':
@@ -589,11 +583,21 @@ class Population(Constants):
             self.temp_interp = partial(interp1d, kind = self.temp_interp_type, fill_value = 'extrapolate')
         elif self.temp_interp_type == 'nearest':
             self.temp_interp = NearestNDInterpolator
-        elif self.temp_interp_type == 'radial':
-            self.temp_interp = partial(RBFInterpolator, kernel = 'linear')
-        elif self.temp_interp_type == 'linear':
-            warnings.warn(Warning('Linear T interpolation is currently valid for slice subvolumes only. Defaulting to RBF interpolation to avoid extrapolation problems.'))
-            self.temp_interp = partial(RBFInterpolator, kernel = 'linear')
+        elif self.temp_interp_type in ['radial', 'linear']:
+            if self.temp_interp_type == 'linear':
+                warnings.warn(Warning('Linear T interpolation is currently valid for slice subvolumes only. Defaulting to RBF interpolation to avoid extrapolation problems.'))
+
+            # NOTE: RBFInterpolator is kinda hard to make it work properly:
+            #       - The "neighbours" keyword does not seem to work to reduce the influence.
+            #       - Every point influences the result, so the distribution of temperature seems to cause a feedback loop that makes it hotter or colder. Need to confirm.
+            #       - Other kernels need an aditional shape parameter that can be harder for the user to tune.
+            #       
+            #       An alternative is to use linear interpolator, but then the interpolator needs to include the points on the borders and corners
+            #       of the geometry so that the convex hull of the interpolator corresponds to that of the geometry. That may be too difficult to do
+            #       in general.
+            #       Maybe a shape parameter identifier?
+
+            self.temp_interp = partial(RBFInterpolator, kernel = 'cubic')
         else:
             raise Exception('Invalid T interpolator type.')
 
@@ -654,6 +658,8 @@ class Population(Constants):
         
         if geometry.subvol_type == 'slice' and self.temp_interp_type in ['linear', 'nearest']:
             self.temperature_interpolator = self.temp_interp(geometry.subvol_center[:, self.slice_axis], subvol_temperatures)
+        elif geometry.subvol_type == 'grid' and np.any(geometry.grid == 1):
+            self.temperature_interpolator = self.temp_interp(geometry.subvol_center[:, geometry.grid != 1], subvol_temperatures)
         else:
             self.temperature_interpolator = self.temp_interp(geometry.subvol_center, subvol_temperatures)
         
@@ -699,15 +705,18 @@ class Population(Constants):
         if geometry.subvol_type == 'slice' and self.temp_interp_type in ['linear', 'nearest']:
             self.temperature_interpolator = self.temp_interp(geometry.subvol_center[:, self.slice_axis], self.subvol_temperature)
             self.temperatures = self.temperature_interpolator(self.positions[:, self.slice_axis])
+        elif geometry.subvol_type == 'grid' and np.any(geometry.grid == 1):
+            self.temperature_interpolator = self.temp_interp(geometry.subvol_center[:, geometry.grid != 1], self.subvol_temperature)
+            self.temperatures = self.temperature_interpolator(self.positions[:, geometry.grid != 1])
         else:
             self.temperature_interpolator = self.temp_interp(geometry.subvol_center, self.subvol_temperature)
             self.temperatures = self.temperature_interpolator(self.positions)
-
+        
     def calculate_energy(self, geometry, phonon):
         
         if self.T_reference == 'local':
-            dn = self.occupation - phonon.calculate_occupation(self.temperatures, self.omega)
-            ref = phonon.calculate_crystal_energy(self.subvol_temperature)
+            dn = self.occupation - phonon.calculate_occupation(self.subvol_temperature[self.subvol_id], self.omega)
+            ref = phonon.crystal_energy_function(self.subvol_temperature)
         else:
             dn = self.occupation - self.reference_occupation[self.modes[:, 0], self.modes[:, 1]]
             ref = self.ref_en_density
@@ -979,6 +988,9 @@ class Population(Constants):
 
             if geometry.subvol_type == 'slice' and self.temp_interp_type in ['nearest', 'linear']:
                 T_diff = self.temperature_interpolator(col_pos[indexes_diff, self.slice_axis])
+            elif geometry.subvol_type == 'grid' and np.any(geometry.grid == 1):
+                x = col_pos[indexes_diff, :].reshape(-1, 3)
+                T_diff = self.temperature_interpolator(x[:, geometry.grid != 1])
             else:
                 T_diff = self.temperature_interpolator(col_pos[indexes_diff, :])
 
@@ -1090,27 +1102,6 @@ class Population(Constants):
                 out_q = near_k_func(k_try)                            # out qpoints (Qa,)
                 in_q  = np.arange(phonon.number_of_qpoints)[active_k] # in  qpoints (Qa,)
 
-                # v_try = v[ in_q, :, :] - 2*n[i_f, :]*np.sum(v[in_q, :, :]*n[i_f, :], axis = 2, keepdims = True) # (Qa, J, 3)
-                # v_try = v[ in_q, :, :] - 2*n*np.sum(v[in_q, :, :]*n, axis = 2, keepdims = True) # (Qa, J, 3)
-                # v_try = np.expand_dims(v_try, axis = 0)                                                         # (1, Qa, J, 3)
-                # v_out = np.transpose(np.expand_dims(v[out_q, :, :], axis = 0), axes = (2, 1, 0, 3))             # (J, Qa, 1, 3)
-                
-                # v_try_norm = np.linalg.norm(v_try, axis = 3)
-                # v_out_norm = np.linalg.norm(v_out, axis = 3)
-
-                # dot = np.sum(v_try*v_out, axis = 3) # (J, Q, J)
-
-                # v_angle = np.arccos(np.around(dot/(v_try_norm*v_out_norm), decimals = 3))
-
-                # same_norm  = np.absolute((v_try_norm - v_out_norm)/v_try_norm) < 1e-10
-                # same_angle = v_angle < 1e-10
-
-                # same_v = np.logical_and(same_norm, same_angle)
-
-                ################### TEST ###################################
-                # same_v = np.ones(same_v.shape, dtype = bool)
-                ############################################################
-
                 is_in = s_in[in_q, :]
                 is_out = np.transpose(np.expand_dims(s_out[out_q, :], 0), (2, 1, 0))
 
@@ -1186,7 +1177,7 @@ class Population(Constants):
 
                 n_ts = i_q_in.shape[0]
 
-                fig, ax = plt.subplots(nrows = 2, ncols = 3, figsize = (15, 10), dpi = 100, sharex = 'row', sharey = 'row')
+                fig, ax = plt.subplots(nrows = 3, ncols = 3, figsize = (15, 15), dpi = 300, sharex = 'row', sharey = 'row')
                 
                 b = np.eye(3)
                 is_normal = 1 - np.sum(b*np.absolute(n), axis = 1) < 1e-3
@@ -1216,6 +1207,9 @@ class Population(Constants):
                 v_n_in = np.sum(phonon.group_vel[spec_q_in, spec_j_in, :]*n, axis = 1)
                 v_n_out = np.sum(phonon.group_vel[spec_q_out, spec_j_out, :]*n, axis = 1)
 
+                omega_in  = phonon.omega[spec_q_in , spec_j_in ]
+                omega_out = phonon.omega[spec_q_out, spec_j_out]
+
                 ax[0, 0].scatter(k_n_in, k_n_out, s = 1)
                 ax[1, 0].scatter(v_n_in, v_n_out, s = 1)
 
@@ -1225,6 +1219,8 @@ class Population(Constants):
                 ax[0, 2].scatter(k_b2_in, k_b2_out, s = 1)
                 ax[1, 2].scatter(v_b2_in, v_b2_out, s = 1)
 
+                ax[2, 1].scatter(omega_in, omega_out, s = 1)
+
                 v_list = [r'$\vec{{n}}$', r'$\vec{{b}}_{{1}}$', r'$\vec{{b}}_{{2}}$']
 
                 for i in range(3):
@@ -1232,6 +1228,12 @@ class Population(Constants):
                     ax[0, i].set_ylabel(r'$\vec{{k}}_{{out}}\cdot$' + v_list[i])
                     ax[1, i].set_xlabel(r'$\vec{{v}}_{{in}}\cdot$' + v_list[i])
                     ax[1, i].set_ylabel(r'$\vec{{v}}_{{out}}\cdot$' + v_list[i])
+                
+                ax[2, 1].set_xlabel('$\omega_{in}$')
+                ax[2, 1].set_ylabel('$\omega_{out}$')
+
+                ax[2, 0].axis('off')
+                ax[2, 2].axis('off')
                 
                 for a in ax.ravel():
                     a.yaxis.set_tick_params(labelleft=True)
@@ -1390,7 +1392,7 @@ class Population(Constants):
                 
                 n_ts = spec_q_in.shape[0]
 
-                fig, ax = plt.subplots(nrows = 2, ncols = 3, figsize = (15, 10), dpi = 100, sharex = 'row', sharey = 'row')
+                fig, ax = plt.subplots(nrows = 3, ncols = 3, figsize = (15, 15), dpi = 100, sharex = 'row', sharey = 'row')
                 
                 b = np.eye(3)
                 is_normal = 1 - np.sum(b*np.absolute(n), axis = 1) < 1e-3
@@ -1420,6 +1422,9 @@ class Population(Constants):
                 v_n_in = np.sum(phonon.group_vel[spec_q_in, spec_j_in, :]*n, axis = 1)
                 v_n_out = np.sum(phonon.group_vel[spec_q_out, spec_j_out, :]*n, axis = 1)
 
+                omega_in  = phonon.omega[spec_q_in , spec_j_in ]
+                omega_out = phonon.omega[spec_q_out, spec_j_out]
+
                 ax[0, 0].scatter(k_n_in, k_n_out, s = 1)
                 ax[1, 0].scatter(v_n_in, v_n_out, s = 1)
 
@@ -1429,6 +1434,8 @@ class Population(Constants):
                 ax[0, 2].scatter(k_b2_in, k_b2_out, s = 1)
                 ax[1, 2].scatter(v_b2_in, v_b2_out, s = 1)
 
+                ax[2, 1].scatter(omega_in, omega_out, s = 1)
+
                 v_list = [r'$\vec{{n}}$', r'$\vec{{b}}_{{1}}$', r'$\vec{{b}}_{{2}}$']
 
                 for i in range(3):
@@ -1437,6 +1444,12 @@ class Population(Constants):
                     ax[1, i].set_xlabel(r'$\vec{{v}}_{{in}}\cdot$' + v_list[i])
                     ax[1, i].set_ylabel(r'$\vec{{v}}_{{out}}\cdot$' + v_list[i])
                 
+                ax[2, 1].set_xlabel('$\omega_{in}$')
+                ax[2, 1].set_ylabel('$\omega_{out}$')
+
+                ax[2, 0].axis('off')
+                ax[2, 2].axis('off')
+
                 for a in ax.ravel():
                     a.yaxis.set_tick_params(labelleft=True)
 
@@ -1688,10 +1701,10 @@ class Population(Constants):
             # To recover the flux, we average this energy over the area and interval of time integrated.
             # The energy is this quantity in the direction of the normal.
 
-            self.res_heat_flux      = phonon.normalise_to_density(self.res_heat_flux)/self.res_norm.reshape(-1, 1) # average energy crossing the boundary
-            self.res_heat_flux     *= phonon.number_of_active_modes                                                # considering the contribution of several modes
+            self.res_heat_flux  = phonon.normalise_to_density(self.res_heat_flux)/self.res_norm.reshape(-1, 1) # average energy crossing the boundary
+            self.res_heat_flux *= phonon.number_of_active_modes                                                # considering the contribution of several modes
             
-            self.res_energy_balance = np.sum(self.res_heat_flux*-geometry.facets_normal[self.res_facet, :], axis = 1)
+            # self.res_energy_balance = np.sum(self.res_heat_flux*-geometry.facets_normal[self.res_facet, :], axis = 1)
             
             self.res_heat_flux      /= (self.n_dt_to_conv*self.dt*geometry.facets_area[self.res_facet].reshape(-1, 1))                # divide by area and time to convert in rate
             self.res_heat_flux      *= self.eVpsa2_in_Wm2 # convert eV/a²ps to W/m²
@@ -1710,8 +1723,8 @@ class Population(Constants):
 
         n0 = phonon.calculate_occupation(self.temperatures, self.omega) # calculating Bose-Einstein occcupation
         
-        with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
-            self.occupation = n0 + (self.occupation - n0)*np.exp(-self.dt/tau) # n = n0 + (n - n0(T)) e^(-dt/tau(T))
+        with np.errstate(divide='ignore', invalid='ignore', over='ignore'): # this case is treated inside np.where, but the warning still keeps showing up
+            self.occupation = np.where(tau > 0, n0 + (self.occupation - n0)*np.exp(-self.dt/tau), n0) # n = n0 + (n - n0(T)) e^(-dt/tau(T))
 
     def contains_check(self, geometry):
         '''Eventually, some particles will escape the geometry because of numerical uncertainties.
@@ -1754,7 +1767,9 @@ class Population(Constants):
             self.add_reservoir_particles(geometry)  # add reservoir particles that come in the domain
 
         self.boundary_scattering(geometry, phonon)      # perform boundary scattering/periodicity and particle deletion
+
         self.refresh_temperatures(geometry, phonon)     # refresh cell temperatures
+        
         self.lifetime_scattering(phonon)                # perform lifetime scattering
 
         self.current_timestep += 1                      # +1 timestep index

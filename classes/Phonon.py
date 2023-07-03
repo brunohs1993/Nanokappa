@@ -67,7 +67,6 @@ class Phonon(Constants):
     def load_base_properties(self):
         '''Initialise all phonon properties from input files.'''
         
-        #### we have to discuss for the following ####
         poscar_file = self.mat_folder + self.args.poscar_file[self.mat_index]
         unitcell, _ = read_crystal_structure(poscar_file, interface_mode='vasp')
         lattice = unitcell.get_cell()   # vectors as lines
@@ -81,7 +80,6 @@ class Phonon(Constants):
 
         symmetry_obj = phonon.primitive_symmetry
         rotations = symmetry_obj.get_reciprocal_operations()
-        #############################################
 
         self.volume_unitcell = unitcell.get_volume()   # angstrom³
         
@@ -102,8 +100,7 @@ class Phonon(Constants):
         print('Expanding group velocity to FBZ...')
         self.load_group_vel()
         qpoints_FBZ,group_vel=expand_FBZ(0,self.weights,self.q_points,self.group_vel,1,rotations,reciprocal_lattice)
-        self.group_vel=np.around(group_vel, decimals = 8)
-        # self.group_vel -= self.group_vel.mean(axis = (0, 1)) # TEST
+        self.group_vel = group_vel
 
         self.load_temperature()
         # print('Expanding heat capacity to FBZ...')  # Do we need heat capacity? For now it is not used anywhere...  
@@ -133,11 +130,6 @@ class Phonon(Constants):
         self.reciprocal_lattice = np.around(reciprocal_lattice, decimals = 6)
 
         self.unique_modes = np.stack(np.meshgrid( np.arange(self.number_of_qpoints), np.arange(self.number_of_branches) ), axis = -1 ).reshape(-1, 2).astype(int)
-
-        # np.savetxt('scat_dataset.txt', np.hstack((self.unique_modes,
-        #                                          self.omega[self.unique_modes[:, 0], self.unique_modes[:, 1]].reshape(-1, 1),
-        #                                          self.group_vel[self.unique_modes[:, 0], self.unique_modes[:, 1], :])), delimiter = ',', fmt = '%d %d %+23.16e %+23.16e %+23.16e %+23.16e')
-        # quit()
 
         self.get_wavevectors()
         self.get_norms()
@@ -386,7 +378,10 @@ class Phonon(Constants):
         self.energy_array = np.array( list( map(self.calculate_crystal_energy, T_array) ) ).reshape(-1)
 
         # Interpolating
-        self.temperature_function = interp1d( self.energy_array, T_array, kind = 'linear', fill_value = (T_min, T_max), bounds_error = False)
+        self.temperature_function = interp1d(self.energy_array, T_array, kind = 'linear', fill_value = (T_min, T_max), bounds_error = False)
+
+        # saving crystal energy function as well
+        self.crystal_energy_function = interp1d(T_array, self.energy_array, kind = 'linear', fill_value = (self.energy_array.min(), self.energy_array.max()), bounds_error = False)
 
     def normalise_to_density(self, x):
         '''Defines conversion from energy to energy density here so it is easy to change.'''

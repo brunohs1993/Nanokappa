@@ -494,9 +494,11 @@ class Geometry:
                 self.subvol_volume = self.calculate_subvol_volume(algorithm = 'mc')
         
         elif self.subvol_type == 'grid':
-            nx = int(self.args.subvolumes[1])
-            ny = int(self.args.subvolumes[2])
-            nz = int(self.args.subvolumes[3])
+            self.grid = np.array(self.args.subvolumes[1:4]).astype(int)
+
+            nx = int(self.grid[0])
+            ny = int(self.grid[1])
+            nz = int(self.grid[2])
             
             dx = 1/nx
             dy = 1/ny

@@ -164,7 +164,7 @@ def exec_sim(sim_params_csv, mode, exec_params):
 
     elif mode == 'local':
 
-        sim_params = import_params(sim_params_csv)
+        sim_params = sim_params_csv
 
         cmd = 'conda run -n nanokappa python {}/nanokappa.py'.format(exec_params['nanokappa_folder'])
         for k in sim_params.keys():

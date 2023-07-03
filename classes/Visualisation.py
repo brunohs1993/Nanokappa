@@ -8,9 +8,6 @@ import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 
-# import matplotlib.cm as cm
-# import matplotlib.gridspec as gridspec
-
 # other
 import copy
 import warnings
@@ -118,7 +115,6 @@ class Visualisation(Constants):
             self.read_convergence()
 
             if self.sim_time.shape[0] > 1:
-            #     if verbose: print('Plotting convergence...')
                 self.plot_convergence_general(property_list = ['e', 'T', 'Np', 'phi', 'kappa'], cmap = None)
 
             if self.n_of_reservoirs >0 :
@@ -129,8 +125,6 @@ class Visualisation(Constants):
             if self.n_of_reservoirs >0 :
                 if verbose: print('Reading particle data...')
                 self.read_particles(verbose)
-                # if self.args.subvolumes[0] == 'slice':
-                #     if verbose: print('Plotting thermal conductivity with frequency...')
                 with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
                     self.flux_contribution()
             self.plot_kappa_path()
@@ -809,7 +803,7 @@ class Visualisation(Constants):
         ax1.plot(x_axis, y_axis.sum(axis = 1), linestyle = '--', color = 'k')
         
         ax1.set_xlabel('Simulation time [ps]', fontsize = 12)
-        ax1.set_ylabel('Energy balance on surface [eV]', fontsize = 12)
+        ax1.set_ylabel('Energy balance through surface [eV]', fontsize = 12)
         
         labels = ['Res {}'.format(i) for i in range(self.n_of_reservoirs)]
         labels.append('Balance')
@@ -875,10 +869,6 @@ class Visualisation(Constants):
                         color = colors[i],
                         linewidth = 5)
 
-        # divider = make_axes_locatable(plt.gca())
-        # cax = divider.append_axes("bottom", "5%", pad="3%")
-        # norm = matplotlib.colors.Normalize(vmin=np.nanmin(k), vmax=np.nanmax(k))
-
         norm = matplotlib.colors.Normalize(vmin=min_k, vmax=max_k)
         cb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap),
                      ax = ax,
@@ -896,10 +886,5 @@ class Visualisation(Constants):
         cb.set_ticklabels(ticks, size = 'small')
         
         plt.tight_layout()
-        # plt.show()
         plt.savefig(self.folder + 'kappa_con.png')
         plt.close(fig)
-
-
-
-

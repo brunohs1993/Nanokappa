@@ -3,8 +3,6 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import copy
 
-from scipy.stats.qmc import Sobol
-
 def get_regions(x_s, x_r):
     
     n_r = x_r.shape[0] # number of regions
@@ -61,8 +59,6 @@ def distribute(geo, n_r, folder, view = True):
     counter = 0
     solution_found = False
     
-    gen = Sobol(3)
-
     x_r = geo.sample_volume(n_r) # regions coordinates
     x_s = geo.sample_volume(n_s) # samples coordinates
 
