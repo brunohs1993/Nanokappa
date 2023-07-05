@@ -1,13 +1,13 @@
 ![](/readme_fig/logo_white.png#gh-light-mode-only)
 ![](/readme_fig/logo_black.png#gh-dark-mode-only)
 
-# What is Nano-k?
+# What is Nano-&#954;?
 
-Nano-k is a Python code for phonon transport simulation. It allows to estimate the transport of heat in a given material by importing its properties derived from ab-initio calculations. It is possible to use standard geometries or import external ones.
+Nano-&#954; is a Python code for phonon transport simulation, combining Monte Carlo method with ab-initio material data. The user can simulate preset, standard geometries or import external ones in STL format.
 
 # Setting the environment
 
-It is recommended to run nano-k using a Conda environment. Firstly, install [Anaconda](https://www.anaconda.com/) on your computer.
+It is recommended to run Nano-&#954; using a Conda environment. Firstly, install [Anaconda](https://www.anaconda.com/) on your computer.
 
 Next, clone this repository or download its files to the desired folder.
 
@@ -68,26 +68,128 @@ The `(nanokappa)` word will appear on the command line, signaling the conda envi
 
 ## Simulation parameters
 
-In order to define a study case and run a simulation, several parameters need to be set. Geometry, material, boundary conditions and calculation parameters need to be completely defined. These parameters are passed to the program as a pair <keyword, values> directly on command line.
+In order to define a study case and run a simulation, several parameters need to be set. Geometry, material data, boundary conditions and calculation parameters need to be completely defined. These parameters are passed to the program as a pair <keyword, values> directly on command line.
+
+### Geometrical parameters
+
+These parameters are the ones that relate to the geometry that will be simulated. The geometry can be imported as an STL file by setting `--geometry <file_name>` or chosen among the following options:
+
+| Geometry        | Key for `--geometry`     | Parameters for `--dimensions`         |
+| --------------- | ------------------------ | ------------------------------------- |
+| Box             | `box`, `cuboid`          | Lx, Ly, Lz                    |
+| Cylinder        | `cylinder`, `rod`, `bar` | H, R, N_sides    |
+| Variable cross-section corrugated wire | `corrugated` | L, l, R, r, N_sides, N_sections |
+| Constant cross-section corrugated wire | `zigzag` | L, R, dx, dy, N_sides, N_sections|
+| "Castle"        | `castle`                 | L, l, R, r, N_sides, N_sections, S |
+| Radially corrugated wire | `star`          | H, R, r, N_points. |
+| Free shape wire | `freewire`          | R0, L0, R1, L1, R2, L2 ... L(N), R(N+1), N_sides |
+
+<p>&nbsp</p>
+
+These standard geometries can be modified by entering the parameters `--scale` and `--geo_rotation`. For example, in order to declare a box with $L_x$ = 100, $L_y$ = 100 and $L_z$ = 200 (all lengths in angstroms), there are several ways to enter parameters:
+
+1. The most straightforward, by directly inputing the dimensions...
+
+        --geometry   box
+        --dimensions 100 100 200
+
+2. ...or by inputing any dimensions and scaling it by x, y and z factors, such as...
+   
+        --geometry   box
+        --dimensions 100 100 100
+        --scale      1 1 2
+
+3. ... or even by setting the dimensions in another order and rotating it:
+
+        --geometry     box
+        --dimensions   200 100 100
+        --geo_rotation 90 y
+
+The `--dimensions` arguments are required only for standard geometries. Imported geometries ignore this command. The inputs `--scale` and `--geo_rotation`, however, work with imported geometries the same way as with the standard ones. It is important to note that the scaling of the geometry comes _before_ than its rotation.
+
+Whatever is the geometry, it is always rezeroed so that all vertices are in the all positive quadrant (every x, y and z coordinate is greater than or equal to zero).
+
+In summary:
+
+| Parameter                 | Keyword              | Reduced | Description | Types | Default |
+| ------------------------- | -------------------- | ------- | ----------- | ----- | ------- |
+| Geometry                  | `--geometry`         | `-g`    | Standard geometry name or file name. Geometry coordinates in angstroms. | String | `cuboid` |
+| Dimensions                | `--dimensions`       | `-d`    | Dimensions for the standard base geometries (box, cylinder, etc.). | Floats | `20e3 1e3 1e3` |
+| Scale                     | `--scale`            | `-s`    | Scale factors for the base geometry (x, y, z) | Float x3 | `1 1 1` |
+| Geometry rotation         | `--geo_rotation`     | `-gr`   | Euler angles to rotate the base geometry and which axis to apply (see [scipy.rotation.from_euler](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.from_euler.html)) | Float, String | |
+
+### Material parameters
+
+The parameters that treat the material data are:
+
+| Parameter          | Keyword          | Reduced | Description | Types | Default |
+| ------------------ | ---------------- | ----- | ----------- | ----- | ------- |
+| Material folder    | `--mat_folder`   | `-mf` | Path of the folder containing the material files. Full path advised. | String | |
+| hdf5 file          | `--hdf_file`     | `-hf` | File name with extension. | String | | 
+| POSCAR file        | `--poscar_file`  | `-pf` | File name with extension. | String | |
+| Material rotation  | `--mat_rotation` | `-mr` | Euler angles to change crystal orientation (see [scipy.rotation.from_euler](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.from_euler.html)) | Float, String |  |
+| Isotope scattering | `--isotope_scat` | `-is` | Additional scattering due to impurities/defects. | Int | |
+
+The properties describing the material are derived from hdf5 and POSCAR files derived as result from [Phono3py](https://phonopy.github.io/phono3py/index.html). They should both be in the folder informed in full to the `--mat_folder` argument. The material can also be rotated by passing a set of angles and rotation order to `--mat_rotation`.
+
+The `--isotope_scat` parameter signals whether there is additional phonon scattering to be considered due to impurities or deffects, e.g. in alloys data. This is signaled by passing the index of the material that should consider it. Since for now Nano-&#954; accepts only one material at time, the user should pass `-is 0` if there is additional scattering, and nothing if there is not.
+
+> **Obs.:** Only one material is accepted at the time because Nano-&#954; does not support phonon transmission on interfaces between different materials for now. This is planned to be added in the future.
+
+### Boundary conditions
+
+The boundary conditions (BC) consist of heat transfer restrictions (such as imposed temperatures) and boundary surfaces properties (roughness or periodic). The user sets the BC with the following parameters:
+
+| Parameter                 | Keyword              | Reduced | Description | Types | Default |
+| ------------------------- | -------------------- | ------- | ----------- | ----- | ------- |
+| Positions with imposed BC | `--bound_pos`        | `-bp`   | Set the coordinates from which to find the closest facet to apply the specific boundary conditions. First value is a keyword `relative` (normalises the bounding box between 0 and 1) or `absolute` (direct positions). The points are passed as $x_1~y_1~z_1~x_2~y_2~z_2...$.| String Float | | 
+| Boundary conditions       | `--bound_cond`       | `-bc`   | Type of boundary condition for each facet detected from the coordinates declared in `--bound_pos`. Accepts `T` for temperature, `P` for periodic, `R` for roughness/reflection. If one extra condition is given, it is considered to be the same for all non informed facets.  | String | |
+| Boundary condition values | `--bound_values`     | `-bv`   | Values for each imposed boundary condition. Temperatures in Kelvin, roughness in angstroms. | Float | |
+| Connected facets          | `--connect_pos`      | `-cp`   | Declared the same way as in `-bp`, it declares which facets are connected. They are treated in pairs: the first is connected to the second, the third to the fourth, etc. | String Float | |
+
+As an example, let's say that you would like to simulate a box measuring 10e3 &#8491; X 1e3 &#8491; X 1e3 &#8491;:
+
+    --geometry box
+    --dimensions 1e4 1e3 1e3
+
+We could simulate heat transfer in a thin film in inplane direction by setting:
+ - a temperature difference between both $x$ extremities;
+ - rough facets in upper and lower facets;
+ - periodicity in the two that are left.
+
+Declared as parameters, it could look like:
+
+    --bound_pos    relative 0 0.5 0.5 1 0.5 0.5 0.5 0.5 0 0.5 0.5 1
+    --bound_cond   T T R R P
+    --bound_values 302 298 10 10
+    --connect_pos  absolute 5e3 0 5e2 5e3 1e3 5e2
+
+So, in order:
+
+- Facet located at the relative position [0 0.5 0.5] has an imposed temperature of 302 K;
+- Facet located at the relative position [1 0.5 0.5] has an imposed temperature of 298 K;
+- Facets located at relative positions [0.5 0.5 0] and [0.5 0.5 1] both have a roughness of 10 &#8491;;
+- The remaining facets are not mentioned in `--bound_pos`, hence they pick the last informed boundary condition, which is periodic (`P`). To complete, their positions need to be informed to `--connect_pos`.
+
+The periodic (`P`) BC can only be applied to facets that have the same geometrical boundaries in relation to their centroid, and their normal must be parallel and pointing in opposite directions. This is of vital importance, since crystal orientation is relevant to the phonon properties: an interface between crystals of the same material but in different orientations (such as grain boundaries) _cannot_ be considered periodic. In this configuration, whenever a particle crosses a boundary (that is not with a fixed temperature) it is transported to the same position as it entered on the opposite boundary, as the solid was composed by several cuboid domains side by side (hence, periodic).
+
+The imposition of temperatures as BC (`T`) treats the respective facet as black body, always emmiting phonons according to the Bose-Einstein distribution:
+
+$$ n^0(\omega, T) = \frac{1}{\exp(\hbar \omega/k_b T)-1}$$
+
+The rough facet BC (`R`) uses a generalisation of the model described by [Ziman](https://academic.oup.com/book/32666) to calculate the probability of a particle being subjected to a specular or to a diffuse reflection, depending on its vibrational mode. In specular reflections, the velocity is perfectly mirrorred, frequency is kept and intensity (occupation) is conserved. In diffuse refflections, the wall behaves like a a black body absorbing completely the energy of the particle and reemitting another random mode with occupation calculated according to the Bose-Einstein distribution at local temperature.
+
+#################### EDITING ############################
+
 
 Here is a list of all parameters that can be set:
 
 | Parameter                 | Keyword              | Reduced | Description | Types | Default |
 | ------------------------- | -------------------- | ------- | ----------- | ----- | ------- |
 | Parameters file           | `--from_file`        | `-ff`   | File name with extension of a file containing all input parameters. Used to avoid inputing lots of parameters directly on terminal. Full path advised. | String | | 
-| Material folder           | `--mat_folder`       | `-mf`   | Path of the folders containing the material files. Full path advisable. | String | |
-| hdf5 file                 | `--hdf_file`         | `-hf`   | File names in each `-mf` with extensions. | String | | 
-| POSCAR file               | `--poscar_file`      | `-pf`   | File names in each `-mf` with extensions. | String | |
 | Results folder            | `--results_folder`   | `-rf`   | The name of the folder to be created containing all result files. If none is informed, no folder is created. | String | `''` |
 | Results location          | `--results_location` | `-rl`   | The path where the result folder will be created. It accepts `local` if the results should be saved in the current directory, `main` if they should be saved in the same directory as `nanokappa.py`, or a custom path. | String | `local` |
-| Geometry                  | `--geometry`         | `-g`    | Standard geometry name or file name. Geometry coordinates in angstroms. | String | `cuboid` |
-| Dimensions                | `--dimensions`       | `-d`    | Dimensions for the standard base geometries (box, cylinder, etc.). | Floats | `20e3 1e3 1e3` |
-| Scale                     | `--scale`            | `-s`    | Scale factors for the base geometry (x, y, z) | Float x3 | `1 1 1` |
-| Geometry rotation         | `--geo_rotation`     | `-gr`   | Euler angles to rotate the base geometry and which axis to apply (see [scipy.rotation.from_euler](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.from_euler.html)) | Float, String | |
-| Material rotation         | `--mat_rotation`     | `-mr`   | Euler angles to change crystal orientation (see [scipy.rotation.from_euler](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.from_euler.html)) | Float, String |  |
-| Boundary conditions       | `--bound_cond`       | `-bc`   | Type of boundary condition for each facet declared in `--bound_facets`. If one condition more is given, it is considered to be the same for all non informed facets. Accepts `T` for temperature, `P` for periodic, `R` for roughness/reflection. | String | |
-| Positions with imposed BC | `--bound_pos`        | `-bp`   | Set the POSITIONS from which to find the closest facet to apply the specific boundary conditions. First value is a keyword `relative` - considers all points in the mesh between 0 and 1 - or `absolute` - direct positions. | String Float | | 
-| Boundary condition values | `--bound_values`     | `-bv`   | Values for each imposed boundary conditions. Temperatures in Kelvin, roughness in angstroms. | Float | `303 297` |
+
 | Temperature distribution  | `--temp_dist`        | `-td`   | Shape of the initial temperature profile. Accepts `cold`, `hot`, `mean`, `linear`, `random`, `custom`. | String | `cold` |
 | Subvolume temperature     | `--subvol_temp`      | `-st`   | Initial temperature of each subvolume when `custom` is informed in `-td`, in Kelvin. | Float | |
 | Reference temperature     | `--reference_temp`   | `-rt`   | The temperature at which the occupation number for every mode will be considered zero, in Kelvin. Alternatively, the user can set it as "local" to use the local temperature of each particle.| Float/String | `local` |
@@ -155,61 +257,11 @@ The program could then be executed on terminal by calling:
 
     $ python <path_to_nanokappa>/nanokappa.py -ff <path-to-file>/parameters.txt
 
-### Material properties
-
-The properties describing the material are derived from hdf5 and POSCAR files. These files needed to be informed with extensions. They should both be in the folder informed in full to the `--mat_folder` argument. The files with material properties are the only mandatory parameters to be informed. All others have standard values associated for quick tests, as seen on the table above. The material can also be rotated by passing a set of angles and rotation order to `--mat_rotation`.
-
-### Geometry definition
-
-The geometry can be defined from an standard geometry or an external file. The standard geometries are the following:
-
-| Geometry        | Key for `--geometry`     | Parameters for `--dimensions`         |
-| --------------- | ------------------------ | ------------------------------------- |
-| Box             | `box`, `cuboid`          | Lx, Ly, Lz                    |
-| Cylinder        | `cylinder`, `rod`, `bar` | H, R, N_sides    |
-| Variable cross-section corrugated wire | `corrugated` | L, l, R, r, N_sides, N_sections |
-| Constant cross-section corrugated wire | `zigzag` | L, R, dx, dy, N_sides, N_sections|
-| "Castle"        | `castle`                 | L, l, R, r, N_sides, N_sections, S |
-| Radially corrugated wire | `star`          | H, R, r, N_points. |
-| Free shape wire | `freewire`          | R0, L0, R1, L1, R2, L2 ... L(N), R(N+1), N_sides |
 
 
-<p>&nbsp</p>
 
-These standard geometries can be modified by entering the parameters `--scale` and `--geo_rotation`. For example, a box with L_x = 100, L_y = 100 and L_z = 200 (all lengths in angstroms), there are two ways to enter parameters.
 
-1. By directly inputing the dimensions...
 
-        --geometry   box
-        --dimensions 100 100 200
-
-2. ...or by inputing any dimensions and scaling it by x, y and z factors, such as:
-   
-        --geometry   box
-        --dimensions 100 100 100
-        --scale      1 1 2
-
-The `--dimensions` arguments are required only for standard geometries. Imported geometries ignore this command. The inputs `--scale` and `--geo_rotation`, however, work with imported geometries the same way as with the standard ones.
-
-Whatever is the geometry, it is always rezeroed so that all vertices are in the all positive quadrant (every x, y and z coordinate is greater than or equal to zero).
-
-### Boundary conditions
-
-The boundary conditions (BC) consist of heat transfer restrictions (such as imposed temperatures) and boundary surfaces properties (roughness or periodic). The user sets the desired facets on which to apply the BC by passing their positions `--bound_pos`, the BC type to `--bound_cond` and their respective values to `--bound_values`. For instance, in the previously given example we have:
-
-    --bound_pos    relative 0 0.5 0.5 1 0.5 0.5 0.5 0 0.5 0.5 1 0.5
-    --bound_cond   T T R R P
-    --bound_values 302 298 10 10
-    --connect_pos  absolute 5e3 5e2 0 5e3 5e2 1e3
-
-So, in order:
-
-- Facet located at the relative position [0 0.5 0.5] has an imposed temperature of 302 K;
-- Facet located at the relative position [1 0.5 0.5] has an imposed temperature of 298 K;
-- Facets located at relative positions [0.5 0 0.5] and [0.5 1 0.5] both have a roughness of 10 angstroms;
-- The remaining facets are not mentioned in `--bound_pos`, hence they pick the last informed boundary condition, which is periodic (`P`). To complete, their connection needs to be informed to `--connect_pos`.
-
-The `periodic` BC can only be applied to facets that have vertices in the same relative position, and their normal must be parallel and pointing in opposite directions. This is of vital importance, since crystal orientation is relevant to the phonon properties: an interface between crystals of the same material but in different orientations (such as grain boundaries) _cannot_ be considered periodic. In this configuration, whenever a particle crosses a boundary (that is not with a fixed temperature) it is transported to the same position as it entered on the opposite boundary, as the solid was composed by several cuboid domains side by side (hence, periodic).
 
 ### Subvolumes
 
