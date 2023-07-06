@@ -132,9 +132,15 @@ The parameters that treat the material data are:
 
 The properties describing the material are derived from hdf5 and POSCAR files derived as result from [Phono3py](https://phonopy.github.io/phono3py/index.html). They should both be in the folder informed in full to the `--mat_folder` argument. The material can also be rotated by passing a set of angles and rotation order to `--mat_rotation`.
 
-The `--isotope_scat` parameter signals whether there is additional phonon scattering to be considered due to impurities or deffects, e.g. in alloys data. This is signaled by passing the index of the material that should consider it. Since for now Nano-&#954; accepts only one material at time, the user should pass `-is 0` if there is additional scattering, and nothing if there is not.
+The `--isotope_scat` parameter signals whether there is additional phonon scattering to be considered due to impurities or deffects, e.g. in alloys data. For this the hdf5 file should include the `gamma_isotope` field. The activation is signaled by passing the index of the material that should consider it. Since Nano-&#954; accepts only one material for the simulation, the user should pass `-is 0` if there is additional scattering, and nothing if there is not.
 
 > **Obs.:** Only one material is accepted at the time because Nano-&#954; does not support phonon transmission on interfaces between different materials for now. This is planned to be added in the future.
+
+To use the material offered as example in the test_material folder, it should be declared as:
+
+    --mat_folder  <path_to_nanokappa>/test_material/
+    --hdf_file    kappa-m313131.hdf5
+    --poscar_file POSCAR
 
 ### Boundary conditions
 
@@ -181,7 +187,13 @@ The rough facet BC (`R`) uses a generalisation of the model described by [Ziman]
 
 ### Subvolumes
 
-The subvolumes (SV) are subdivisions of the domain so it is possible to calculate local quantities, such as energy density, temperature and heat flux. Think cells, mesh or grid, but not exactly. They are defined by the use of reference points, so that a particle passing by is considered to be contained in the SV with the nearest reference point. The defined SV are thus non-intersecting, and local quantities are calculated considering the particles that are contained in it. The definition of the reference points can be given to the `--subvolumes` parameters in three different ways:
+The subvolumes (SV) are subdivisions of the domain so it is possible to calculate local quantities, such as energy density, temperature and heat flux. Think cells, mesh or grid, but not exactly. There is only one parameter that deals with that:
+
+| Parameter                 | Keyword              | Reduced | Description | Types | Default |
+| ------------------------- | -------------------- | ------- | ----------- | ----- | ------- |
+| Subvolumes                | `--subvolumes`       | `-sv`   | Type of subvolumes, number of subvolumes and slicing axis when the case (x = 0, y = 1, z = 2). Accepts `slice`, `grid` and `voronoi` as subvolume types. | String Integer (Integer Integer) | `slice 10 0` |
+
+The SVs are defined by the use of reference points, so that a particle passing by is considered to be contained in the SV with the nearest reference point. The defined SV are thus non-intersecting, and local quantities are calculated considering the particles that are contained in it. The definition of the reference points can be given to the `--subvolumes` parameters in three different ways:
 
 - `slice` slices the domain i.e. divides the geometry using equidistant planes along a given axis. For example, to slice the domain 5 times along x axis:
 
@@ -191,15 +203,28 @@ The subvolumes (SV) are subdivisions of the domain so it is possible to calculat
 
     --subvolumes grid 5 4 3
 
-- `unstruct` generates subvolumes by iteratively adjusting their positions so that it is more or less equilibrated. It is useful for complex geometries. For example, to generate 10 subvolumes without any position restriction:
+- `voronoi` generates subvolumes by iteratively adjusting their positions so that it is more or less equilibrated. It is useful for complex geometries. For example, to generate 10 subvolumes without any position restriction:
 
-    --subvolumes unstruct 10
+    --subvolumes voronoi 10
 
-The figure below shows how the system sets the voronoi subvolumes, in two dimensions for clarity. The red dots are the current $x_r$ and the black dots are the updated $x_r$ for the next iteration. It can be seen that even with a number of subvolumes that is not a perfect square, the subvolumes are organised rather evenly at the end of the process.
+The figure below shows how the system sets the voronoi subvolumes, in two dimensions for clarity. Samples are taken throughout the domain and initial reference points are randomly generated, in red. The samples are divided among SVs, and the centroid of each region is calculated (black dots). These centroids are then used as reference for the next iterations, and the process is repeated. The SV are defined when the reference points stop moving.
 
 ![](/readme_fig/voronoi.png)
 
-This algorithm has shown to be flexible, but can cause some problems depending of the complexity of the geometry and of the initial $x_r$. Geometries with indents or holes, for example, can lead to particles on each side of the gap to be considered in the same subvolume, which can lead to an unreal energy transfer through the space. This sometimes can be avoided by just rerunning the simulation, but usually better results can be achieved by increasing the number of subvolumes, so that each side of the empty space is classified as a different subvolume. It is important to have user discretion while applying this type of subvolume.
+The `voronoi` SV type allows for great flexibility but some unexpected effects can appear (such as two regions separated by a corner or a hole being connected by the same SV). Usually increasing the number of SV solves this issue.
+
+### Initial conditions
+
+The initial state of the domain is set by a temperature distribution that can be chosen by the user. The parameters responsible for that are:
+
+| Parameter                 | Keyword              | Reduced | Description | Types | Default |
+| ------------------------- | -------------------- | ------- | ----------- | ----- | ------- |
+| Temperature distribution  | `--temp_dist`        | `-td`   | Shape of the initial temperature profile. Accepts `cold`, `hot`, `mean`, `linear`, `random`, `custom`. | String | `cold` |
+| Subvolume temperature     | `--subvol_temp`      | `-st`   | Initial temperature of each subvolume when `custom` is informed in `-td`, in Kelvin. | Float | |
+
+Particles are initialised in each SV with their Bose-Einstein occupation at the local temperature. The temperature is based on the imposed temperatures of the reservoirs. If there is no imposed temperature as BC, the only available option is `custom`, and the desired temperature for each SV should be informed in order to `--subvol_temp`.
+
+
 
 
 #################### EDITING ############################
@@ -213,15 +238,13 @@ Here is a list of all parameters that can be set:
 | Results folder            | `--results_folder`   | `-rf`   | The name of the folder to be created containing all result files. If none is informed, no folder is created. | String | `''` |
 | Results location          | `--results_location` | `-rl`   | The path where the result folder will be created. It accepts `local` if the results should be saved in the current directory, `main` if they should be saved in the same directory as `nanokappa.py`, or a custom path. | String | `local` |
 
-| Temperature distribution  | `--temp_dist`        | `-td`   | Shape of the initial temperature profile. Accepts `cold`, `hot`, `mean`, `linear`, `random`, `custom`. | String | `cold` |
-| Subvolume temperature     | `--subvol_temp`      | `-st`   | Initial temperature of each subvolume when `custom` is informed in `-td`, in Kelvin. | Float | |
 | Reference temperature     | `--reference_temp`   | `-rt`   | The temperature at which the occupation number for every mode will be considered zero, in Kelvin. Alternatively, the user can set it as "local" to use the local temperature of each particle.| Float/String | `local` |
 | Temperature interpolation | `--temp_interp`      | `-ti`   | How to interpolate the temperature between the subvolumes' reference points. Accepts `nearest`, `linear` (when slice subvolumes are used) or `radial` (for grid or voronoi subvolumes). | String | `nearest` | 
 | N° of particles           | `--particles`        | `-p`    | Number of particles given as `keyword number`. Can be given as the total number (keyworld `total`), the number per-mode-per-subvolume (keyworld `pmps`) and the number per cubic angstom (keyworld `pv`). | String Integer | `pmps 1` |
 | Timestep                  | `--timestep`         | `-ts`   | Timestep of each iteration in picoseconds | Float | `1` |
 | Iterations                | `--iterations`       | `-i`    | Number of iterations to be performed | Integer | `10000` |
 | Maximum simulation time   | `--max_sim_time`     | `-mt`   | Maximum time the simulation will run. Declared as `D-HH:MM:SS`. If the simulation arrives to this time, the calculation is finished and post processing is executed. If `0-00:00:00` is informed, no time limit is imposed. | String |`0-00:00:00`|
-| Subvolumes                | `--subvolumes`       | `-sv`   | Type of subvolumes, number of subvolumes and slicing axis when the case (x = 0, y = 1, z = 2). Accepts `slice`, `grid` and `voronoi` as subvolume types. | String Integer (Integer Integer) | `slice 10 0` |
+
 | Path points               | `--path_points`      | `-pp`   | Set the approximate points where the path to calculate $\kappa_{path}$ will go through. Declared the same way as `--bound_pos`.| String Float | `relative 0 0.5 0.5 1 0.5 0.5` |
 | Number of datapoints      | `--n_mean`           | `-nm`   | Number of datapoints considered to calculated mean and standard deviation values. Each datapoint is 10 timesteps.| Int | `100` |
 | Real time plot            | `--rt_plot`          | `-rp`   | Property to plot particles to generate animations.  | String | |
