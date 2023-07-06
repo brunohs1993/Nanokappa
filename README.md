@@ -179,6 +179,29 @@ $$ n^0(\omega, T) = \frac{1}{\exp(\hbar \omega/k_b T)-1}$$
 
 The rough facet BC (`R`) uses a generalisation of the model described by [Ziman](https://academic.oup.com/book/32666) to calculate the probability of a particle being subjected to a specular or to a diffuse reflection, depending on its vibrational mode. In specular reflections, the velocity is perfectly mirrorred, frequency is kept and intensity (occupation) is conserved. In diffuse refflections, the wall behaves like a a black body absorbing completely the energy of the particle and reemitting another random mode with occupation calculated according to the Bose-Einstein distribution at local temperature.
 
+### Subvolumes
+
+The subvolumes (SV) are subdivisions of the domain so it is possible to calculate local quantities, such as energy density, temperature and heat flux. Think cells, mesh or grid, but not exactly. They are defined by the use of reference points, so that a particle passing by is considered to be contained in the SV with the nearest reference point. The defined SV are thus non-intersecting, and local quantities are calculated considering the particles that are contained in it. The definition of the reference points can be given to the `--subvolumes` parameters in three different ways:
+
+- `slice` slices the domain i.e. divides the geometry using equidistant planes along a given axis. For example, to slice the domain 5 times along x axis:
+
+    --subvolumes slice 5 0
+
+- `grid` slices the domain in all three axis. For example, to generate a grid of 5 x 4 x 3 subvolumes (x, y and z, respectively):
+
+    --subvolumes grid 5 4 3
+
+- `unstruct` generates subvolumes by iteratively adjusting their positions so that it is more or less equilibrated. It is useful for complex geometries. For example, to generate 10 subvolumes without any position restriction:
+
+    --subvolumes unstruct 10
+
+The figure below shows how the system sets the voronoi subvolumes, in two dimensions for clarity. The red dots are the current $x_r$ and the black dots are the updated $x_r$ for the next iteration. It can be seen that even with a number of subvolumes that is not a perfect square, the subvolumes are organised rather evenly at the end of the process.
+
+![](/readme_fig/voronoi.png)
+
+This algorithm has shown to be flexible, but can cause some problems depending of the complexity of the geometry and of the initial $x_r$. Geometries with indents or holes, for example, can lead to particles on each side of the gap to be considered in the same subvolume, which can lead to an unreal energy transfer through the space. This sometimes can be avoided by just rerunning the simulation, but usually better results can be achieved by increasing the number of subvolumes, so that each side of the empty space is classified as a different subvolume. It is important to have user discretion while applying this type of subvolume.
+
+
 #################### EDITING ############################
 
 
@@ -263,35 +286,7 @@ The program could then be executed on terminal by calling:
 
 
 
-### Subvolumes
 
-The subvolumes are subdivisions of the domain so it is possible to calculate local quantities, such as energy density, temperature and heatflux. The domain is subdivided in `N` non-intersecting pieces and local quantities are calculated only from the phonons located inside that region. There are three types of subvolumes that can be declared:
-
-- `slice` slices the domain i.e. divides the geometry using equidistant planes along a given axis. For example, to slice the domain 5 times along x axis:
-
-    --subvolumes slice 5 0
-
-- `grid` slices the domain in all three axis and removes subvolumes too small in comparison to the rest. For example, to generate a grid of 5 x 4 x 3 subvolumes (x, y and z, respectively):
-
-    --subvolumes grid 5 4 3
-
-- `voronoi` generates subvolumes by iteratively adjusting their positions so that it is more or less equilibrated. It is useful for complex geometries. For example, to generate 10 subvolumes without any position restriction:
-
-    --subvolumes voronoi 10
-
-The definition of the Voronoi subvolumes is given by the following algorithm:
-
-- Generate initial subvolume reference points $x_r$;
-- Sample the geometry with a number $N_s$ of generated points;
-- Define their correspondent subvolume i.e. the one with closest $x_r$;
-- Update $x_r$ to the center of mass of the subvolume (average samples position);
-- Repeat while increasing the number of samples until there is no change on $x_r$.
-
-The Figure shows an example in two dimensions. The red dots are the current $x_r$ and the black dots are the updated $x_r$ for the next iteration. It can be seen that even with a number of subvolumes that is not a perfect square, the subvolumes are organised rather evenly at the end of the process.
-
-![](/readme_fig/voronoi.png)
-
-This algorithm has shown to be flexible, but can cause some problems depending of the complexity of the geometry and of the initial $x_r$. Geometries with indents or holes, for example, can lead to particles on each side of the gap to be considered in the same subvolume, which can lead to an unreal energy transfer through the space. This sometimes can be avoided by just rerunning the simulation, but usually better results can be achieved by increasing the number of subvolumes, so that each side of the empty space is classified as a different subvolume. It is important to have user discretion while applying this type of subvolume.
 
 ### Result files
 
