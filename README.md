@@ -70,6 +70,21 @@ The `(nanokappa)` word will appear on the command line, signaling the conda envi
 
 In order to define a study case and run a simulation, several parameters need to be set. Geometry, material data, boundary conditions and calculation parameters need to be completely defined. These parameters are passed to the program as a pair <keyword, values> directly on command line.
 
+### The `--from_file` parameter
+
+The user can input all parameters sequentially directly on terminal, which is easy when there are just a few parameters. However it is often not the case, and it is usually better to use an external input file and use the `--from_file` or `-ff` argument. You can save the parameters on a txt file written just like you would do on command line, but separating each parameter in a new line. Then you could run:
+
+    python nanokappa.py -ff <parameter_file>.txt
+
+### Where to save the results
+
+The location of the results is set with two arguments:
+
+| Parameter                 | Keyword              | Reduced | Description | Types | Default |
+| ------------------------- | -------------------- | ------- | ----------- | ----- | ------- |
+| Results folder            | `--results_folder`   | `-rf`   | The name of the folder to be created containing all result files. If none is informed, no folder is created. | String | `''` |
+| Results location          | `--results_location` | `-rl`   | The path where the result folder will be created. It accepts `local` if the results should be saved in the current directory, `main` if they should be saved in the same directory as `nanokappa.py`, or a custom path. | String | `local` |
+
 ### Geometrical parameters
 
 These parameters are the ones that relate to the geometry that will be simulated. The geometry can be imported as an STL file by setting `--geometry <file_name>` or chosen among the following options:
@@ -213,44 +228,70 @@ The figure below shows how the system sets the voronoi subvolumes, in two dimens
 
 The `voronoi` SV type allows for great flexibility but some unexpected effects can appear (such as two regions separated by a corner or a hole being connected by the same SV). Usually increasing the number of SV solves this issue.
 
-### Initial conditions
+### Initial conditions and particle temperature
 
 The initial state of the domain is set by a temperature distribution that can be chosen by the user. The parameters responsible for that are:
 
 | Parameter                 | Keyword              | Reduced | Description | Types | Default |
 | ------------------------- | -------------------- | ------- | ----------- | ----- | ------- |
 | Temperature distribution  | `--temp_dist`        | `-td`   | Shape of the initial temperature profile. Accepts `cold`, `hot`, `mean`, `linear`, `random`, `custom`. | String | `cold` |
-| Subvolume temperature     | `--subvol_temp`      | `-st`   | Initial temperature of each subvolume when `custom` is informed in `-td`, in Kelvin. | Float | |
+| Subvolume temperature     | `--subvol_temp`      | `-st`   | Initial temperature of each subvolume when `custom` is informed in `-td`, in Kelvin. | Float or String | |
+| Particle distribution     | `--part_dist`        | `-pd`   | Txt file with particle data to be imported. | String | | 
 
-Particles are initialised in each SV with their Bose-Einstein occupation at the local temperature. The temperature is based on the imposed temperatures of the reservoirs. If there is no imposed temperature as BC, the only available option is `custom`, and the desired temperature for each SV should be informed in order to `--subvol_temp`.
+Particles are initialised in each SV with their Bose-Einstein occupation at the local temperature. The temperature is based on the imposed temperatures of the reservoirs. If there is no imposed temperature as BC, the only available option is `custom`, and the desired temperature for each SV should be informed to `--subvol_temp`.
 
+A custom temperature distribution can be declared by giving numerical values for each subvolume or by passing a txt file with subvolume data from a previous simulation.
 
+Another way that the initial condiction could be set is by importing the particle data from a previous simulation, in which case the initial temperature is automatically calculated from the energy of the particles.
 
+> **Obs.:** If you import a particle data file, make sure that the set number of particles in the domain is the same, otherwise there will be a mismatch between the rate of particles leaving and entering the domain, which could lead to divergence.
 
-#################### EDITING ############################
+### Particle temperature
 
-
-Here is a list of all parameters that can be set:
+In order to calculate phonon-phonon scattering, the temperature to which the particle is submitted needs to be defined. The particle can either assume the temperature of its subvolume or have it calculated by some type of interpolation:
 
 | Parameter                 | Keyword              | Reduced | Description | Types | Default |
 | ------------------------- | -------------------- | ------- | ----------- | ----- | ------- |
-| Parameters file           | `--from_file`        | `-ff`   | File name with extension of a file containing all input parameters. Used to avoid inputing lots of parameters directly on terminal. Full path advised. | String | | 
-| Results folder            | `--results_folder`   | `-rf`   | The name of the folder to be created containing all result files. If none is informed, no folder is created. | String | `''` |
-| Results location          | `--results_location` | `-rl`   | The path where the result folder will be created. It accepts `local` if the results should be saved in the current directory, `main` if they should be saved in the same directory as `nanokappa.py`, or a custom path. | String | `local` |
+| Temperature interpolation | `--temp_interp`      | `-ti`   | How to interpolate the temperature between the subvolumes' reference points. Accepts `nearest` or `linear` (only for `slice` subvolumes are used). | String | `nearest` |
 
-| Reference temperature     | `--reference_temp`   | `-rt`   | The temperature at which the occupation number for every mode will be considered zero, in Kelvin. Alternatively, the user can set it as "local" to use the local temperature of each particle.| Float/String | `local` |
-| Temperature interpolation | `--temp_interp`      | `-ti`   | How to interpolate the temperature between the subvolumes' reference points. Accepts `nearest`, `linear` (when slice subvolumes are used) or `radial` (for grid or voronoi subvolumes). | String | `nearest` | 
+> **Obs.:** Currently only the `nearest` interpolation is accepted for non-sliced geometries. There is some work to do for 2D and 3D interpolations that should be done very soon.
+
+### Duration and precision of the simulation
+
+Some of the parameters directly affect the precision and the time of the simulation, or are conditions that limit the maximum runnning time:
+
+| Parameter                 | Keyword              | Reduced | Description | Types | Default |
+| ------------------------- | -------------------- | ------- | ----------- | ----- | ------- |
 | N° of particles           | `--particles`        | `-p`    | Number of particles given as `keyword number`. Can be given as the total number (keyworld `total`), the number per-mode-per-subvolume (keyworld `pmps`) and the number per cubic angstom (keyworld `pv`). | String Integer | `pmps 1` |
 | Timestep                  | `--timestep`         | `-ts`   | Timestep of each iteration in picoseconds | Float | `1` |
 | Iterations                | `--iterations`       | `-i`    | Number of iterations to be performed | Integer | `10000` |
+| Number of datapoints      | `--n_mean`           | `-nm`   | Number of datapoints considered to calculated mean and standard deviation values. Each datapoint is 10 timesteps.| Int | `100` |
+| Convergence criteria      | `--conv_crit`        | `-cc`   | Criteria for convergence and stop simulation. | Float | 0 1|
 | Maximum simulation time   | `--max_sim_time`     | `-mt`   | Maximum time the simulation will run. Declared as `D-HH:MM:SS`. If the simulation arrives to this time, the calculation is finished and post processing is executed. If `0-00:00:00` is informed, no time limit is imposed. | String |`0-00:00:00`|
 
-| Path points               | `--path_points`      | `-pp`   | Set the approximate points where the path to calculate $\kappa_{path}$ will go through. Declared the same way as `--bound_pos`.| String Float | `relative 0 0.5 0.5 1 0.5 0.5` |
-| Number of datapoints      | `--n_mean`           | `-nm`   | Number of datapoints considered to calculated mean and standard deviation values. Each datapoint is 10 timesteps.| Int | `100` |
+
+The number of particles and the timestep size determine how good your simulation results will be. Of course, the more particles and the smaller the timestep, the better. However, the two of them impact directly on the time needed for your calculation, so we have to make some compromises there. What can be changed depends a lot on the material you are simulating. Velocity, relaxation time, number of modes in the data, even geometry and boundary conditions, all that can influence how noisy and unstable is your calculation. Run tests for some 1000 iterations to check whether your parameters are good enough!!
+
+Every 10 iterations, the global data is saved in the `convergence.txt` file. This includes time information, temperature, heat flux, thermal conductivity, number of particles and energy balance. Every 100 iterations, the code calculates the mean and standard deviations of these quantities over time. The desired number of datapoints (each datapoint saved 10 timesteps apart) to be considered for this mean and standard deviation is passed to `--n_mean`.
+
+These mean values are also used to calculate de convergence criterion passed to `--conv_crit`. The standard is to not have any convergence criterion. If the user wishes, it can be set by passing the criteria to be used and the number of checks (that happen every 100 iterations) in which the maximum error should stay below the criterion. The error is calculated as:
+
+$$ \epsilon = \max \Bigg(\bigg| \frac{\mu^{k}}{\mu^{k-1}}-1 \bigg| \Bigg) $$
+
+where $\mu$ refers to each considered quantity (local temperature, local heat flux, thermal conductvity, etc.).
+
+If you want to be sure your simulation won't be interrupted unexpectedly by your cluster or you do not want to leave it running all night because you underestimated the simulation time, you can set a time limit with `--max_sim_time`. When the code detects that the limit time was reached, it finishes the simulation and safely saves all result files at its current state.
+
+### Figures and cosmetic parameters
+
+| Parameter                 | Keyword              | Reduced | Description | Types | Default |
+| ------------------------- | -------------------- | ------- | ----------- | ----- | ------- |
 | Real time plot            | `--rt_plot`          | `-rp`   | Property to plot particles to generate animations.  | String | |
 | Figure plot               | `--fig_plot`         | `-fp`   | Property to plot particles at end of run (frequency, occupation, etc.) | Strings | `e` |
 | Colormap                  | `--colormap`         | `-cm`   | Matplotlib [colormap](https://matplotlib.org/stable/gallery/color/colormap_reference.html) to be used in geometry plots (not convergence). | String | `jet` |
-| Convergence criteria      | `--conv_crit`        | `-cc`   | Criteria for convergence and stop simulation. | Float | 1e-6 |
+| Theme
+
+#################### EDITING ############################
 
 ### Debugging parameters
 
@@ -262,12 +303,12 @@ These should only be used to detect possible errors in the simulation:
 | Reservoir generation      | `--reservoir_gen`    | `-rg`   | How to generate particles on the reservoirs. With `constant`, particles are generated in a constant rate based in a timestep counter; `fixed_rate` means the particles are generated randomly, but in an approximately fixed rate; `one_to_one` means that the number of particles generated is the same of particles leaving in order to keep the number of particles stable. | String | `fixed_rate` |
 | Empty subvols             | `--empty_subvols`    | `-es`   | Index of subvolumes that are to be initialised as empty (no particles). | Integer | |
 | Energy normalisation      | `--energy_normal`    | `-en`   | The way to normalise energy to energy density. Choose between `fixed` (according to the expected number of particles in the subvolume) and `mean` (arithmetic mean of the particles inside). | String | `mean` |
+| Reference temperature     | `--reference_temp`   | `-rt`   | The temperature at which the occupation number for every mode will be considered zero, in Kelvin. Alternatively, the user can set it as "local" to use the local temperature of each particle.| Float/String | `local` |
+| Path points               | `--path_points`      | `-pp`   | Set the approximate points where the path to calculate $\kappa_{path}$ will go through. Declared the same way as `--bound_pos`.| String Float | `relative 0 0.5 0.5 1 0.5 0.5` |
 
 <p>&nbsp</p>
 
-### The `--from_file` parameter
 
-The user can input all parameters sequentially directly on terminal, which is easy when there are a few parameters that differ from the standard values. When there is a highly customised simulation to be ran, it is better to use an external input file and use the `--from_file` or `-ff` argument.
 
 All inputs can be given in form of a text file. The following shows an example of the content of a txt file that we are calling `parameters.txt`:
 
