@@ -125,4 +125,4 @@ If you are a researcher, feel free to use Nano-&#954;, as long as you cite us. I
 
 # Aknowledgements
 
-This code was written by Bruno Hartmann da Silva as part of his PhD, under supervision of Dr. Prof. Laurent Chaput and Dr. Prof. David Lacroix at the Laboratoire Énergies et Mécanique Théorique et Appliquée (LEMTA), Université de Lorraine, Vandoeuvre-lès-Nancy, France. The PhD was funded by the Agence National de la Recherche (ANR).
+The first version of this code was written by Bruno Hartmann da Silva as part of his PhD, under supervision of Prof. Laurent Chaput and Prof. David Lacroix at the Laboratory of Energy and Theorethical and Applied Mechanics (LEMTA), Lorraine University, Vandoeuvre-lès-Nancy, France. The PhD was funded by the French National Research Agency (ANR).
