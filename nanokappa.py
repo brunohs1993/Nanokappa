@@ -32,7 +32,15 @@ if args.output == 'file':
 f = open(args_filename, 'w')
 
 for key in vars(args).keys():
-    f.write( '{} = {} \n'.format(key, vars(args)[key]) )
+    # f.write( '{} = {} \n'.format(key, vars(args)[key]) )
+    s = f'--{key} '
+    if type(vars(args)[key]) == str:
+        s += f'{vars(args)[key]}\n'
+    else:
+        for i in vars(args)[key]:
+            s += f'{i} '
+        s += '\n'
+    f.write(s)
 
 f.close()
 
@@ -98,14 +106,6 @@ hours = total_time.seconds//3600
 minutes = (total_time.seconds//60)%60
 
 seconds = total_time.seconds - 3600*hours - 60*minutes
-
-f = open(args_filename, 'a+')
-f.write('---------- o ----------- o ------------- o ------------\n' +
-        "Start at: {:>02d}/{:>02d}/{:>4d}, {:>02d} h {:>02d} min {:>02d} s\n".format(start_time.day, start_time.month, start_time.year, start_time.hour, start_time.minute, start_time.second)+
-        "Finish at: {:>02d}/{:>02d}/{:>4d}, {:>02d} h {:>02d} min {:>02d} s\n".format(end_time.day, end_time.month, end_time.year, end_time.hour, end_time.minute, end_time.second)+
-        "Total time: {:>02d} days {:>02d} h {:>02d} min {:>02d} s\n".format(total_time.days, hours, minutes, seconds)+
-        '---------- o ----------- o ------------- o ------------')
-f.close()
 
 print("Total time: {:>02d} days {:>02d} h {:>02d} min {:>02d} s\n".format(total_time.days, hours, minutes, seconds))
 print('---------- o ----------- o ------------- o ------------')

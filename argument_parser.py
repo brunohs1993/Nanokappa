@@ -44,13 +44,13 @@ def initialise_parser():
                         type = float, nargs = 1   , help    = 'Timestep size in picoseconds')
     parser.add_argument('--iterations'     , '-i' , default = [10000],
                         type = int  , nargs = 1   , help    = 'Number of timesteps (iterations) to be run')
-    parser.add_argument('--max_sim_time'   , '-mt', default = '1-00:00:00',
+    parser.add_argument('--max_sim_time'   , '-mt', default = ['1-00:00:00'],
                         type = str  , nargs = 1   , help    = 'Maximum simulation time. If the iterations are not done when -mt is reached, simulation stops and final data is saved. ' +
                                                               ' Declared as D-HH:MM:SS. Useful to avoid losing data in cluster simulations.')
     parser.add_argument('--subvolumes'     , '-sv', default = [],
                                       nargs = '*' , help    = 'Type of subvolumes, number of subvolumes and slicing axis when the case (x = 0, y = 1, z = 2). ' +
                                                               'Accepts "slice", "grid" and "voronoi" as subvolume types.')
-    parser.add_argument('--reference_temp' , '-rt', default = [0],
+    parser.add_argument('--reference_temp' , '-rt', default = ['local'],
                                       nargs = 1   , help    = 'Set reference temperature to be considered in the system, in Kelvin. Also accepts "local", so deltas are calculated in relation to local temperature.') 
     parser.add_argument('--temp_dist'      , '-td', default = ['cold'], choices = ['cold', 'hot', 'linear', 'mean', 'random', 'custom'],
                         type = str  , nargs = '*' , help    = 'Set how to distribute initial temperatures.')
@@ -59,7 +59,7 @@ def initialise_parser():
                                                               'The "linear" option only works with slices and defaults to "radial" when used with other types of subvolumes.')
     parser.add_argument('--subvol_temp'    , '-st', default = [],
                         type = float, nargs = '*' , help    = 'Set subvolumes temperatures when custom profile is selected.')
-    parser.add_argument('--bound_cond'     , '-bc', default = ['T', 'T', 'P'], choices = ['T', 'P', 'R'],
+    parser.add_argument('--bound_cond'     , '-bc', default = [], choices = ['T', 'P', 'R'],
                         type = str  , nargs = '*' , help    = 'Set boundary conditions to each specific facet. Choose between "T" for temperature,'+
                                                               '"R" for roughness or "P" for periodic. The respective values need to be set in --bound_values '+
                                                               '(not for periodic boundary condition).')
@@ -73,7 +73,7 @@ def initialise_parser():
                                       nargs = '*' , help    = 'Set the POSITIONS from which to find the closest facet to apply the connections between facets. Nargs depends on what was specified on --bound_cond.' + 
                                                              'First value is a keyword "relative" - considers all points in the mesh between 0 and 1 - or "absolute" - direct positions. Set points as kw x1 y1 z1 x2 y2 z2 etc.' +
                                                              'The facets are connected in pairs, the same way as declared on --connect_facets.')
-    parser.add_argument('--reservoir_gen' , '-gn' , default = ['fixed_rate'], choices = ['fixed_rate', 'one_to_one', 'constant'],
+    parser.add_argument('--reservoir_gen' , '-gn' , default = ['constant'], choices = ['fixed_rate', 'one_to_one', 'constant'],
                         type = str  , nargs = '*' , help    = 'Set the type of generation of particles in the reservoir. "fixed_rate" means the generation is independent from the particles leaving the domain. '+
                                                               '"one_to_one" means that a particle will be generated only when a particle leaves the domain (one leaves, one enters).')
     parser.add_argument('--path_points'  , '-pp'  , default = [],
@@ -85,16 +85,16 @@ def initialise_parser():
                         
     parser.add_argument('--rt_plot'       , '-rp' , default = [],
                         type = str  , nargs = '*' , help    = 'Set which property you want to see in the real time plot during simulation. Choose between T, omega, e, n and None (random colors).')
-    parser.add_argument('--fig_plot'      , '-fp' , default = ['T', 'omega', 'e'],
+    parser.add_argument('--fig_plot'      , '-fp' , default = [],
                         type = str  , nargs = '*' , help    = 'Save figures with properties distributions. Standard is T, omega and energy.')
     parser.add_argument('--colormap'      , '-cm' , default = ['jet'],
                         type = str  , nargs = 1   , help    = 'Set matplotlib colormap to be used on all plots. Standard is jet.')
-    parser.add_argument('--theme'         , '-th' , default = ['light'], choices = ['white', 'light', 'dark', 'black'],
+    parser.add_argument('--theme'         , '-th' , default = ['white'], choices = ['white', 'light', 'dark', 'black'],
                         type = str  , nargs = 1   , help    = 'Set theme color for all plots.')
     parser.add_argument('--n_mean'        , '-nm' , default  = [100], 
                         type = int  , nargs = 1   , help    = 'The number of datapoints to consider when calculating mean and stdev values. Each datapoint = 10 iterations. Default is 100.')
 
-    parser.add_argument('--conv_crit'     , '-cc' , default = [1e-2, 10],
+    parser.add_argument('--conv_crit'     , '-cc' , default = [0, 1],
                         type = float, nargs = 2   , help    = 'Value of convergence criteria and number of checks to keep it under criteria to consider convergence.')
 
     parser.add_argument('--output'        , '-op' , default = 'file',
