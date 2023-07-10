@@ -59,7 +59,7 @@ class Geometry:
         self.load_geo_file(self.shape) # loading
         self.transform_mesh()          # transforming
         self.get_mesh_properties()
-        self.plot_triangulation(linestyle = '-')
+        # self.plot_triangulation(linestyle = '-')
         self.get_bound_facets(args)    # get boundary conditions facets
         self.check_facet_connections(args)   # check if all connections are valid and adjust vertices
         self.plot_mesh_bc()
