@@ -23,10 +23,10 @@ args = read_args()
 args = generate_results_folder(args)
 
 # saving arguments on file
-args_filename = args.results_folder + 'arguments.txt'
+args_filename = os.path.join(args.results_folder, 'arguments.txt')
 
 if args.output == 'file':
-    output_file = open(args.results_folder + 'output.txt', 'a')
+    output_file = open(os.path.join(args.results_folder, 'output.txt'), 'a')
     sys.stdout = output_file
 
 f = open(args_filename, 'w')
@@ -58,7 +58,7 @@ start_time = datetime.now()
 print('---------- o ----------- o ------------- o ------------')
 print("Year: {:<4d}, Month: {:>02d}, Day: {:>02d}".format(start_time.year, start_time.month, start_time.day))
 print("Start at: {:>02d} h {:>02d} min {:>02d} s".format(start_time.hour, start_time.minute, start_time.second))	
-print("Simulation name: " + args.results_folder)
+print(f"Simulation name: {args.results_folder}")
 print('---------- o ----------- o ------------- o ------------')
 
 # initialising geometry

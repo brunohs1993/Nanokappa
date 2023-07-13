@@ -16,6 +16,7 @@ from shapely.geometry import Polygon
 
 # other
 import sys
+import os
 import copy
 import time
 
@@ -826,7 +827,7 @@ class Geometry:
         
         ax.legend(handles=legend_elements, loc='lower right')
 
-        plt.savefig(self.args.results_folder + 'BC_plot.png')
+        plt.savefig(os.path.join(self.folder, 'BC_plot.png'))
         plt.close(fig)
 
     def remove_midpoints_from_ring(self, v, r, tol = 1e-3):
@@ -1102,7 +1103,7 @@ class Geometry:
             ax.plot(p[:, 0], p[:, 1], p[:, 2], ':', c = 'k')
         
         ax.tick_params(labelsize = 'small')
-        plt.savefig(self.args.results_folder + 'subvol_connections.png')
+        plt.savefig(os.path.join(self.folder, 'subvol_connections.png'))
         plt.close(fig)
 
     def get_path(self):
@@ -1220,7 +1221,7 @@ class Geometry:
             
             for i in path:
                 ax.text(self.subvol_center[i, 0], self.subvol_center[i, 1], self.subvol_center[i, 2], '{:d}'.format(i))
-            fig.savefig(self.args.results_folder + 'path_kappa.png')
+            fig.savefig(os.path.join(self.folder, 'path_kappa.png'))
             plt.close(fig)
 
             return path
@@ -1230,7 +1231,7 @@ class Geometry:
             mesh = self.mesh
         fig, ax = self.mesh.plot_triangulation(fig = fig, ax = ax, l_color = l_color, linestyle = linestyle, dpi = dpi)
         
-        fig.savefig(self.args.results_folder + 'triangulation.png')
+        fig.savefig(os.path.join(self.folder, 'triangulation.png'))
         plt.close(fig)
 
 class SubvolClassifier():

@@ -1,6 +1,7 @@
 import os
 import argparse
 import sys
+import copy
 
 # NOTES:
 # I propose to remove from user access the following parameters:
@@ -104,8 +105,7 @@ def initialise_parser():
     parser.add_argument('--poscar_file'     , '-pf', required = True   , type = str, nargs = '*', help     = 'Set the POSCAR file to be read.' ) # lattice properties
     parser.add_argument('--hdf_file'        , '-hf', required = True   , type = str, nargs = '*', help     = 'Set the hdf5 file to be read.'   ) # phonon properties of the material
 
-    parser.add_argument('--results_folder'  , '-rf', default  = []     , type = str,nargs = '*', help     = 'Set the results folder name.'    ) # 
-    parser.add_argument('--results_location', '-rl', default  = 'local', type = str, help     = 'Set the results folder location.') # 
+    parser.add_argument('--results_folder'  , '-rf', default  = []     , type = str,nargs = '*', help     = 'Set the results folder.'    ) # 
     
     return parser
 
@@ -141,68 +141,24 @@ def read_args():
 
 def generate_results_folder(args):
 
-    # get results location
-    loc = args.results_location
-    
-    # define folder separator symbol and adjust folder path according to opperating system
-    loc, folder_sep = correct_folder_separator(loc)
-
-    if loc == 'local':
-        args.results_location = os.getcwd()     # stay in the same folder
-    elif loc == 'main':
-        file_path = os.path.realpath(__file__)  # get main_program.py path
-        file_dir = os.path.dirname(file_path)   # get main_program.py folder
-        args.results_location = file_dir
+    # get results location relative path
+    if len(args.results_folder) == 0:
+        args.results_folder = os.getcwd()
+        return args
     else:
-        if not os.path.isabs(loc):                  # if the path is not absolute
-            loc = os.getcwd() + folder_sep + loc          # add the current work folder to the path
-        if not os.path.isdir(loc):                  # if it does not exist
-            os.mkdir(loc)                           # create
-        args.results_location = loc
+        loc = os.path.normpath(os.path.relpath(args.results_folder[0]))
 
-    # get results folder name
-    if len(args.results_folder)>0:    # if a folder name is specified
+        if not os.path.isabs(loc): # if it is not absolute, get from current working directory
+            loc = os.path.join(os.getcwd(), loc)
 
-        folder = args.results_folder[0]
-
-        folder, folder_sep = correct_folder_separator(folder)
-
-        subfolders = folder.split(folder_sep)
-
-        if len(subfolders) > 1: # if there are subfolders
-            args.results_location += folder_sep + folder_sep.join(subfolders[:-1]) # add subfolders to results_location path
-            os.makedirs(args.results_location, exist_ok=True)                      # create subfolders if they don't exist
-            folder = subfolders[-1]                                                # save new folder name
-
-        folders = os.listdir(args.results_location) # get folders in working directory
-    
-        valid_folders = [i for i in folders if i.startswith(folder+'_')] # get folders that start with the same name
-
-        if len(valid_folders) == 0: # if there is no folder with desired name, create the first (zeroth) one
-            folder = folder+'_0'
-        else:                       # if there is, create the next one
-            numbers = [int(i[ len(folder)+1: ]) for i in valid_folders ]
-            
-            folder = folder + '_{:d}'.format(max(numbers)+1)
-
-        args.results_folder = args.results_location + folder_sep + folder
-
-        os.mkdir(args.results_folder)    # create folder
-
-        args.results_folder += folder_sep
-    
-    else:  # if not specified
-        args.results_folder = args.results_location + folder_sep
-
+        # create folder
+        i = 0
+        created = False
+        while not created:
+            try:
+                os.makedirs(f'{loc}_{i}', exist_ok=False)
+                created = True
+            except: i +=1
+        
+        args.results_folder = f'{loc}_{i}'
     return args
-
-def correct_folder_separator(path):
-
-    if sys.platform == 'win32':
-        folder_sep = '\\'
-        path = path.replace('/', folder_sep)
-    elif sys.platform in ['linux', 'linux2', 'darwin']:
-        folder_sep = '/'
-        path = path.replace('\\', folder_sep)
-    
-    return path, folder_sep

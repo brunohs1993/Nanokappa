@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 
 # other
+import os
 import copy
 import warnings
 
@@ -29,10 +30,10 @@ class Visualisation(Constants):
 
         self.folder = self.args.results_folder
 
-        self.convergence_file = self.folder+'convergence.txt'
-        self.particle_file    = self.folder+'particle_data.txt'
-        self.mode_file        = self.folder+'modes_data.txt'
-        self.subvol_file      = self.folder+'subvol_data.txt'
+        self.convergence_file = os.path.join(self.folder, 'convergence.txt')
+        self.particle_file    = os.path.join(self.folder, 'particle_data.txt')
+        self.mode_file        = os.path.join(self.folder, 'modes_data.txt')
+        self.subvol_file      = os.path.join(self.folder, 'subvol_data.txt')
 
         self.dt         = self.args.timestep[0]
 
@@ -205,7 +206,7 @@ class Visualisation(Constants):
                      fontsize = 'xx-large')
 
         plt.tight_layout()
-        plt.savefig(self.folder+'scattering_prob.png')
+        plt.savefig(os.path.join(self.folder,'scattering_prob.png'))
 
         plt.close(fig)
 
@@ -250,7 +251,7 @@ class Visualisation(Constants):
         plt.title(r'Density of states. {:d} bins, $d\omega = $ {:.3f} THz'.format(n_bins, d_omega), fontsize = 'xx-large')
 
         plt.tight_layout()
-        plt.savefig(self.folder+'density_of_states.png')
+        plt.savefig(os.path.join(self.folder,'density_of_states.png'))
         plt.close(fig)
 
     def read_convergence(self):
@@ -712,7 +713,7 @@ class Visualisation(Constants):
 
             plt.suptitle(suptitle, fontsize = 'xx-large', color = self.ax_style['textcolor']) # figure title
             plt.tight_layout() # pack everything
-            plt.savefig(self.folder + filename) # save figure
+            plt.savefig(os.path.join(self.folder,filename)) # save figure
             plt.close(fig)
 
     def flux_contribution(self):
@@ -787,7 +788,7 @@ class Visualisation(Constants):
         plt.suptitle('Contribution of each frequency band to thermal conductivity. {:d} bands.'.format(centers.shape[0]), fontsize = 'xx-large')
 
         plt.tight_layout(pad = 3)
-        plt.savefig(self.folder + 'k_contribution.png')
+        plt.savefig(os.path.join(self.folder, 'k_contribution.png'))
         plt.close(fig)
 
     def convergence_energy_balance(self):
@@ -837,7 +838,7 @@ class Visualisation(Constants):
         plt.suptitle('Energy and Heat Flux balance over time.', fontsize = 'xx-large')
 
         plt.tight_layout()
-        plt.savefig(self.folder+'convergence_en_balance.png')
+        plt.savefig(os.path.join(self.folder, 'convergence_en_balance.png'))
 
         plt.close(fig)
 
@@ -886,5 +887,5 @@ class Visualisation(Constants):
         cb.set_ticklabels(ticks, size = 'small')
         
         plt.tight_layout()
-        plt.savefig(self.folder + 'kappa_con.png')
+        plt.savefig(os.path.join(self.folder, 'kappa_con.png'))
         plt.close(fig)

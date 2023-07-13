@@ -1244,7 +1244,7 @@ class Population(Constants):
                                                                                                     np.arccos(n[2])*180/np.pi))
 
                 plt.tight_layout()
-                plt.savefig(self.results_folder_name + 'spec{}.png'.format(n))
+                plt.savefig(os.path.join(self.results_folder_name, f'spec{n}.png'))
                 plt.close(fig)
 
                 correspondent_modes = np.vstack((correspondent_modes, np.vstack((np.ones(n_ts)*n.reshape(-1, 1), spec_q_in, spec_j_in, spec_q_out, spec_j_out)).T))
@@ -1459,7 +1459,7 @@ class Population(Constants):
                                                                                                     np.arccos(n[2])*180/np.pi))
 
                 plt.tight_layout()
-                plt.savefig(self.results_folder_name + 'spec{}.png'.format(n))
+                plt.savefig(os.path.join(self.results_folder_name, f'spec{n}.png'))
                 plt.close(fig)
 
                 correspondent_modes = np.vstack((correspondent_modes, np.vstack((np.ones(n_ts)*n.reshape(-1, 1), spec_q_in, spec_j_in, spec_q_out, spec_j_out)).T))
@@ -1469,7 +1469,7 @@ class Population(Constants):
         self.true_specular       = copy.copy(true_spec)
         self.specularity         = self.true_specular.astype(int)*self.specularity
 
-        np.savetxt(self.results_folder_name + 'specular_correspondences.txt', self.correspondent_modes, fmt = '%.3f %.3f %.3f %d %d %d %d')
+        np.savetxt(os.path.join(self.results_folder_name, 'specular_correspondences.txt'), self.correspondent_modes, fmt = '%.3f %.3f %.3f %d %d %d %d')
 
     def periodic_boundary_condition(self, positions, group_velocities, collision_facets, collision_positions, calculated_ts, geometry, indexes_del_extra):
         
@@ -1855,7 +1855,7 @@ class Population(Constants):
             s+= '{:9.3e} '.format(i)
         s += '\n'
 
-        with open(self.results_folder_name + 'residue.txt', 'a+') as f:
+        with open(os.path.join(self.results_folder_name,'residue.txt'), 'a+') as f:
             f.writelines(s)
 
     def init_plot_real_time(self, geometry, phonon):
@@ -1995,7 +1995,7 @@ class Population(Constants):
         self.plot_images = [np.fromstring(fig.canvas.tostring_rgb(), dtype = np.uint8, sep = '').reshape(fig.canvas.get_width_height()[::-1]+(3,))]
 
         plt.figure(fig.number)
-        plt.savefig(self.results_folder_name+'last_anim_frame.png')
+        plt.savefig(os.path.join(self.results_folder_name,'last_anim_frame.png'))
 
         return graph, fig
 
@@ -2040,7 +2040,7 @@ class Population(Constants):
         self.plot_images += [np.fromstring(self.rt_fig.canvas.tostring_rgb(), dtype = np.uint8, sep = '').reshape( self.rt_fig.canvas.get_width_height()[::-1]+(3,) ) ]
 
         plt.figure(self.rt_fig.number)
-        plt.savefig(self.results_folder_name+'last_anim_frame.png')
+        plt.savefig(os.path.join(self.results_folder_name, 'last_anim_frame.png'))
         
         return
 
@@ -2048,7 +2048,7 @@ class Population(Constants):
         if len(self.rt_plot) > 0:
             plt.close(fig = self.rt_fig)
             print('Saving animation...')
-            imageio.mimsave(self.results_folder_name+'simulation.gif', self.plot_images, fps=10)
+            imageio.mimsave(os.path.join(self.results_folder_name,'simulation.gif'), self.plot_images, fps=10)
             print('Saved!')
 
     def plot_figures(self, geometry, phonon, property_plot=['energy'], colormap = 'viridis'):
@@ -2180,7 +2180,7 @@ class Population(Constants):
 
             # plt.tight_layout(rect = (0.05, 0.15, 0.95, 0.95))
             
-            plt.savefig(self.results_folder_name+figname+'.png')
+            plt.savefig(os.path.join(self.results_folder_name, f'{figname}.png'))
 
         plt.close(fig)
 
@@ -2190,7 +2190,7 @@ class Population(Constants):
         n_dt_to_conv = int(10**n_dt_to_conv)
         n_dt_to_conv = max([10, n_dt_to_conv])
 
-        filename = self.results_folder_name+'convergence.txt'
+        filename = os.path.join(self.results_folder_name,'convergence.txt')
 
         self.f = open(filename, 'a+')
 
@@ -2266,7 +2266,7 @@ class Population(Constants):
 
         line += '\n'
 
-        filename = self.results_folder_name+'convergence.txt'
+        filename = os.path.join(self.results_folder_name,'convergence.txt')
 
         self.f = open(filename, 'a+')
 
@@ -2282,7 +2282,7 @@ class Population(Constants):
         # Obs.: phonon properties of particles can be retrieved by mode information and subvol temperature
         
         #### PARTICLE DATA ####
-        filename = self.results_folder_name + 'particle_data.txt'
+        filename = os.path.join(self.results_folder_name, 'particle_data.txt')
 
         header ='Particles final state data \n' + \
                 'Date and time: {}\n'.format(time) + \
@@ -2298,7 +2298,7 @@ class Population(Constants):
         
         #### MEAN AND STDEV QUANTITIES ####
         if self.current_timestep > 0:
-            filename = self.results_folder_name + 'subvolumes.txt'
+            filename = os.path.join(self.results_folder_name,'subvolumes.txt')
 
             if geometry.subvol_type == 'slice':
 
@@ -2338,7 +2338,7 @@ class Population(Constants):
                 np.savetxt(filename, data, '%d, %.3e, %.3e, %.3e, %.3e, %.3f, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e', delimiter = ',', header = header)
 
                 # connections data
-                filename = self.results_folder_name + 'subvol_connections.txt'
+                filename = os.path.join(self.results_folder_name, 'subvol_connections.txt')
 
                 header ='connections final state data \n' + \
                         'Date and time: {}\n'.format(time) + \

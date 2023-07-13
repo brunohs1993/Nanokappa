@@ -48,26 +48,21 @@ class Phonon(Constants):
         print('Material initialisation done!')
 
     def get_mat_folder(self):
-        if len(self.args.mat_folder) > 0:
-            self.mat_folder = self.args.mat_folder[self.mat_index]
-        else:
-            self.mat_folder = ''
         
-        if not os.path.isabs(self.mat_folder):
-            self.mat_folder = os.getcwd() + '\\' + self.mat_folder
-        if sys.platform == 'win32':
-            self.mat_folder = self.mat_folder.replace('/', '\\')
-            if not self.mat_folder.endswith('\\'):
-                self.mat_folder += '\\'
-        elif sys.platform in ['linux', 'linux2', 'darwin']:
-            self.mat_folder = self.mat_folder.replace('\\', '/')
-            if not self.mat_folder.endswith('/'):
-                self.mat_folder += '/'
-    
+        if len(self.args.mat_folder) > 0:
+            folder = os.path.relpath(self.args.mat_folder[self.mat_index])
+        else:
+            folder = ''
+
+        if not os.path.isabs(folder):
+            folder = os.path.join(os.getcwd(), folder)
+        
+        self.mat_folder = folder
+
     def load_base_properties(self):
         '''Initialise all phonon properties from input files.'''
         
-        poscar_file = self.mat_folder + self.args.poscar_file[self.mat_index]
+        poscar_file = os.path.join(self.mat_folder, self.args.poscar_file[self.mat_index])
         unitcell, _ = read_crystal_structure(poscar_file, interface_mode='vasp')
         lattice = unitcell.get_cell()   # vectors as lines
         reciprocal_lattice = np.linalg.inv(lattice)*2*np.pi # vectors as columns
@@ -84,7 +79,7 @@ class Phonon(Constants):
         self.volume_unitcell = unitcell.get_volume()   # angstrom³
         
         print('Reading hdf file...')
-        hdf_file = self.mat_folder + self.args.hdf_file[self.mat_index]
+        hdf_file = os.path.join(self.mat_folder, self.args.hdf_file[self.mat_index])
 
         self.load_hdf_data(hdf_file)
 
@@ -197,7 +192,7 @@ class Phonon(Constants):
         fig, ax = plt.subplots(nrows = 1, ncols = 1, subplot_kw={'projection': '3d'})
         ax.scatter(self.wavevectors[:, 0], self.wavevectors[:, 1], self.wavevectors[:, 2], s = 1, c = np.sum(self.wavevectors**2, axis = 1))
         
-        fig.savefig(self.mat_folder + 'FBZ.png')
+        fig.savefig(os.path.join(self.mat_folder, 'FBZ.png'))
         plt.close(fig)
 
     def find_min_k(self, k, return_disp = False):
