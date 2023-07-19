@@ -3,7 +3,7 @@
 
 # What is this file?
 
-This document explains each of the simulation parameters that the user can declare. We will go in detail about what they mean and how to pass them to Nano-&#549;, and we will execute the simulation at the end and check the results.
+This document explains each of the simulation parameters that the user can declare. We will go in detail about what they mean and how to pass them to Nano-&#954;, and we will execute the simulation at the end and check the results.
 
 # Simulation parameters
 
