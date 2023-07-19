@@ -84,7 +84,6 @@ The easiest case to simulate is a heat transfer in a thin film in the crossplane
     --timestep     1
     --iterations   10000
     --results_folder   test
-    --results_location <path_to_folder>/
 
 and run on command line with:
 
