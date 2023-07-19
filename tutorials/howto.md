@@ -17,12 +17,13 @@ The user can input all parameters sequentially directly on terminal, which is ea
 
 ## Where to save the results
 
-The location of the results is set with two arguments:
+The location of the results is set with one argument:
 
 | Parameter                 | Keyword              | Reduced | Description | Types | Default |
 | ------------------------- | -------------------- | ------- | ----------- | ----- | ------- |
-| Results folder            | `--results_folder`   | `-rf`   | The name of the folder to be created containing all result files. If none is informed, no folder is created. | String | `''` |
-| Results location          | `--results_location` | `-rl`   | The path where the result folder will be created. It accepts `local` if the results should be saved in the current directory, `main` if they should be saved in the same directory as `nanokappa.py`, or a custom path. | String | `local` |
+| Results folder            | `--results_folder`   | `-rf`   | The path and the name of the folder to be created containing all result files. If none is informed, no folder is created and files are saved in the working directory. | String | `''` |
+
+Relative and absolute paths are accepted, with relative being searched from the current working directory. If the folder does not exist, all folders in the given path are created.
 
 ## Geometrical parameters
 
