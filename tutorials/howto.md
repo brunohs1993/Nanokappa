@@ -242,25 +242,24 @@ It would be nice to generate plots with a theme similar to that you're using her
 
 Let's say we want to simulate the heat transfer in a thin film, in the in-plane direction, like we talked about in the boundary conditions' section. The film is 100 nm thick, with a surface roughness of 1 nm. The $\Delta T$ is applied between 1 &#956;m distance. We declare the material file, the box dimensions and the boundary conditions. We're going to divide the domain in 20 slices, starting with a cold temperature. The temperature of each particle will be interpolated linearly between subvolumes. For a quick demonstration, we are going to use only 1e5 particles in timesteps of 1ps, for 5000 iterations. We also set the plots as we just discussed.
 
-    --mat_folder       <path_to_nanokappa>/test_material/
-    --hdf_file         kappa-m313131.hdf5
-    --poscar_file      POSCAR
-    --geometry         box
-    --dimensions       1e4 1e4 1e3
-    --bound_pos        relative 0 0.5 0.5 1 0.5 0.5 0.5 0.5 0 0.5 0.5 1
-    --bound_cond       T T R R P
-    --bound_values     302 298 10 10
-    --connect_pos      absolute 5e3 0 5e2 5e3 1e3 5e2
-    --subvolumes       slice 20 0
-    --temp_dist        cold
-    --temp_interp      linear
-    --timestep         1
-    --particles        total 1e5
-    --fig_plot         energy
-    --colormap         jet
-    --theme            white OR dark
-    --results_location <folder>
-    --folder_name      <folder_name>
+    --mat_folder     <path_to_nanokappa>/test_material/
+    --hdf_file       kappa-m313131.hdf5
+    --poscar_file    POSCAR
+    --geometry       box
+    --dimensions     1e4 1e4 1e3
+    --bound_pos      relative 0 0.5 0.5 1 0.5 0.5 0.5 0.5 0 0.5 0.5 1
+    --bound_cond     T T R R P
+    --bound_values   302 298 10 10
+    --connect_pos    absolute 5e3 0 5e2 5e3 1e3 5e2
+    --subvolumes     slice 20 0
+    --temp_dist      cold
+    --temp_interp    linear
+    --timestep       1
+    --particles      total 1e5
+    --fig_plot       energy
+    --colormap       jet
+    --theme          <white OR dark>
+    --results_folder <folder_name>
 
 # Checking the results
 
