@@ -24,8 +24,7 @@
 --iterations       100
 --n_mean           10
 --path_points      
---results_folder   test_results/test
---results_location main
+--results_folder   test
 --conv_crit        0 10
 --colormap         jet
 --fig_plot         energy
