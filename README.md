@@ -70,20 +70,20 @@ Please, refer to our [how-to guide](/tutorials/howto.md) for a more detailed des
 
 The easiest case to simulate is a heat transfer in a thin film in the crossplane direction. For that we can use the material data offered as sample. The parameters could be listed in a `parameters.txt` file as:
 
-    --mat_folder   <path_to_nanokappa>/test_material/
-    --hdf_file     kappa-m313131.hdf5
-    --poscar_file  POSCAR
-    --geometry     box
-    --dimensions   20e3 20e3 20e3
-    --bound_pos    relative 0 0.5 0.5 1 0.5 0.5
-    --bound_cond   T T P
-    --bound_values 302 298
-    --connect_pos  relative 0.5 0 0.5 0.5 1 0.5 0.5 0.5 0 0.5 0.5 1
-    --subvolumes   slice 20 0
-    --particles    total 1e6
-    --timestep     1
-    --iterations   10000
-    --results_folder   test
+    --mat_folder     <path_to_nanokappa>/test_material/
+    --hdf_file       kappa-m313131.hdf5
+    --poscar_file    POSCAR
+    --geometry       box
+    --dimensions     20e3 20e3 20e3
+    --bound_pos      relative 0 0.5 0.5 1 0.5 0.5
+    --bound_cond     T T P
+    --bound_values   302 298
+    --connect_pos    relative 0.5 0 0.5 0.5 1 0.5 0.5 0.5 0 0.5 0.5 1
+    --subvolumes     slice 20 0
+    --particles      total 1e6
+    --timestep       1
+    --iterations     10000
+    --results_folder test
 
 and run on command line with:
 
