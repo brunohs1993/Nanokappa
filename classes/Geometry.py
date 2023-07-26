@@ -542,52 +542,6 @@ class Geometry:
 
         if self.subvol_type in ['slice', 'grid'] and self.shape in ['cuboid', 'box']:
             subvol_volume = self.volume*np.ones(self.n_of_subvols)/self.n_of_subvols
-        # elif algorithm in ['submesh', 'submesh_qmc']:
-        #     ################ TRYING TO CALCULATE VOLUME BY SLICING MESH #####################
-        #     origins = (self.subvol_center+np.expand_dims(self.subvol_center, axis = 1))/2
-        #     normals = self.subvol_center-np.expand_dims(self.subvol_center, axis = 1)
-
-        #     subvol_volume = np.zeros(self.n_of_subvols)
-        #     if return_centers:
-        #         subvol_center = np.zeros((self.n_of_subvols, 3))
-
-        #     for sv in range(self.n_of_subvols):
-        #         sv_mesh = copy.copy(self.mesh)
-        #         for sv_p in [i for i in range(self.n_of_subvols) if i != sv]:
-        #             lines = tm.intersections.mesh_plane(sv_mesh, normals[sv_p, sv, :], origins[sv, sv_p, :])
-        #             if lines.shape[0] > 0:
-        #                 sv_mesh = tm.intersections.slice_mesh_plane(sv_mesh, normals[sv_p, sv, :], origins[sv, sv_p, :], cap = True)
-                
-        #         subvol_volume[sv] = sv_mesh.volume # trimesh estimation
-        #         if return_centers:
-        #             subvol_center[sv, :] = sv_mesh.center_mass
-            
-        #     if algorithm == 'submesh_qmc':
-        #         # submesh quasi monte carlo estimation
-        #         ns = int(2**20)
-        #         nt  = 0
-        #         nin = 0
-
-        #         vbox = np.prod(sv_mesh.bounds.ptp(axis = 0))
-        #         v    = vbox
-        #         err = 1
-                
-        #         while err > tol:
-        #             s = np.random.rand(ns, 3)*sv_mesh.bounds.ptp(axis = 0)+sv_mesh.bounds[0, :]
-        #             i = sv_mesh.contains(s)
-
-        #             nt  += ns
-        #             nin += i.sum()
-
-        #             v_new = (nin/nt)*(vbox)
-
-        #             err = np.absolute((v_new - v)/v)
-
-        #             v = v_new
-
-        #         subvol_volume[sv] = v_new
-        #         if verbose:
-        #             print('Comparing: tm: {}, mc: {}, ratio-1:{}'.format(sv_mesh.volume, v_new, (v_new/sv_mesh.volume)-1))
 
         elif algorithm == 'qmc':
             ################# RANDOM SAMPLES ########################

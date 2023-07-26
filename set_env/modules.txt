@@ -2,14 +2,7 @@ scipy
 matplotlib
 h5py
 trimesh
-pyembree
 shapely
-networkx
-mapbox_earcut
-triangle
-rtree
 phonopy
 imageio
-pyqt
-pyglet
 pandas

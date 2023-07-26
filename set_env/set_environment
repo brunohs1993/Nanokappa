@@ -1,12 +1,8 @@
 # Script to create the environment and install all needed packages
 
 # Modules used in the library:
-# h5py         --> to read hdf5 files
-# phonopy      --> to make atomic calculations whenever needed
-# imageio      --> to draw simulation animations
-# trimesh      --> to deal with complex geometries
-# pyembree     --> for fast ray-mesh intersections calculation. Easy to install on Linux, tricky on windows.
-# networkx     --> soft dependency of trimesh
-# triangle     --> soft dependency of trimesh
-# rtree        --> trimesh dependency
-# shapely      --> trimesh dependency
+# h5py    --> to read hdf5 files
+# phonopy --> to make atomic calculations whenever needed
+# imageio --> to draw simulation animations
+# trimesh --> to deal load custom geometries
+# shapely --> to compare shapes

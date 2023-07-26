@@ -938,14 +938,10 @@ class Mesh:
 
         v = self.vertices[self.faces[f, :], :] # (N, 3, 3)
 
-        # a = np.random.rand(n, 3, 1) # (N, 3, 1)
-        # a = -np.log(a)
-        # a /= a.sum(axis = 1, keepdims = True)
-
-        s = np.random.rand(n)
-        r = np.random.rand(n)
+        s = np.random.rand(n, 1)
+        r = np.random.rand(n, 1)
         
-        a = np.zeros(n, 3, 1)
+        a = np.zeros((n, 3, 1))
         a[:, 0, :] = 1-(s**0.5)
         a[:, 1, :] = (1-r)*(s**0.5)
         a[:, 2, :] = r*(s**0.5)

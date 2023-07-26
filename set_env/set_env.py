@@ -8,8 +8,10 @@ elif sys.platform in ['linux', 'linux2', 'darwin']:
 
 main_path = os.path.realpath(__file__).replace('set_env{}set_env.py'.format(folder_sep), '') # path of Nanokappa main
 
-subprocess.run('conda create -n nanokappa python=3.8 --yes', shell = True)
-subprocess.run('conda activate nanokappa', shell = True)
+env_name = input('Type the name of the environment to be created and press ENTER: ')
+
+subprocess.run(f'conda create -n {env_name} python=3.9 --yes', shell = True)
+subprocess.run(f'conda activate {env_name}', shell = True)
 subprocess.run('conda config --add channels conda-forge', shell = True)
 
 with open('set_env/modules.txt', 'r') as f:
@@ -40,13 +42,13 @@ print('Pip modules:'+pip_mods_str)
 with open('set_env/install_log.txt', 'w') as f:
     if len(conda_mods_str) > 0:
         print('Installing packages from conda...')
-        subprocess.run('conda install -n nanokappa --yes'+conda_mods_str  , shell = True, stdout = f)
+        subprocess.run(f'conda install -n {env_name} --yes'+conda_mods_str  , shell = True, stdout = f)
     if len(pip_mods_str) > 0:
         print('Installing packages in pip...')
-        subprocess.run('conda run -n nanokappa python -m pip install'+pip_mods_str, shell = True, stdout = f)
+        subprocess.run(f'conda run -n {env_name} python -m pip install'+pip_mods_str, shell = True, stdout = f)
 
-print('Running test...')
-cmd = 'echo Do not close this window... & conda run -n nanokappa python {}nanokappa.py -ff {}parameters_test.txt'.format(main_path, main_path)
+print('Running test, do not close the new terminal window...')
+cmd = f'conda run -n {env_name} python {main_path}nanokappa.py -ff {main_path}parameters_test.txt'
 if sys.platform in ['linux', 'linux2']:
     sp = subprocess.Popen('gnome-terminal --wait -- ' + cmd, shell = True)
     sp.wait()

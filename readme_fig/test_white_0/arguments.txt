@@ -1,0 +1,38 @@
+--from_file .\parameters_extra.txt
+--geometry box 
+--dimensions 5000.0 1000.0 1000.0 
+--scale 1.0 1.0 1.0 
+--geo_rotation 0 0 0 xyz 
+--mat_rotation 
+--isotope_scat 
+--bound_scat velocity 
+--particles total 1e5 
+--part_dist random_subvol 
+--empty_subvols 
+--subvol_material 
+--timestep 1.0 
+--iterations 1000 
+--max_sim_time 0-00:00:00 
+--subvolumes slice 10 0 
+--reference_temp local 
+--temp_dist cold 
+--temp_interp linear 
+--subvol_temp 
+--bound_cond T T R R P 
+--bound_pos relative -0.1 0.5 0.5 1.1 0.5 0.5 0.5 0.5 -0.1 0.5 0.5 1.1 
+--bound_values 302.0 298.0 0.0 0.0 
+--connect_pos relative 0.5 -0.1 0.5 0.5 1.1 0.5 
+--reservoir_gen constant 
+--path_points 
+--energy_normal mean 
+--rt_plot 
+--fig_plot energy 
+--colormap jet 
+--theme white 
+--n_mean 10 
+--conv_crit 0.0 10.0 
+--output file 
+--mat_folder test_material\ 
+--poscar_file POSCAR 
+--hdf_file kappa-m313131.hdf5 
+--results_folder C:\Users\bruno\OneDrive\MEUS ARQUIVOS\LEMTA\Papers\PhD Paper 1\NanokappaSource\test_results\test_white_0
