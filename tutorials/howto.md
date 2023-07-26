@@ -238,6 +238,8 @@ It would be nice to generate plots with a theme similar to that you're using her
     --colormap jet
     --theme    white OR dark
 
+>**Obs.:** Some of the plots have not yet been configured on the desired theme. This will be done as the plots are all standardised.
+
 # Setting the parameter file
 
 Let's say we want to simulate the heat transfer in a thin film, in the in-plane direction, like we talked about in the boundary conditions' section. The film is 100 nm thick, with a surface roughness of 1 nm. The $\Delta T$ is applied between 1 &#956;m distance. We declare the material file, the box dimensions and the boundary conditions. We're going to divide the domain in 20 slices, starting with a cold temperature. The temperature of each particle will be interpolated linearly between subvolumes. For a quick demonstration, we are going to use only 1e5 particles in timesteps of 1ps, for 5000 iterations. We also set the plots as we just discussed.
@@ -254,6 +256,7 @@ Let's say we want to simulate the heat transfer in a thin film, in the in-plane 
     --subvolumes     slice 20 0
     --temp_dist      cold
     --temp_interp    linear
+    --iterations     1000
     --timestep       1
     --particles      total 1e5
     --fig_plot       energy
@@ -263,6 +266,49 @@ Let's say we want to simulate the heat transfer in a thin film, in the in-plane 
 
 # Checking the results
 
-TODO
+Nano-&#954; will produce several convergence plots. Most of them will have on the right the variation of the quantity over time in each subvolume, and on the left the mean and standard deviations in a chosen interval. The data that reproduces these plots can be found in `convergence.txt`. These plots are:
 
+### Temperature
 
+![](/readme_fig/test_white_0/convergence_T.png#gh-light-mode-only)
+![](/readme_fig/test_dark_0/convergence_T.png#gh-dark-mode-only)
+
+It looks good, going up from 298 K and kept below 302, almost linearly, with some balistic effects on the borders. It just does not seem to stabilise quite yet... Shows that we need more iterations for steady state.
+
+### Heat Flux
+
+![](/readme_fig/test_white_0/convergence_phi.png#gh-light-mode-only)
+![](/readme_fig/test_dark_0/convergence_phi.png#gh-dark-mode-only)
+
+Overall, heat flux seems ok, being near zero in $y$ and $z$ directions, and on its way to convergence on $x$.
+
+### Energy Balance
+![](/readme_fig/test_white_0/convergence_en_balance.png#gh-light-mode-only)
+![](/readme_fig/test_dark_0/convergence_en_balance.png#gh-dark-mode-only)
+
+Again, it does not seem to be yet converged, but the balance of energy leaving and entering the domain is tending to zero, and the flux is equalising on both sides as well.
+
+### Thermal Conductivity
+![](/readme_fig/test_white_0/convergence_kappa.png#gh-light-mode-only)
+![](/readme_fig/test_dark_0/convergence_kappa.png#gh-dark-mode-only)
+
+It seems ok, the global $\kappa$ rapidly stabilising while the profile is adjusted, depending on the $T$ and $\mathbf{\Phi}$ profiles.
+
+### Number of Particles
+![](/readme_fig/test_white_0/convergence_Np.png#gh-light-mode-only)
+![](/readme_fig/test_dark_0/convergence_Np.png#gh-dark-mode-only)
+
+Number of particles seems stable around the same quantity, with some Monte Carlo noise, of course. Looks good.
+
+### Energy density
+![](/readme_fig/test_white_0/convergence_e.png#gh-light-mode-only)
+![](/readme_fig/test_dark_0/convergence_e.png#gh-dark-mode-only)
+
+Energy density is almost the same plot as temperature, with notable differences only on low temperatures. So not much more to see here in this case.
+
+### Energy scatter plot
+
+![](/readme_fig/test_white_0/fig_energy.png#gh-light-mode-only)
+![](/readme_fig/test_dark_0/fig_energy.png#gh-dark-mode-only)
+
+>**Obs:** there are also other plots that help to see the boundary conditions, the density of states of the material, and more. More detailed information about them will come soon.
