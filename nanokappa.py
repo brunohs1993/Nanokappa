@@ -32,7 +32,6 @@ if args.output == 'file':
 f = open(args_filename, 'w')
 
 for key in vars(args).keys():
-    # f.write( '{} = {} \n'.format(key, vars(args)[key]) )
     s = f'--{key} '
     if type(vars(args)[key]) == str:
         s += f'{vars(args)[key]}\n'

@@ -127,7 +127,6 @@ class Population(Constants):
         self.write_convergence(geometry)
 
         self.view = Visualisation(self.args, geometry, phonon, self) # initialising visualisation class
-        self.view.preprocess()
         self.plot_figures(geometry, phonon, property_plot = self.args.fig_plot, colormap = self.args.colormap[0])
 
         if len(self.rt_plot) > 0:
@@ -1705,8 +1704,14 @@ class Population(Constants):
             self.res_heat_flux *= phonon.number_of_active_modes                                                # considering the contribution of several modes
             
             # self.res_energy_balance = np.sum(self.res_heat_flux*-geometry.facets_normal[self.res_facet, :], axis = 1)
+
+            # self.res_energy_balance = phonon.normalise_to_density(self.res_energy_balance)
+            self.res_energy_balance /= self.res_norm
+            self.res_energy_balance *= phonon.number_of_active_modes
             
-            self.res_heat_flux      /= (self.n_dt_to_conv*self.dt*geometry.facets_area[self.res_facet].reshape(-1, 1))                # divide by area and time to convert in rate
+            # THIS LINE IS WRONG
+            # self.res_heat_flux      /= (self.n_dt_to_conv*self.dt*geometry.facets_area[self.res_facet].reshape(-1, 1))                # divide by area and time to convert in rate
+
             self.res_heat_flux      *= self.eVpsa2_in_Wm2 # convert eV/a²ps to W/m²
 
     def restart_reservoir_balance(self):
@@ -1801,7 +1806,6 @@ class Population(Constants):
         self.max_residue    = 1
         self.max_residue_qt = 'none'
 
-        
         if geo.subvol_type == 'slice':
             ax_str = ['x', 'y', 'z'][self.slice_axis]
             self.residue_qts   = ['T_{:d}'.format(i) for i in range(self.n_of_subvols)] + \
@@ -2081,8 +2085,6 @@ class Population(Constants):
             elif property_plot[i] in ['omega', 'angular_frequency', 'frequency']:
                 figname = 'fig_omega'
                 colors = self.omega
-                # vmin = phonon.omega[phonon.omega>0].min()
-                # vmax = phonon.omega.max()
                 order = np.ceil(np.log10(phonon.omega.max()))
                 vmin = 0
                 vmax = (10**order)*np.ceil(phonon.omega.max()/(10**order))
@@ -2090,12 +2092,26 @@ class Population(Constants):
                 format = '{:.2e}'
             elif property_plot[i] in ['n', 'occupation']:
                 figname = 'fig_occupation'
-                colors = self.occupation
-                with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
-                    order = [np.floor( np.log10( self.occupation.min()) ), np.floor( np.log10( self.occupation.max()) )]
-                vmin = (10**order[0])*np.ceil(self.occupation.min()/(10**order[0]))
-                vmax = (10**order[1])*np.ceil(self.occupation.max()/(10**order[1]))
-                label = r'Occupation number deviation $\delta n$ [phonons/angstrom$^3$]'
+                T = self.subvol_temperature
+                dn = self.occupation - phonon.calculate_occupation(T.mean(), self.omega)
+                colors = dn
+
+                # using symlog scale
+                N_order = 10
+                B = np.floor(np.log10(np.absolute(dn).max()))       # B in ( A x 10^B )
+                A = np.ceil(np.absolute(dn).max()/(10**B)) # A in ( A x 10^B )
+                y_interp = np.linspace(-N_order, N_order, 2*N_order+1)
+
+                x_interp = np.zeros(y_interp.shape[0])
+                x_interp[:N_order] = -A*10**(B-np.arange(N_order))
+                x_interp[-N_order:] = A*10**(B-np.flip(np.arange(N_order)))
+
+                f = interp1d(x_interp, y_interp, kind = 'cubic', fill_value = (-N_order, N_order), bounds_error=False)
+
+                colors = f(dn)
+                vmin = N_order
+                vmax = -N_order
+                label = r'Occupation number deviation $\delta n$ [phonons]'
                 format = '{:.2e}'
             elif property_plot[i] in ['e', 'energy', 'energies']:
                 figname = 'fig_energy'
@@ -2162,9 +2178,6 @@ class Population(Constants):
             ax.set_facecolor(figcolor)
             fig.patch.set_facecolor(figcolor)
 
-            ax.w_xaxis.line.set_color(linecolor)
-            ax.w_yaxis.line.set_color(linecolor)
-            ax.w_zaxis.line.set_color(linecolor)
             ax.xaxis.label.set_color(linecolor)
             ax.yaxis.label.set_color(linecolor)
             ax.zaxis.label.set_color(linecolor)
@@ -2178,8 +2191,6 @@ class Population(Constants):
             ax.set_yticklabels(ax.get_yticklabels(), fontdict = {'color':linecolor})
             ax.set_zticklabels(ax.get_zticklabels(), fontdict = {'color':linecolor})
 
-            # plt.tight_layout(rect = (0.05, 0.15, 0.95, 0.95))
-            
             plt.savefig(os.path.join(self.results_folder_name, f'{figname}.png'))
 
         plt.close(fig)

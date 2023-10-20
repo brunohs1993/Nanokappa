@@ -16,7 +16,9 @@ import sys, os, re
 
 from classes.Constants import Constants
 
+import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib.patches import Ellipse
 
 np.set_printoptions(precision=3, threshold=sys.maxsize, linewidth=np.nan)
 
@@ -44,6 +46,8 @@ class Phonon(Constants):
             self.rotate_crystal()
         
         self.plot_FBZ()
+        self.plot_relaxation_time()
+        self.plot_density_of_states()
 
         print('Material initialisation done!')
 
@@ -88,24 +92,24 @@ class Phonon(Constants):
 
         print('Expanding frequency to FBZ...')
         self.load_frequency()
-        qpoints_FBZ,frequency=expand_FBZ(0,self.weights,self.q_points,self.frequency,0,rotations,reciprocal_lattice)
+        qpoints_FBZ,frequency=self.expand_FBZ(0,self.weights,self.q_points,self.frequency,0,rotations,reciprocal_lattice)
         self.frequency= frequency
         self.convert_to_omega()
         
         print('Expanding group velocity to FBZ...')
         self.load_group_vel()
-        qpoints_FBZ,group_vel=expand_FBZ(0,self.weights,self.q_points,self.group_vel,1,rotations,reciprocal_lattice)
-        self.group_vel = group_vel
+        qpoints_FBZ,group_vel=self.expand_FBZ(0,self.weights,self.q_points,self.group_vel,1,rotations,reciprocal_lattice)
+        self.group_vel = np.around(group_vel, decimals = 10)
 
         self.load_temperature()
-        # print('Expanding heat capacity to FBZ...')  # Do we need heat capacity? For now it is not used anywhere...  
+        # print('Expanding heat capacity to FBZ...')  # We don't use heat capacity for anything. Keeping this for future use if needed.
         # self.load_heat_cap()
-        # qpoints_FBZ,heat_cap=expand_FBZ(1,self.weights,self.q_points,self.heat_cap,0,rotations,reciprocal_lattice)
+        # qpoints_FBZ,heat_cap=self.expand_FBZ(1,self.weights,self.q_points,self.heat_cap,0,rotations,reciprocal_lattice)
         # self.heat_cap=heat_cap
 
         print('Expanding gamma to FBZ...')
         self.load_gamma()
-        qpoints_FBZ,gamma=expand_FBZ(1,self.weights,self.q_points,self.gamma,0,rotations,reciprocal_lattice)
+        qpoints_FBZ,gamma=self.expand_FBZ(1,self.weights,self.q_points,self.gamma,0,rotations,reciprocal_lattice)
         self.gamma=gamma
 
         self.q_points = qpoints_FBZ
@@ -418,8 +422,90 @@ class Phonon(Constants):
                             d = np.vstack((d_q, d_b)).T # array with q
 
                             self.degenerate_modes.append(d)
+    
+    def plot_relaxation_time(self):
+        '''Plots the scattering probability of the maximum temperature (in which scattering mostly occurs)
+        and gives information about simulation instability due to de ratio dt/tau.'''
 
-def expand_FBZ(axis,weight,qpoints,tensor,rank,rotations,reciprocal_lattice):
+        T_all = self.temperature_array[self.temperature_array % 100 == 0] # multiples of 100 K available in the data
+
+        cmap   = matplotlib.cm.get_cmap('jet')
+        colors = cmap((T_all - T_all.min())/T_all.ptp())
+
+        fig, ax = plt.subplots(nrows = 1, ncols = 1, figsize = (5,5), dpi = 300)
+        
+        x_data = self.omega[self.unique_modes[:, 0], self.unique_modes[:, 1]]
+
+        for i, T in enumerate(T_all):
+            # calculating y data
+            Tqj = np.hstack( ( ( np.ones(self.unique_modes.shape[0])*T).reshape(-1, 1), self.unique_modes ) )
+        
+            lifetime = self.lifetime_function(Tqj)
+
+            ax.scatter(x_data, lifetime, s = 1, color = colors[i, :])
+
+        handles = [Ellipse(xy = np.random.rand(2)*np.array([np.array(ax.get_xlim()).ptp(), np.array(ax.get_ylim()).ptp()])+np.array([ax.get_xlim()[0], ax.get_ylim()[0]]),
+                           height = 1, width = 1,
+                           color = c, label = '{:.1f} K'.format(T_all[i])) for i, c in enumerate(colors)]
+
+        ax.legend(handles = handles, fontsize = 'medium')
+       
+        ax.set_xlabel(r'Angular frequency $\omega$ [rad THz]',
+                        fontsize = 'large')
+        ax.set_ylabel(r'Phonon relaxation time $\tau$ [ps]',
+                        fontsize = 'large')
+
+        ax.set_yscale('log')
+        
+        plt.tight_layout()
+
+        plt.savefig(os.path.join(self.mat_folder,'relaxation_times.png'))
+
+        plt.close(fig)
+
+    def plot_density_of_states(self):
+
+        n_bins    = 200
+        
+        d_omega   = self.omega.max()/n_bins
+
+        intervals = np.linspace(0, self.omega.max(), n_bins+1)
+        
+        centers = (intervals[1:] + intervals[:-1])/2
+
+        dos = np.zeros((n_bins, self.number_of_branches))
+
+        cmap   = matplotlib.cm.get_cmap('jet')
+        colors = cmap(np.linspace(0, 1, self.number_of_branches))
+
+        for b in range(self.number_of_branches):
+            omega = self.omega[:, b]
+
+            below = (omega.reshape(-1, 1) < intervals)[:, 1:]
+            above = (omega.reshape(-1, 1) >= intervals)[:, :-1]
+            
+            dos[:, b] = (below & above).sum(axis = 0)/d_omega
+
+        fig, ax = plt.subplots(nrows = 1, ncols = 1, figsize = (5,5), dpi = 300)
+        
+
+        ax.stackplot(centers, dos.T, labels = ['Branch {:d}'.format(i) for i in range(self.number_of_branches)], step = 'pre', colors = colors)
+
+        ax.set_ylim(0)
+
+        ax.legend(fontsize = 'medium')
+
+        ax.set_xlabel(r'Angular Frequency $\omega$ [THz]', fontsize = 'medium')
+        ax.set_ylabel(r'Density of states $g(\omega)$ [THz$^{-1}$]', fontsize = 'medium')
+
+        plt.title(r'Density of states. {:d} bins, $d\omega = $ {:.3f} THz'.format(n_bins, d_omega), fontsize = 'large')
+
+        plt.tight_layout()
+
+        plt.savefig(os.path.join(self.mat_folder,'density_of_states.png'))
+        plt.close(fig)
+
+    def expand_FBZ(self, axis,weight,qpoints,tensor,rank,rotations,reciprocal_lattice):
         # expand tensor from IBZ to BZ
         # q is in the direction "axis" in tensor, and #rank cartesian coordinates the last
 

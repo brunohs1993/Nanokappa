@@ -95,17 +95,6 @@ class Visualisation(Constants):
         self.stdev_plot_style = dict(color     = 'r' ,
                                      linestyle = '--')
         
-    def preprocess(self):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-        
-            print('Generating preprocessing plots...')
-            
-            print('Scattering probability...')
-            self.scattering_probability()
-            print('Density of states...')
-            self.density_of_states()
-
     def postprocess(self, verbose = True):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -129,130 +118,6 @@ class Visualisation(Constants):
                 with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
                     self.flux_contribution()
             self.plot_kappa_path()
-
-    def scattering_probability(self):
-        '''Plots the scattering probability of the maximum temperature (in which scattering mostly occurs)
-        and gives information about simulation instability due to de ratio dt/tau.'''
-
-        T = max([self.geometry.res_values[i] for i, bc in enumerate(self.geometry.res_bound_cond) if bc == 'T'])
-        
-        fig, ax = plt.subplots(nrows = 1, ncols = 1, figsize = (8,8), dpi = 200)
-        
-        x_data = self.phonon.omega[self.phonon.unique_modes[:, 0], self.phonon.unique_modes[:, 1]]
-
-        # calculating y data
-        Tqj = np.hstack( ( ( np.ones(self.phonon.unique_modes.shape[0])*T).reshape(-1, 1), self.phonon.unique_modes ) )
-        
-        lifetime = self.phonon.lifetime_function(Tqj)
-
-        min_lt = lifetime[lifetime > 0].min()
-
-        with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
-            scat_prob = np.where(lifetime>0, 1-np.exp(-self.dt/lifetime), 0)
-
-        y_data = scat_prob
-
-        # setting limits and colors based on y data
-        min_y = 0
-        max_y = 1
-
-        unstable_scat_prob    = 1-np.exp(-2)
-        oscillating_scat_prob = 1-np.exp(-1)
-
-        max_dt = -min_lt*np.log(1-unstable_scat_prob)
-        max_non_oscil_dt = -min_lt*np.log(1-oscillating_scat_prob)
-
-        unstable_modes = np.where(y_data > unstable_scat_prob, 1, 0).sum()/y_data.shape[0]
-        unstable_modes *= 100
-
-        colors = ['royalblue', 'royalblue', 'gold', 'gold', 'crimson', 'crimson']
-        nodes  = np.array([0.0, oscillating_scat_prob-0.01, oscillating_scat_prob+0.01, unstable_scat_prob-0.01, unstable_scat_prob+0.01, 1])
-        cmap = LinearSegmentedColormap.from_list('byr', list(zip(nodes, colors)))
-
-        ax.scatter(x_data, y_data, s = 1,
-                    c = y_data, cmap = cmap,
-                    vmin = 0,
-                    vmax = 1)
-        ax.plot([0, self.phonon.omega.max()], [   unstable_scat_prob,    unstable_scat_prob], color = 'gray', linestyle='--', alpha = 0.5)
-        ax.text(x = 0, y = unstable_scat_prob - 0.01,
-                s = r'Instability limit - $dt/\tau = 2$',
-                va = 'top',
-                ha = 'left',
-                fontsize = 'large',
-                color = 'gray')
-        ax.plot([0, self.phonon.omega.max()], [oscillating_scat_prob, oscillating_scat_prob], color = 'gray', linestyle='--', alpha = 0.5)
-        ax.text(x = 0, y = oscillating_scat_prob - 0.01,
-                s = r'Oscillations limit - $dt/\tau = 1$',
-                va = 'top',
-                ha = 'left',
-                fontsize = 'large',
-                color = 'gray')
-        
-        ax.set_xlabel(r'Angular frequency $\omega$ [rad THz]',
-                        fontsize = 'large')
-        ax.set_ylabel(r'Scattering probability $P = 1-\exp(-dt/\tau)$',
-                        fontsize = 'large')
-
-        ax.set_ylim(min_y, max_y)
-
-        ax.text(x = 0, y = max_y*0.97,
-                s = 'T = {:.1f} K\nUnstable modes = {:.2f} %\nMax stable dt = {:.3f} ps\nMax non-oscillatory dt = {:.3f} ps'.format(T, unstable_modes, max_dt, max_non_oscil_dt),
-                va = 'top',
-                ha = 'left',
-                fontsize = 'large',
-                linespacing = 1.1)
-
-        fig.suptitle(r'Scattering probability with $dt = ${:.2f} ps'.format(self.dt),
-                     fontsize = 'xx-large')
-
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.folder,'scattering_prob.png'))
-
-        plt.close(fig)
-
-        if np.any(y_data > unstable_scat_prob):
-            print('MCPhonon Warning: Timestep is too large! Check scattering probability plot for details.')
-        
-    def get_lifetime(self, mode, T):
-        return self.phonon.lifetime_function[mode[0]][mode[1]](T)
-
-    def density_of_states(self):
-
-        omega = self.phonon.omega[self.phonon.unique_modes[:, 0], self.phonon.unique_modes[:, 1]]
-
-        n_bins    = 200
-        
-        d_omega   = omega.max()/n_bins
-
-        intervals = np.arange(0, omega.max()+d_omega, d_omega)
-        
-        below = (omega.reshape(-1, 1) < intervals)[:, 1:]
-        above = (omega.reshape(-1, 1) >= intervals)[:, :-1]
-        
-        dos = below & above
-
-        dos = dos.sum(axis = 0)
-        dos = dos/d_omega
-
-        x_data = intervals[:-1]+d_omega
-        y_data = dos
-
-        fig = plt.figure(figsize = (10,8), dpi = 120)
-        ax = fig.add_subplot(111)
-
-        # ax.plot(x_data, y_data, color = 'k')
-        ax.fill_between(x_data, 0, y_data, facecolor = 'slategray')
-
-        ax.set_ylim(0)
-
-        ax.set_xlabel(r'Angular Frequency $\omega$ [THz]', fontsize = 'x-large')
-        ax.set_ylabel(r'Density of states $g(\omega)$ [THz$^{-1}$]', fontsize = 'x-large')
-
-        plt.title(r'Density of states. {:d} bins, $d\omega = $ {:.3f} THz'.format(n_bins, d_omega), fontsize = 'xx-large')
-
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.folder,'density_of_states.png'))
-        plt.close(fig)
 
     def read_convergence(self):
         f = open(self.convergence_file, 'r')
@@ -617,8 +482,17 @@ class Visualisation(Constants):
                 ax['bottom'].plot(conv_x, data_total, **conv_dict)
 
                 N = int(self.args.n_mean[0])
+                rescale = np.arange(1, min(N, data_total.shape[0])+1)/N
+
                 rol_mean = np.convolve(data_total                , np.ones(N)/N, mode = 'full')[:-N+1]
-                rol_std  = (np.convolve((data_total - rol_mean)**2, np.ones(N)/N, mode = 'full')[:-N+1])**0.5
+                rol_mean[:N] = rol_mean[:N]/rescale
+
+                # rol_std  = np.convolve((data_total - rol_mean)**2, np.ones(N)/N, mode = 'full')[:-N+1]
+                rol_std = np.array([np.sum((data_total[max(i-N+1, 0):i+1] - rol_mean[i])**2)/(min(N, i+1)) for i in range(data_total.shape[0])])
+                rol_std **= 0.5
+
+                # rol_std[:N] = rol_std[:N]/rescale
+                
                 
                 ax['bottom'].plot(conv_x, rol_mean, **mean_dict )
                 ax['bottom'].plot(conv_x, rol_std , **stdev_dict)

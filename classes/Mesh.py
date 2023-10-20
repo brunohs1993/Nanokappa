@@ -12,6 +12,7 @@ from scipy.spatial import Delaunay
 #   Class representing the triangular mesh without any BC or material data.
 
 #   TO DO
+#   - Add an self.watertight attribute and use it as condition for simulation
 #   - Complete the implementation of interfaces for interfaces with more than one face (probably using adjacency)
 #   - Better triangulation to avoid holes or simplices outside boundaries (gmsh seems to be a good option)
 
@@ -28,7 +29,7 @@ class Mesh:
 
         if vertices.shape[1] == 2:
             z = np.zeros((vertices.shape[0], 1))
-            vertices = np.hstack((z, vertices))
+            vertices = np.hstack((vertices, z))
         elif vertices.shape[1] == 3:
             pass
         else:
@@ -239,9 +240,6 @@ class Mesh:
         for f in self.faces:
             self.face_bounds = np.concatenate((self.face_bounds, np.expand_dims(np.vstack((self.vertices[f, :].min(axis = 0),
                                                                                            self.vertices[f, :].max(axis = 0))), axis = 1)), axis = 1)
-
-        # self.face_bounds = np.concatenate((np.expand_dims(self.vertices[self.faces, :].min(axis = 1), 0),
-        #                                    np.expand_dims(self.vertices[self.faces, :].max(axis = 1), 0)), axis = 0)
         
     def get_facets_properties(self, tol = None):
         '''Get:
@@ -571,7 +569,7 @@ class Mesh:
 
         all_i    = np.arange(self.n_of_vertices, dtype = int)
         keep_i   = np.delete(all_i, indices) # indices that will be kept
-        remove_i = (~np.isin(all_i, keep_i)).nonzero()[0]
+        remove_i = (~np.isin(all_i, keep_i)).nonzero()[0] # is this just to convert to array? Isn't remove_i == indices?
         remove_i = np.sort(remove_i)
 
         self.vertices = self.vertices[keep_i, :]
@@ -750,7 +748,7 @@ class Mesh:
         
         v1 = np.expand_dims(self.vertices[edges[:, 0], :], 1) # (E, 1, 3)
         v2 = np.expand_dims(self.vertices[edges[:, 1], :], 1) # (E, 1, 3)
-        dv = v2 - v1                                               # (E, 1, 3)
+        dv = v2 - v1                                          # (E, 1, 3)
 
         t = np.sum((x - v1)*dv, axis = 2)/np.sum(dv*dv, axis = 2) # (E, P)
         

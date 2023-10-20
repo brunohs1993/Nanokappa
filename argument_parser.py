@@ -90,7 +90,7 @@ def initialise_parser():
                         type = str  , nargs = '*' , help    = 'Save figures with properties distributions. Standard is T, omega and energy.')
     parser.add_argument('--colormap'      , '-cm' , default = ['jet'],
                         type = str  , nargs = 1   , help    = 'Set matplotlib colormap to be used on all plots. Standard is jet.')
-    parser.add_argument('--theme'         , '-th' , default = ['white'], choices = ['white', 'light', 'dark', 'black'],
+    parser.add_argument('--theme'         , '-th' , default = ['white'], choices = ['white', 'light', 'dark'],
                         type = str  , nargs = 1   , help    = 'Set theme color for all plots.')
     parser.add_argument('--n_mean'        , '-nm' , default  = [100], 
                         type = int  , nargs = 1   , help    = 'The number of datapoints to consider when calculating mean and stdev values. Each datapoint = 10 iterations. Default is 100.')
@@ -152,13 +152,27 @@ def generate_results_folder(args):
             loc = os.path.join(os.getcwd(), loc)
 
         # create folder
-        i = 0
-        created = False
-        while not created:
-            try:
-                os.makedirs(f'{loc}_{i}', exist_ok=False)
-                created = True
-            except: i +=1
+        i = get_folder_index(loc)
+        os.makedirs(f'{loc}_{i}', exist_ok=False)
         
         args.results_folder = f'{loc}_{i}'
     return args
+
+def get_folder_index(loc):
+    
+    basename = os.path.basename(loc)
+    dirname = os.path.dirname(loc)
+
+    dirs = os.listdir(dirname)
+    same = [int(d.split('_')[-1]) for d in dirs if basename in d]
+
+    if len(same) == 0:
+        return 0
+    else:
+        return max(same)+1
+    
+
+
+
+
+

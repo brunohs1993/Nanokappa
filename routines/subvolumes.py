@@ -1,20 +1,14 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+from scipy.interpolate import NearestNDInterpolator
 import copy
 
 def get_regions(x_s, x_r):
     
-    n_r = x_r.shape[0] # number of regions
-
-    d = x_s - x_r.reshape(n_r, 1, 3)
-    d = np.sum(d**2, axis = 2)**0.5
-
-    min_d = np.amin(d, axis = 0, keepdims = True)
-
-    r = np.argmax(d == min_d, axis = 0)
-
-    return r
+    f = NearestNDInterpolator(x_r, np.arange(x_r.shape[0], dtype = int))
+    
+    return f(x_s)
 
 def get_cover(r, n_r):
 
@@ -36,7 +30,7 @@ def update_centers(x_s, r, x_r):
     for i in range(n_r):                           # check for each region
         ind = np.nonzero(r == i)[0]
         x_r_new[i, :] = x_s[ind, :].mean(axis = 0) # to  calculate their centroid
-
+    
     return x_r_new
 
 def normalise(x, geo):

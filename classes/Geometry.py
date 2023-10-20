@@ -35,7 +35,7 @@ class Geometry:
     def __init__(self, args):
         
         self.args            = args
-        self.standard_shapes = ['cuboid', 'cillinder', 'sphere']
+        self.standard_shapes = ['cuboid', 'box', 'cylinder', 'rod', 'bar', 'star', 'castle', 'zigzag', 'corrugated', 'freewire']
         self.scale           = args.scale
         
         self.shape           = args.geometry[0]
@@ -76,13 +76,13 @@ class Geometry:
         
         print('Loading geometry...')
 
-        if shape in ['cuboid', 'box', 'cylinder', 'rod', 'bar', 'star', 'castle', 'zigzag', 'corrugated', 'freewire']:
+        if shape in self.standard_shapes:
             self.mesh = self.generate_primitives(shape, self.dimensions)
         else:
             prev_mesh = tm.load(shape)
                 
             self.mesh = Mesh(np.around(prev_mesh.vertices, decimals = 10), prev_mesh.faces)
-
+        
     def generate_primitives(self, shape, dims):
         if shape in ['cuboid', 'box']:
             vertices = np.array([[0, 0, 0],
@@ -427,10 +427,7 @@ class Geometry:
 
             self.mesh.rezero() # brings mesh to origin back again to avoid negative coordinates
         
-        # THIS IS TO TRY AVOID PROBLEMS WITH PERIODIC BOUNDARY CONDITION
-        # DUE TO ROUNDING ERRORS
-        self.mesh.vertices = np.around(self.mesh.vertices, decimals = self.tol_decimals)
-        self.mesh.vertices = np.where(self.mesh.vertices == -0., 0, self.mesh.vertices)
+        
 
         self.mesh.update_mesh_properties()
         self.mesh.rezero()
@@ -610,8 +607,6 @@ class Geometry:
                 new_samples = self.mesh.sample_volume(ns)
 
                 samples = np.vstack((samples, new_samples))
-
-                scaled_samples = self.scale_positions(new_samples)
                 
                 r = self.subvol_classifier.predict(new_samples)
 
@@ -1058,6 +1053,7 @@ class Geometry:
         
         ax.tick_params(labelsize = 'small')
         plt.savefig(os.path.join(self.folder, 'subvol_connections.png'))
+        
         plt.close(fig)
 
     def get_path(self):
