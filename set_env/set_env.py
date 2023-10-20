@@ -1,5 +1,5 @@
 import subprocess, sys, time, os
-from threading import local
+# from threading import local
 
 if sys.platform == 'win32':
     folder_sep = '\\'
@@ -10,7 +10,8 @@ main_path = os.path.realpath(__file__).replace('set_env{}set_env.py'.format(fold
 
 env_name = input('Type the name of the environment to be created and press ENTER: ')
 
-subprocess.run(f'conda create -n {env_name} python=3.9 --yes', shell = True)
+# subprocess.run(f'conda create -n {env_name} python=3.9 --yes', shell = True)
+subprocess.run(f'conda create -n {env_name} --yes', shell = True)
 subprocess.run(f'conda activate {env_name}', shell = True)
 subprocess.run('conda config --add channels conda-forge', shell = True)
 
@@ -40,12 +41,16 @@ print('Conda modules:'+conda_mods_str)
 print('Pip modules:'+pip_mods_str)
 
 with open('set_env/install_log.txt', 'w') as f:
-    if len(conda_mods_str) > 0:
+    if len(conda_mods) > 0:
         print('Installing packages from conda...')
-        subprocess.run(f'conda install -n {env_name} --yes'+conda_mods_str  , shell = True, stdout = f)
-    if len(pip_mods_str) > 0:
+        for m in conda_mods:
+            print(f'Installing {m}...')
+            subprocess.run(f'conda install -n {env_name} --yes '+m, shell = True, stdout = f)
+    if len(pip_mods) > 0:        
         print('Installing packages in pip...')
-        subprocess.run(f'conda run -n {env_name} python -m pip install'+pip_mods_str, shell = True, stdout = f)
+        for m in pip_mods:
+            print(f'Installing {m}...')
+            subprocess.run(f'conda run -n {env_name} python -m pip install '+m, shell = True, stdout = f)
 
 print('Running test, do not close the new terminal window...')
 cmd = f'conda run -n {env_name} python {main_path}nanokappa.py -ff {main_path}parameters_test.txt'
