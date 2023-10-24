@@ -93,7 +93,7 @@ The `--isotope_scat` parameter signals whether there is additional phonon scatte
 
 To use the material offered as example in the test_material folder, it should be declared as:
 
-    --mat_folder  <path_to_nanokappa>/test_material/
+    --mat_folder  <path_to_nanokappa>/test_material/Si/
     --hdf_file    kappa-m313131.hdf5
     --poscar_file POSCAR
 

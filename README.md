@@ -29,20 +29,20 @@ If you prefer, you can also set the environment manually:
 
 1.  Create an environment (here called `nanokappa`, but it is an user's choice) and activate it:
    
-        $ conda create -n nanokappa python=3.8
+        $ conda create -n nanokappa
         $ conda activate nanokappa
 
 The `(nanokappa)` word will appear on the command line, signaling the conda environment is active.
 
-2. Add conda-forge to the available channels:
+1. Add conda-forge to the available channels:
    
        (nanokappa) $ conda config --add channels conda-forge
 
-3. Install the needed modules:
+2. Install the needed modules:
    
         (nanokappa) $ conda install -n nanokappa --file <path-to-nanokappa>/Nanokappa/set_env/modules.txt
 
-4. Run a test by executing `python nanokappa.py -ff <path-to-nanokappa>/Nanokappa/parameters_test.txt`. The resulting files should be located at `Nanokappa/test_results/test_X/`. These result files can be safely deleted after the test is finished.
+3. Run a test by executing `python nanokappa.py -ff <path-to-nanokappa>/Nanokappa/parameters_test.txt`. The resulting files should be located at `Nanokappa/test_results/test_X/`. These result files can be safely deleted after the test is finished.
 
 > **Obs.**: Depending on the operating system, some modules may not be available on Conda repositories. In this case, check the modules that caused errors, and manually install from Conda the available modules by running:
 >
@@ -70,7 +70,7 @@ Please, refer to our [how-to guide](/tutorials/howto.md) for a more detailed des
 
 The easiest case to simulate is a heat transfer in a thin film in the crossplane direction. For that we can use the material data offered as sample. The parameters could be listed in a `parameters.txt` file as:
 
-    --mat_folder     <path_to_nanokappa>/test_material/
+    --mat_folder     <path_to_nanokappa>/test_material/Si/
     --hdf_file       kappa-m313131.hdf5
     --poscar_file    POSCAR
     --geometry       box
@@ -107,7 +107,21 @@ Currently Nano-&#954; does not support parallel computing of a single case. It d
 
 # How to cite?
 
-The scientific paper describing Nano-&#954; is currently being reviewed. The citation to it in bibtex format will be here when it becomes published.
+We ask for everyone that uses Nano-&#954; to cite our work. Nano-&#954; was published in the following paper with citations in BibTeX:
+
+        @article{2024-Nanokappa,
+        title = {Monte Carlo simulation of phonon transport from ab-initio data with Nano-κ},
+        journal = {Computer Physics Communications},
+        volume = {294},
+        pages = {108954},
+        year = {2024},
+        issn = {0010-4655},
+        doi = {https://doi.org/10.1016/j.cpc.2023.108954},
+        url = {https://www.sciencedirect.com/science/article/pii/S0010465523002990},
+        author = {B.H. Silva and D. Lacroix and M. Isaiev and L. Chaput},
+        keywords = {Monte Carlo, Phonon transport, Ab-initio, Nanoscale heat transfer, Thermal conductivity}
+        }
+
 
 # What is planned for the future?
 
@@ -120,7 +134,11 @@ We want the user to always have more flexibility, prettier visuals, faster simul
 
 # "I like it! What can I do?"
 
-If you are a researcher, feel free to use Nano-&#954;, as long as you cite us. If you think you could contribute to its development, please send us a message and we could have a coffee and talk about how.
+- If you are a researcher, feel free to use Nano-&#954;, as long as you cite us;
+  
+- If you find any bugs, please report on Nano-&#954;'s repository or send us an email so we can fix it as quick as possible;
+  
+- If you think you could contribute to Nano-&#954;'s development, please send us a message and we could have a coffee and talk about how.
 
 # Aknowledgements
 
