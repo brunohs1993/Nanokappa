@@ -166,6 +166,9 @@ def get_folder_index(loc):
     basename = os.path.basename(loc)
     dirname = os.path.dirname(loc)
 
+    if not os.path.exists(dirname):
+        return 0
+
     dirs = os.listdir(dirname)
     same = [int(d.split('_')[-1]) for d in dirs if basename in d]
 
