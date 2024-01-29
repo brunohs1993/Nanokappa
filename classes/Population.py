@@ -584,7 +584,7 @@ class Population(Constants):
             self.temp_interp = NearestNDInterpolator
         elif self.temp_interp_type in ['radial', 'linear']:
             if self.temp_interp_type == 'linear':
-                warnings.warn(Warning('Linear T interpolation is currently valid for slice subvolumes only. Defaulting to RBF interpolation to avoid extrapolation problems.'))
+                print('Linear T interpolation is currently valid for slice subvolumes only. Defaulting to RBF interpolation to avoid extrapolation problems.')
 
             # NOTE: RBFInterpolator is kinda hard to make it work properly:
             #       - The "neighbours" keyword does not seem to work to reduce the influence.
@@ -644,7 +644,8 @@ class Population(Constants):
                     temperatures = subvol_temperatures[self.subvol_id]
                 
             elif key == 'random':
-                temperatures        = np.random.rand(number_of_particles)*(bound_T.ptp() ) + bound_T.min()
+                subvol_temperatures = np.random.rand(self.n_of_subvols)*bound_T.ptp() + bound_T.min()
+                temperatures = subvol_temperatures[self.subvol_id]
             elif key == 'hot':
                 temperatures        = np.ones(number_of_particles)*bound_T.max()
                 subvol_temperatures = np.ones(  self.n_of_subvols)*bound_T.max()
@@ -2055,7 +2056,7 @@ class Population(Constants):
             imageio.mimsave(os.path.join(self.results_folder_name,'simulation.gif'), self.plot_images, fps=10)
             print('Saved!')
 
-    def plot_figures(self, geometry, phonon, property_plot=['energy'], colormap = 'viridis'):
+    def plot_figures(self, geometry, phonon, property_plot=['energy'], colormap = 'jet'):
         
         fig, ax = geometry.mesh.plot_facet_boundaries(l_color = self.view.ax_style['axiscolor'])
         n = len(property_plot)
@@ -2289,8 +2290,8 @@ class Population(Constants):
         
         time = datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f')
         
-        # saving final particle states: modes, positions, subvol id and occupation number.
-        # Obs.: phonon properties of particles can be retrieved by mode information and subvol temperature
+        # saving final particle states: modes, positions and occupation number.
+        # Obs.: phonon properties of particles can be retrieved by mode information and subvol temperature calculated at initialisation
         
         #### PARTICLE DATA ####
         filename = os.path.join(self.results_folder_name, 'particle_data.txt')
@@ -2298,7 +2299,7 @@ class Population(Constants):
         header ='Particles final state data \n' + \
                 'Date and time: {}\n'.format(time) + \
                 'hdf file = {}, POSCAR file = {}\n'.format(self.args.hdf_file, self.args.poscar_file) + \
-                'q-point, branch, pos x [angs], pos y [angs], pos z [angs], subvol, occupation'
+                'q-point, branch, pos x [angs], pos y [angs], pos z [angs], occupation'
 
         data = np.hstack( (self.modes,
                            self.positions,

@@ -7,6 +7,9 @@ from argument_parser import *
 import sys
 import re
 
+import warnings
+warnings.simplefilter("ignore")
+
 print('\n'+
     ' nonano          no   onanonan        onanon          on nonanonan              anon    anona\n'+
     'ano   ona       ano  nona   anon     non  onan       nonano     anon            ano   ona\n'+

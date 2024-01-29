@@ -1196,7 +1196,7 @@ class SubvolClassifier():
         else:
             self.xc = xc
 
-        self.f = NearestNDInterpolator(self.xc, np.arange(self.n))
+        self.f = NearestNDInterpolator(self.xc, np.arange(self.n, dtype = int))
         
     def predict(self, x):
-        return self.f(x)
+        return self.f(x).astype(int)

@@ -193,9 +193,16 @@ class Phonon(Constants):
         self.wavevectors = self.find_min_k(k)
 
     def plot_FBZ(self):
-        fig, ax = plt.subplots(nrows = 1, ncols = 1, subplot_kw={'projection': '3d'})
+        fig, ax = plt.subplots(nrows = 1, ncols = 1, subplot_kw={'projection': '3d'}, figsize = (6, 5), dpi = 300)
         ax.scatter(self.wavevectors[:, 0], self.wavevectors[:, 1], self.wavevectors[:, 2], s = 1, c = np.sum(self.wavevectors**2, axis = 1))
+
+        ax.set_xlabel(r'$\vec{k}_x$')
+        ax.set_ylabel(r'$\vec{k}_y$')
+        ax.set_zlabel(r'$\vec{k}_z$')
+
+        fig.suptitle(r'Wavevectors in FBZ, coloured by $|\vec{\kappa}|$.')
         
+        plt.tight_layout()
         fig.savefig(os.path.join(self.mat_folder, 'FBZ.png'))
         plt.close(fig)
 

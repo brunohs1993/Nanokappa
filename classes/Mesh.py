@@ -537,8 +537,10 @@ class Mesh:
 
     def get_volume_properties(self):
         '''Calculate volume and center of mass.'''
-
-        self.triangulate_volume(max_edge_div=1000, options = 'Qc Qt')
+        
+        max_div = 10**int(np.ceil(np.log10(self.extents.min()))-1)
+        
+        self.triangulate_volume(max_edge_div = max_div, options = 'Qc Qt', sample_volume = False)
         if self.simplices.shape[0] == 0:
             self.volume = 0
             self.center_mass = self.facet_centroid[0, :]
