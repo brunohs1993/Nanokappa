@@ -1,3 +1,5 @@
+debug_flag = True
+
 from datetime import datetime, timedelta
 from classes.Geometry import Geometry
 from classes.Phonon import Phonon
@@ -7,8 +9,9 @@ from argument_parser import *
 import sys
 import re
 
-import warnings
-warnings.simplefilter("ignore")
+if not debug_flag:
+    import warnings
+    warnings.simplefilter("ignore")
 
 print('\n'+
     ' nonano          no   onanonan        onanon          on nonanonan              anon    anona\n'+
@@ -20,7 +23,7 @@ print('\n'+
 
 print('\n'+'Running simulation, please wait. Check the results folder for the current status.')
 
-args = read_args()
+args = read_args(debug_flag)
 
 # seting result files location
 args = generate_results_folder(args)

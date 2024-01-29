@@ -1,2 +1,0 @@
-processes 3
-nanokappa_folder d:/LEMTA/Code/Nanokappa
