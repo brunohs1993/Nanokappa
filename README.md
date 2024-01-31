@@ -50,8 +50,6 @@ Install the requirements:
 <details>
     <summary> <font size="4"><b>Using Pip</b></font> </summary>
 
-### Setting the environment. 
-
 You need `virtualenv` installed. Under Debian you can use:
 
 ```bash
@@ -66,12 +64,6 @@ $ source ~/envs/nanokappa/bin/activate
 ```
 
 The `(nanokappa)` word will appear on the command line, signaling the conda environment is active.
-
-## Clone the Nano-&#954; github repository:
-
-```bash
-(nanokappa) $ git clone https://github.com/brunohs1993/Nanokappa.git
-```
 
 Install Nano-&#954;'s requirements:
 
