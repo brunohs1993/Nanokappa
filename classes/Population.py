@@ -1932,6 +1932,8 @@ class Population(Constants):
             label = 'Subvolume index [-]'
             format = '{:d}'
 
+        plt.ion()
+
         fig, ax = geometry.mesh.plot_facet_boundaries(l_color = 'grey')
 
         ax.set_box_aspect( np.ptp(geometry.bounds, axis = 0) )
@@ -1970,9 +1972,9 @@ class Population(Constants):
         fig.patch.set_facecolor(figcolor)
         ax.set_facecolor(figcolor)
 
-        ax.w_xaxis.line.set_color(linecolor)
-        ax.w_yaxis.line.set_color(linecolor)
-        ax.w_zaxis.line.set_color(linecolor)
+        ax.xaxis.line.set_color(linecolor)
+        ax.yaxis.line.set_color(linecolor)
+        ax.zaxis.line.set_color(linecolor)
         ax.xaxis.label.set_color(linecolor)
         ax.yaxis.label.set_color(linecolor)
         ax.zaxis.label.set_color(linecolor)
@@ -1990,6 +1992,7 @@ class Population(Constants):
         ###########
         
         # graph.set_animated(True)
+        
 
         plt.tight_layout()
 

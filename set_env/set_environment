@@ -1,8 +1,0 @@
-# Script to create the environment and install all needed packages
-
-# Modules used in the library:
-# h5py    --> to read hdf5 files
-# phonopy --> to make atomic calculations whenever needed
-# imageio --> to draw simulation animations
-# trimesh --> to deal load custom geometries
-# shapely --> to compare shapes

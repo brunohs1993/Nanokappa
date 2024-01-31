@@ -1,4 +1,4 @@
---mat_folder       test_material\Si\
+--mat_folder       test_material/Si/
 --hdf_file         kappa-m313131.hdf5
 --poscar_file      POSCAR
 --geometry         box

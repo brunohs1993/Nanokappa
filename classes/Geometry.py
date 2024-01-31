@@ -494,6 +494,17 @@ class Geometry:
         elif self.subvol_type == 'grid':
             self.grid = np.array(self.args.subvolumes[1:4]).astype(int)
 
+            if (self.grid == 1).sum() == 2:
+                print("1D subvolume distribution should use 'slice' type, not 'grid'. Defaulting to 'slice'...")
+                self.subvol_type = 'slice'
+                slice_axis = int(np.nonzero(self.grid != 1)[0][0])
+                n_of_subvols = self.grid[slice_axis]
+                
+                self.args.subvolumes = [self.subvol_type, n_of_subvols, slice_axis]
+                del(self.grid)
+                self.set_subvolumes()
+                return
+
             nx = int(self.grid[0])
             ny = int(self.grid[1])
             nz = int(self.grid[2])

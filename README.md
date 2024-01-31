@@ -5,64 +5,97 @@
 
 Nano-&#954; is a Python code for phonon transport simulation, combining Monte Carlo method with ab-initio material data. The user can simulate preset, standard geometries or import external ones in STL format.
 
-# Setting the environment
+# Installation
 
-It is recommended to run Nano-&#954; using a Conda environment. Firstly, install [Anaconda](https://www.anaconda.com/) on your computer.
+## Clone the Nano-&#954; github repository to the desired folder:
 
-Next, clone this repository or download its files to the desired folder.
+```bash
+$ git clone https://github.com/brunohs1993/Nanokappa.git
+```
 
-The necessary libraries can be installed either automatically or manually.
+## Setting the environment
 
-## **Automatic setting:**
+It is recommended to run Nano-&#954; using a virtual environment, either with Conda or Pip.
 
-To set the `nanokappa` environment automatically, open a terminal window and run:
+<details>
+<summary> <font size="4"><b>Using Conda</b></font> </summary>
 
-        $ python <path-to-nanokappa>/set_env/set_env.py
-        
-> **Obs.:** make sure Python version $\geq$ 3.5. On Linux or MacOS you may need to call `python3` instead of `python`.
+Firstly, install [Anaconda](https://www.anaconda.com/) on your computer.
 
-This should ensure that all necessary packages are installed either from Conda repositories or via pip. A test simulation is run at the end to check if everything goes ok. It should take some minutes.
+Create an environment and activate it:
 
-## **Manual setting**
-
-If you prefer, you can also set the environment manually:
-
-1.  Create an environment (here called `nanokappa`, but it is an user's choice) and activate it:
-   
-        $ conda create -n nanokappa
-        $ conda activate nanokappa
+```bash   
+$ conda create -n nanokappa
+$ conda activate nanokappa
+```
 
 The `(nanokappa)` word will appear on the command line, signaling the conda environment is active.
 
-1. Add conda-forge to the available channels:
-   
-       (nanokappa) $ conda config --add channels conda-forge
+Add conda-forge to the available channels:
 
-2. Install the needed modules:
-   
-        (nanokappa) $ conda install -n nanokappa --file <path-to-nanokappa>/Nanokappa/set_env/modules.txt
+```bash
+(nanokappa) $ conda config --add channels conda-forge
+```
 
-3. Run a test by executing `python nanokappa.py -ff <path-to-nanokappa>/Nanokappa/parameters_test.txt`. The resulting files should be located at `Nanokappa/test_results/test_X/`. These result files can be safely deleted after the test is finished.
+Install the requirements:
 
-> **Obs.**: Depending on the operating system, some modules may not be available on Conda repositories. In this case, check the modules that caused errors, and manually install from Conda the available modules by running:
->
->        (nanokappa) $ conda install -n nanokappa module1 module2 [module3 ...]
->
-> And then try to install the remaining via pip by running
->        
->        (nanokappa) $ conda run -n nanokappa python -m pip install module1 module2 [module3 ...]
->        
-> This procedure is done automatically by the `set_env.py` when running the automatic installation.
+```bash
+(nanokappa) $ conda install -n nanokappa --file <path_to_nanokappa>/Nanokappa/set_env/requirements.txt
+```
 
-<!-- **Obs.**: To install on the cluster:
+</details>
 
-        conda create -n nanokappa -c conda-forge python=3.8
-        conda activate nanokappa
-        conda install -c conda-forge h5py trimesh phonopy pyembree
-        mkdir nanokappa
-        cd nanokappa
-        git clone https://github.com/brunohs1993/Nanokappa
-        conda install -c conda-forge ipython -->
+<br/>
+
+<details>
+    <summary> <font size="4"><b>Using Pip</b></font> </summary>
+
+### Setting the environment. 
+
+You need `virtualenv` installed. Under Debian you can use:
+
+```bash
+$ sudo apt install python3-virtualenv
+```
+
+Create and load the environment:
+
+```bash
+$ python3 -m virtualenv ~/envs/nanokappa
+$ source ~/envs/nanokappa/bin/activate
+```
+
+The `(nanokappa)` word will appear on the command line, signaling the conda environment is active.
+
+## Clone the Nano-&#954; github repository:
+
+```bash
+(nanokappa) $ git clone https://github.com/brunohs1993/Nanokappa.git
+```
+
+Install Nano-&#954;'s requirements:
+
+```bash
+(nanokappa) $ cd nanokappa
+(nanokappa) $ pip install -r <path_to_nanokappa>/Nanokappa/set_env/requirements.txt
+```
+
+</details>
+
+<br/>
+
+## Run a test
+
+Run the following command to run a test calculation to ensure everything is running smoothly:
+
+```bash
+(nanokappa) $ cd <path_to_nanokappa>/Nanokappa/
+(nanokappa) $ python3 nanokappa.py -ff parameters_test.txt
+```
+
+The calculation outputs will be located in `<path_to_nanokappa>/Nanokappa/test_results/test_0/`.
+
+To deactivate the virtual environment, type `deactivate` for pip or `conda deactivate` for Conda and press Enter.
 
 # Running a calculation
 
@@ -87,7 +120,9 @@ The easiest case to simulate is a heat transfer in a thin film in the crossplane
 
 and run on command line with:
 
-    python <path_to_nanokappa>/nanokappa.py -ff <path>/parameters.txt
+```bash
+$ python <path_to_nanokappa>/nanokappa.py -ff <path>/parameters.txt
+```
 
 ## What Nano-&#954; shows as result of a simulation?
 
@@ -100,10 +135,6 @@ After (and during) a simulation, you will find in the results folder:
 - Geometry plots: BCs, SVs, SV connection conductivity, particle scatter plots;
 - Plot of thermal conductivity contribution by frequency;
 - Output file, when `--output file` is used;
-
-## Parallel computing
-
-Currently Nano-&#954; does not support parallel computing of a single case. It does support however parallel computations of multiple cases. To do it you just need to list the parameters in a csv file. More detail is given in the [parallel computation guide](tutorials/parallel.md).
 
 # How to cite?
 

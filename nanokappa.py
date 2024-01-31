@@ -1,4 +1,4 @@
-debug_flag = True
+debug_flag = False
 
 from datetime import datetime, timedelta
 from classes.Geometry import Geometry
