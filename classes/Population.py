@@ -1932,8 +1932,6 @@ class Population(Constants):
             label = 'Subvolume index [-]'
             format = '{:d}'
 
-        plt.ion()
-
         fig, ax = geometry.mesh.plot_facet_boundaries(l_color = 'grey')
 
         ax.set_box_aspect( np.ptp(geometry.bounds, axis = 0) )
@@ -1988,15 +1986,14 @@ class Population(Constants):
         ax.set_yticklabels(ax.get_yticklabels(), fontdict = {'color':linecolor})
         ax.set_zticklabels(ax.get_zticklabels(), fontdict = {'color':linecolor})
 
-
         ###########
         
         # graph.set_animated(True)
         
-
         plt.tight_layout()
 
         fig.canvas.draw()
+        fig.canvas.flush_events()
 
         plt.show(block = False)
 
@@ -2035,10 +2032,10 @@ class Population(Constants):
             colors = self.subvol_id
         
         # uṕdating points
-        # self.rt_graph.set_offsets(self.positions[:, [0, 1]])
-        # self.rt_graph.set_3d_properties(self.positions[:, 2], 'z')
+        self.rt_graph.set_offsets(self.positions[:, [0, 1]])
+        self.rt_graph.set_3d_properties(self.positions[:, 2], 'z')
         # self.rt_graph.do_3d_projection(self.rt_fig._cachedRenderer)
-        self.rt_graph._offsets3d = (self.positions[:,0], self.positions[:,1], self.positions[:,2])
+        # self.rt_graph._offsets3d = (self.positions[:,0], self.positions[:,1], self.positions[:,2])
         
         self.rt_graph.set_array(colors)
 

@@ -29,7 +29,7 @@ $ conda create -n nanokappa
 $ conda activate nanokappa
 ```
 
-The `(nanokappa)` word will appear on the command line, signaling the conda environment is active.
+The `(nanokappa)` word will appear on the command line, signaling the environment is active.
 
 Add conda-forge to the available channels:
 
@@ -63,7 +63,7 @@ $ python3 -m virtualenv ~/envs/nanokappa
 $ source ~/envs/nanokappa/bin/activate
 ```
 
-The `(nanokappa)` word will appear on the command line, signaling the conda environment is active.
+The `(nanokappa)` word will appear on the command line, signaling the environment is active.
 
 Install Nano-&#954;'s requirements:
 
@@ -126,7 +126,7 @@ After (and during) a simulation, you will find in the results folder:
 - Convergence plots: temperature, particles, heat flux, energy balance, thermal conductivity;
 - Geometry plots: BCs, SVs, SV connection conductivity, particle scatter plots;
 - Plot of thermal conductivity contribution by frequency;
-- Output file, when `--output file` is used;
+<!-- - Output file, when `--output file` is used; -->
 
 # How to cite?
 
