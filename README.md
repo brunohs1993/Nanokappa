@@ -68,7 +68,6 @@ The `(nanokappa)` word will appear on the command line, signaling the environmen
 Install Nano-&#954;'s requirements:
 
 ```bash
-(nanokappa) $ cd nanokappa
 (nanokappa) $ pip install -r <path_to_nanokappa>/Nanokappa/set_env/requirements.txt
 ```
 

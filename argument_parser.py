@@ -89,9 +89,6 @@ def initialise_parser(debug_flag):
     parser.add_argument('--subvol_material', '-sm', default = [],
                         type = int  , nargs = '*' , help    = [argparse.SUPPRESS, 'Material index of each subvolume, according to the order given at -pf and -hf.'][int(debug_flag)])
     
-    parser.add_argument('--rt_plot'       , '-rp' , default = [],
-                        type = str  , nargs = '*' , help    = [argparse.SUPPRESS, 'Set which property you want to see in the real time plot during simulation. Choose between T, omega, e, n and None (random colors).'][int(debug_flag)])                    
-    
     parser.add_argument('--reference_temp' , '-rt', default = ['local'],
                                       nargs = 1   , help    = [argparse.SUPPRESS, 'Set reference temperature to be considered in the system, in Kelvin. Also accepts "local", so deltas are calculated in relation to local temperature.'][int(debug_flag)]) 
     

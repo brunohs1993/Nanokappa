@@ -5,12 +5,9 @@ from datetime import datetime
 # plotting
 import matplotlib
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-import imageio
 from scipy.interpolate.ndgriddata import NearestNDInterpolator
 from scipy.interpolate import interp1d, RBFInterpolator
 from functools import partial
-import warnings
 
 # other
 import sys
@@ -23,8 +20,6 @@ from classes.Visualisation import Visualisation
 
 np.set_printoptions(precision=6, threshold=sys.maxsize, linewidth=np.nan)
 
-# matplotlib.use('Qt5Agg')
-
 #=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=
 
 #   Class with information about the particles contained in the domain.
@@ -33,7 +28,6 @@ np.set_printoptions(precision=6, threshold=sys.maxsize, linewidth=np.nan)
 #   - Add option to apply heat flux as boundary condition
 #   - Generalise for use with more than one material at once
 #   - Add transmission on interface between materials
-# 
 
 class Population(Constants):
     '''Class comprising the particles to be simulated.'''
@@ -102,7 +96,6 @@ class Population(Constants):
 
         self.colormap = self.args.colormap[0]
         self.fig_plot = self.args.fig_plot
-        self.rt_plot  = self.args.rt_plot
 
         self.current_timestep = 0
 
@@ -129,10 +122,6 @@ class Population(Constants):
         self.view = Visualisation(self.args, geometry, phonon, self) # initialising visualisation class
         self.plot_figures(geometry, phonon, property_plot = self.args.fig_plot, colormap = self.args.colormap[0])
 
-        if len(self.rt_plot) > 0:
-            print('Starting real-time plot...')
-            self.rt_graph, self.rt_fig = self.init_plot_real_time(geometry, phonon)
-        
         print('Initialisation done!')
 
     def initialise_modes(self, phonon):
@@ -1609,7 +1598,7 @@ class Population(Constants):
                             self.res_norm[i] += indexes_res.sum()
 
                         # adding heat flux
-                        hflux = energies.reshape(-1, 1)*self.group_vel[indexes_del, :][indexes_res, :]
+                        hflux = energies.reshape(-1, 1)*self.group_vel[indexes_del, :][indexes_res, :]/np.sum(self.group_vel[indexes_del, :][indexes_res, :]*geometry.facets_normal[facet, :], axis = 1, keepdims = True)
                         self.res_heat_flux[i, :] += hflux.sum(axis = 0)
 
                 self.delete_particles(indexes_del)
@@ -1696,24 +1685,12 @@ class Population(Constants):
     def adjust_reservoir_balance(self, geometry, phonon):
         if self.n_of_reservoirs > 0:
             
-            # the sum over all particles that cross the reservoir facet is an integration over time and over area.
-            # This makes the final unit of the flux sum ev/a²ps * ps * a² = eV
-            # To recover the flux, we average this energy over the area and interval of time integrated.
-            # The energy is this quantity in the direction of the normal.
-
-            self.res_heat_flux  = phonon.normalise_to_density(self.res_heat_flux)/self.res_norm.reshape(-1, 1) # average energy crossing the boundary
-            self.res_heat_flux *= phonon.number_of_active_modes                                                # considering the contribution of several modes
-            
-            # self.res_energy_balance = np.sum(self.res_heat_flux*-geometry.facets_normal[self.res_facet, :], axis = 1)
-
-            # self.res_energy_balance = phonon.normalise_to_density(self.res_energy_balance)
-            self.res_energy_balance /= self.res_norm
-            self.res_energy_balance *= phonon.number_of_active_modes
-            
-            # THIS LINE IS WRONG
-            # self.res_heat_flux      /= (self.n_dt_to_conv*self.dt*geometry.facets_area[self.res_facet].reshape(-1, 1))                # divide by area and time to convert in rate
-
-            self.res_heat_flux      *= self.eVpsa2_in_Wm2 # convert eV/a²ps to W/m²
+            self.res_heat_flux *= phonon.number_of_active_modes/(self.particle_density*self.dt*self.n_dt_to_conv*geometry.facets_area[self.res_facet].reshape(-1, 1))
+            self.res_heat_flux  = phonon.normalise_to_density(self.res_heat_flux)
+            self.res_heat_flux *= self.eVpsa2_in_Wm2 # convert eV/a²ps to W/m²
+                       
+            self.res_energy_balance *= phonon.number_of_active_modes/(self.particle_density*self.dt*self.n_dt_to_conv)
+            self.res_energy_balance = phonon.normalise_to_density(self.res_energy_balance) # eV/ps            
 
     def restart_reservoir_balance(self):
         self.res_heat_flux = np.zeros((self.n_of_reservoirs, 3))
@@ -1789,8 +1766,6 @@ class Population(Constants):
             self.write_convergence(geometry)      # write data on file
             self.restart_reservoir_balance()
 
-        if (len(self.rt_plot) > 0) and (self.current_timestep % self.n_dt_to_plot == 0):
-            self.plot_real_time(phonon)
         gc.collect() # garbage collector
 
     def initialise_residue(self, geo):
@@ -1862,199 +1837,6 @@ class Population(Constants):
 
         with open(os.path.join(self.results_folder_name,'residue.txt'), 'a+') as f:
             f.writelines(s)
-
-    def init_plot_real_time(self, geometry, phonon):
-        '''Initialises the real time plot to be updated for each timestep.'''
-
-        self.n_dt_to_plot = 100
-
-        if self.rt_plot[0] in ['T', 'temperature']:
-            colors = self.temperatures
-            if self.n_of_reservoirs > 0:
-                T = np.concatenate((self.res_bound_values[self.res_bound_cond == 'T'], self.subvol_temperature))
-            else:
-                T = self.subvol_temperature
-            vmin = np.floor(T.min()-1)
-            vmax = np.ceil(T.max()+1)
-            label = 'Temperature [K]'
-            format = '{:.1f}'
-        elif self.rt_plot[0] in ['e', 'energy']:
-            T = self.subvol_temperature
-            dn = self.occupation - phonon.calculate_occupation(T.mean(), self.omega)
-            colors = self.hbar*self.omega*dn
-
-            emin = (phonon.calculate_energy(T.min()-1, phonon.omega) - phonon.calculate_energy(T.mean(), phonon.omega)).min()
-            emax = (phonon.calculate_energy(T.min()+1, phonon.omega) - phonon.calculate_energy(T.mean(), phonon.omega)).max()
-
-            order = [np.floor( np.log10(np.absolute(emin)) ), np.floor( np.log10(emax) )]
-            vmin = (10**order[0])*np.ceil(emin/(10**order[0]))
-            vmax = (10**order[1])*np.ceil(emax/(10**order[1]))
-            label = r'Energy density deviation $\hbar \omega \delta n$ [eV/angstrom$^3$]'
-            format = '{:.2e}'
-        elif self.rt_plot[0] in ['omega', 'angular_frequency', 'frequency']:
-            colors = self.omega
-            vmin = phonon.omega[phonon.omega>0].min()
-            vmax = phonon.omega.max()
-            label = r'Angular frequency $\omega$ [THz$\cdot$rad]'
-            format = '{:.2e}'
-        elif self.rt_plot[0] in ['n', 'occupation']:
-            colors = self.occupation
-            order = [np.floor( np.log10( self.occupation.min()) ), np.floor( np.log10( self.occupation.max()) )]
-            vmin = (10**order[0])*np.ceil(self.occupation.min()/(10**order[0]))
-            vmax = (10**order[1])*np.ceil(self.occupation.max()/(10**order[1]))
-            label = r'Occupation number deviation $\delta n$ [phonons/angstrom$^3$]'
-            format = '{:.2e}'
-        elif self.rt_plot[0] in ['qpoint']:
-            colors = self.modes[:, 0]
-            vmin = 0
-            vmax = phonon.number_of_qpoints
-            label = 'Q-point index [-]'
-            format = '{:d}'
-        elif self.rt_plot[0] in ['branch']:
-            colors = self.modes[:, 1]
-            vmin = 0
-            vmax = phonon.number_of_branches
-            label = 'Branch index [-]'
-            format = '{:d}'
-        elif self.rt_plot[0] in ['ts_to_boundary']:
-            colors = self.n_timesteps
-            vel  = np.sqrt( (phonon.group_vel**2).sum(axis = 2) )
-            # min_vel = vel[vel>0].min()
-            # max_path = np.sqrt( (geometry.bounds[1, :]**2).sum() ).min()
-            vmin = 0
-            vmax = 100 # max_path/(min_vel*self.dt)
-            label = 'Timesteps to collision [timesteps]'
-            format = '{:.1f}'
-        elif self.rt_plot[0] in ['subvol']:
-            colors = self.subvol_id
-            vmin = 0
-            vmax = self.n_of_subvols
-            label = 'Subvolume index [-]'
-            format = '{:d}'
-
-        fig, ax = geometry.mesh.plot_facet_boundaries(l_color = 'grey')
-
-        ax.set_box_aspect( np.ptp(geometry.bounds, axis = 0) )
-        ax.set_xlim(geometry.bounds[:, 0])
-        ax.set_ylim(geometry.bounds[:, 1])
-        ax.set_zlim(geometry.bounds[:, 2])
-
-        graph = ax.scatter(self.positions[:, 0],
-                           self.positions[:, 1],
-                           self.positions[:, 2],
-                           s    = 1            ,
-                           vmin = vmin         ,
-                           vmax = vmax         ,
-                           c    = colors       ,
-                           cmap = self.colormap)
-        
-        norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
-        cb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap = self.colormap),
-                     ax = ax,
-                     location = 'bottom',
-                     orientation = 'horizontal',
-                     fraction = 0.1,
-                     aspect = 30,
-                     shrink = 0.8,
-                     pad = -0.1,
-                     format = format)
-
-        figcolor = self.view.ax_style['figcolor']
-        facecolor = self.view.ax_style['facecolor']
-        linecolor = self.view.ax_style['axiscolor']
-
-        cb.set_label(label = label, size = 'small', color = linecolor)
-        cb.set_ticks(cb.get_ticks())
-        cb.set_ticklabels([format.format(i) for i in cb.get_ticks()], size = 'small', color = linecolor)
-
-        fig.patch.set_facecolor(figcolor)
-        ax.set_facecolor(figcolor)
-
-        ax.xaxis.line.set_color(linecolor)
-        ax.yaxis.line.set_color(linecolor)
-        ax.zaxis.line.set_color(linecolor)
-        ax.xaxis.label.set_color(linecolor)
-        ax.yaxis.label.set_color(linecolor)
-        ax.zaxis.label.set_color(linecolor)
-        cb.outline.set_edgecolor(linecolor)
-
-        ax.set_xticks(ax.get_xticks())
-        ax.set_yticks(ax.get_yticks())
-        ax.set_zticks(ax.get_zticks())
-
-        ax.set_xticklabels(ax.get_xticklabels(), fontdict = {'color':linecolor})
-        ax.set_yticklabels(ax.get_yticklabels(), fontdict = {'color':linecolor})
-        ax.set_zticklabels(ax.get_zticklabels(), fontdict = {'color':linecolor})
-
-        ###########
-        
-        # graph.set_animated(True)
-        
-        plt.tight_layout()
-
-        fig.canvas.draw()
-        fig.canvas.flush_events()
-
-        plt.show(block = False)
-
-        self.plot_images = [np.fromstring(fig.canvas.tostring_rgb(), dtype = np.uint8, sep = '').reshape(fig.canvas.get_width_height()[::-1]+(3,))]
-
-        plt.figure(fig.number)
-        plt.savefig(os.path.join(self.results_folder_name,'last_anim_frame.png'))
-
-        return graph, fig
-
-    def plot_real_time(self, phonon, property_plot = None, colormap = 'viridis'):
-        '''Updates data on the real time plot at the end of the timestep.'''
-        if property_plot == None:
-            property_plot = self.rt_plot[0]
-        
-        if colormap == None:
-            colormap = self.colormap
-        
-        if property_plot in ['T', 'temperature']:
-            colors = self.temperatures
-        elif property_plot in ['e', 'energy']:
-            T = self.subvol_temperature
-            dn = self.occupation - phonon.calculate_occupation(T.mean(), self.omega)
-            colors = self.hbar*self.omega*dn
-        elif property_plot in ['omega', 'angular_frequency', 'frequency']:
-            colors = self.omega
-        elif property_plot in ['n', 'occupation']:
-            colors = self.occupation
-        elif property_plot in ['qpoint']:
-            colors = self.modes[:, 0]
-        elif property_plot in ['branch']:
-            colors = self.modes[:, 1]
-        elif property_plot in ['ts_to_boundary']:
-            colors = self.n_timesteps
-        elif self.rt_plot[0] in ['subvol']:
-            colors = self.subvol_id
-        
-        # uṕdating points
-        self.rt_graph.set_offsets(self.positions[:, [0, 1]])
-        self.rt_graph.set_3d_properties(self.positions[:, 2], 'z')
-        # self.rt_graph.do_3d_projection(self.rt_fig._cachedRenderer)
-        # self.rt_graph._offsets3d = (self.positions[:,0], self.positions[:,1], self.positions[:,2])
-        
-        self.rt_graph.set_array(colors)
-
-        self.rt_fig.canvas.draw()
-        self.rt_fig.canvas.flush_events()
-
-        self.plot_images += [np.fromstring(self.rt_fig.canvas.tostring_rgb(), dtype = np.uint8, sep = '').reshape( self.rt_fig.canvas.get_width_height()[::-1]+(3,) ) ]
-
-        plt.figure(self.rt_fig.number)
-        plt.savefig(os.path.join(self.results_folder_name, 'last_anim_frame.png'))
-        
-        return
-
-    def save_plot_real_time(self):
-        if len(self.rt_plot) > 0:
-            plt.close(fig = self.rt_fig)
-            print('Saving animation...')
-            imageio.mimsave(os.path.join(self.results_folder_name,'simulation.gif'), self.plot_images, fps=10)
-            print('Saved!')
 
     def plot_figures(self, geometry, phonon, property_plot=['energy'], colormap = 'jet'):
         
