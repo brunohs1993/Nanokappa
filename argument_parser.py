@@ -25,7 +25,7 @@ def initialise_parser(debug_flag):
                         type = int,   nargs = '*' , help    = 'Which materials need to consider mass scattering. Default is none.')
     
     parser.add_argument('--particles'      , '-p' , default = ['pmps', 1],
-                                      nargs = 2   , help    = 'Number of particles. First argument is a string: "total" for total number, "pmps" for number per mode, per ' +
+                                      nargs = '*'   , help    = 'Number of particles. First argument is a string: "total" for total number, "pmps" for number per mode, per ' +
                                                               'subvolume, "pv" for particles per cubic angstrom. Second is the number.')
     parser.add_argument('--timestep'       , '-ts', default = [1],
                         type = float, nargs = 1   , help    = 'Timestep size in picoseconds')
@@ -79,10 +79,6 @@ def initialise_parser(debug_flag):
 
     ############## DEBUG OPTIONS ########################
 
-    parser.add_argument('--part_dist'      , '-pd', default = ['random_subvol'],
-                        type = str  , nargs = 1   , help    = [argparse.SUPPRESS, 'How to distribute particles. It can be used any combination of random/center _ domain/subvol, or input an external file ' +
-                                                                                  'of particle data. The file should have the same structure as particle_data.txt given in the results.'][int(debug_flag)])
-    
     parser.add_argument('--reference_temp' , '-rt', default = ['local'],
                                       nargs = 1   , help    = [argparse.SUPPRESS, 'Set reference temperature to be considered in the system, in Kelvin. Also accepts "local", so deltas are calculated in relation to local temperature.'][int(debug_flag)]) 
     

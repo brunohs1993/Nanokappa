@@ -56,6 +56,17 @@ class Population(Constants):
             self.particle_density = float(self.args.particles[1])
             self.N_p              = int(np.ceil(self.particle_density*geometry.volume))
             self.particles_pmps   = self.N_p/(phonon.number_of_active_modes*self.n_of_subvols)
+        else:
+            try:
+                data = np.loadtxt(self.args.particles[0], delimiter = ',', comments = '#', dtype = float)
+            except:
+                raise Exception('Wrong particle data file. Change the keyword or check whether the file exists.')
+            self.N_p              = data.shape[0]
+            del data
+            self.particles_pmps   = self.N_p/(phonon.number_of_active_modes*self.n_of_subvols)
+            self.particle_density = self.N_p/geometry.volume
+            
+            
         
         self.dt = float(self.args.timestep[0])   # ps
         self.t  = 0.0
@@ -157,23 +168,16 @@ class Population(Constants):
     def generate_positions(self, number_of_particles, mesh, key):
         '''Initialise positions of a given number of particles'''
         
-        if key == 'random':
-            positions = mesh.sample_volume(number_of_particles)
-            # in_mesh = mesh.closest_point(positions)[1] >= 0
-            in_mesh = mesh.contains_naive(positions)
-            positions = positions[in_mesh, :]
-            
-            while positions.shape[0]<number_of_particles:
-                new_positions = mesh.sample_volume(number_of_particles-positions.shape[0])
-                if new_positions.shape[0]>0:
-                    # in_mesh = mesh.closest_point(new_positions)[1] >= 0
-                    in_mesh = mesh.contains_naive(new_positions)
-                    new_positions = new_positions[in_mesh, :]
-                    positions = np.vstack((positions, new_positions))
-            
-        elif key == 'center':
-            center = mesh.center_mass
-            positions = np.ones( (number_of_particles, 3) )*center # Generate all points at the center of the bounding box, positions in angstrom
+        positions = mesh.sample_volume(number_of_particles)
+        in_mesh = mesh.contains_naive(positions)
+        positions = positions[in_mesh, :]
+        
+        while positions.shape[0]<number_of_particles:
+            new_positions = mesh.sample_volume(number_of_particles-positions.shape[0])
+            if new_positions.shape[0]>0:
+                in_mesh = mesh.contains_naive(new_positions)
+                new_positions = new_positions[in_mesh, :]
+                positions = np.vstack((positions, new_positions))
             
         return positions
 
@@ -187,73 +191,11 @@ class Population(Constants):
             message = "{0:{3}d} of {1:{3}d} particles - {2:s}   0%".format(0, self.N_p, " "*bw, nchar)
             sys.stdout.write(message)
             sys.stdout.flush()
-        
-        if self.args.part_dist[0] in ['random_domain', 'center_domain', 'random_subvol', 'center_subvol']:
+
+        if self.args.particles[0] in ['total', 'pv', 'pmps']:
             # initialising positions one mode at a time (slower but uses less memory)
-            self.positions = np.zeros((0, 3))
-
-            if self.args.part_dist[0] == 'random_domain':
-                number_of_particles = self.N_p
-                self.positions = self.generate_positions(number_of_particles, geometry.mesh, key = 'random')
-
-            elif self.args.part_dist[0] == 'center_domain':
-                number_of_particles = self.N_p
-                self.positions = self.generate_positions(number_of_particles, geometry.mesh, key = 'center')
-            
-            elif self.args.part_dist[0] == 'random_subvol':
-                
-                counter = np.zeros(self.n_of_subvols, dtype = int)
-
-                n = self.N_p*geometry.subvol_volume/geometry.subvol_volume.sum() # number of particles for each subvolume
-                n = np.ceil(n).astype(int)
-
-                x = [np.zeros((0, 3)) for _ in range(self.n_of_subvols)]
-
-                while np.any(counter < n):
-
-                    x_new = self.generate_positions(min(n.sum() - counter.sum(), int(1e4)), geometry.mesh, key = 'random')
-
-                    sv_id = geometry.subvol_classifier.predict(x_new)
-
-                    for i in range(self.n_of_subvols):
-                        N = n[i] - counter[i]
-                        
-                        ind = np.nonzero(sv_id == i)[0]
-                        ind = ind[:N]
-
-                        x[i] = np.vstack((x[i], x_new[ind, :]))
-
-                        counter[i] = x[i].shape[0]
-                    
-                    if sys.stdout.isatty():
-                        # update the bar
-                        bw = os.get_terminal_size(sys.stdout.fileno()).columns - (2*nchar + 24)
-                        l = int(np.floor(bw*counter.sum()/self.N_p))
-                        message = "\r{0:{3}d} of {1:{3}d} particles - {2:s} {4:3.0f}%".format(counter.sum(), self.N_p, "\u2588"*l+" "*(bw-l), nchar, 100*counter.sum()/self.N_p)
-                        sys.stdout.write(message)
-                        sys.stdout.flush()
-                
-                sys.stdout.write("\n")
-                self.positions = np.vstack(x)[:self.N_p, :]
-
-            elif self.args.part_dist[0] == 'center_subvol':
-                counter = 0
-                
-                indexes = np.ones(self.n_of_subvols).astype(bool)
-                
-                filled_volume = geometry.subvol_volume[indexes].sum()
-
-                for i in range(self.n_of_subvols):
-                    number_of_particles = int(np.ceil(self.N_p*(geometry.subvol_volume[i]/filled_volume)))
-                    
-                    if counter + number_of_particles > self.N_p:
-                        number_of_particles = self.N_p - counter
-                        counter = self.N_p
-                    else:
-                        counter += number_of_particles
-
-                    new_positions = self.generate_positions(number_of_particles, geometry.subvol_meshes[i], key = 'center')
-                    self.positions = np.vstack((self.positions, new_positions))
+            number_of_particles = self.N_p
+            self.positions = self.generate_positions(number_of_particles, geometry.mesh, key = 'random')
 
             # assigning properties from Phonon
             self.modes = self.initialise_modes(phonon) # getting modes
@@ -270,7 +212,7 @@ class Population(Constants):
             self.calculate_energy(geometry, phonon)
         else:
             try:
-                data = np.loadtxt(self.args.part_dist[0], delimiter = ',', comments = '#', dtype = float)
+                data = np.loadtxt(self.args.particles[0], delimiter = ',', comments = '#', dtype = float)
             except:
                 raise Exception('Wrong particle data file. Change the keyword or check whether the file exists.')
             
