@@ -85,18 +85,12 @@ def initialise_parser(debug_flag):
                         type = str  , nargs = 1   , help    = [argparse.SUPPRESS, 'How to distribute particles. It can be used any combination of random/center _ domain/subvol, or input an external file ' +
                                                                                   'of particle data. The file should have the same structure as particle_data.txt given in the results.'][int(debug_flag)])
     
-    parser.add_argument('--subvol_material', '-sm', default = [],
-                        type = int  , nargs = '*' , help    = [argparse.SUPPRESS, 'Material index of each subvolume, according to the order given at -pf and -hf.'][int(debug_flag)])
-    
     parser.add_argument('--reference_temp' , '-rt', default = ['local'],
                                       nargs = 1   , help    = [argparse.SUPPRESS, 'Set reference temperature to be considered in the system, in Kelvin. Also accepts "local", so deltas are calculated in relation to local temperature.'][int(debug_flag)]) 
     
     parser.add_argument('--reservoir_gen' , '-gn' , default = ['constant'], choices = ['fixed_rate', 'one_to_one', 'constant'],
                         type = str  , nargs = '*' , help    = [argparse.SUPPRESS, 'Set the type of generation of particles in the reservoir. "fixed_rate" means the generation is independent from the particles leaving the domain. '+
                                                               '"one_to_one" means that a particle will be generated only when a particle leaves the domain (one leaves, one enters).'][int(debug_flag)])
-    parser.add_argument('--path_points'  , '-pp'  , default = [],
-                                      nargs = '*' , help    = [argparse.SUPPRESS, 'Set the points where the path to calculate kappa should go through. Declared the same way as --bound_pos'][int(debug_flag)])
-
     parser.add_argument('--energy_normal' , '-en' , default = ['mean'],
                         type = str  , nargs = 1   , help    = [argparse.SUPPRESS, 'Set the energy normalisation in subvolume. "fixed" is divided by the expected number of particles in the subvolume (standard).'+
                                                              ' "mean" is the aritmetic mean.'][int(debug_flag)])

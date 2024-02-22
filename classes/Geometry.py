@@ -52,8 +52,6 @@ class Geometry:
         
         self.folder          = args.results_folder
         
-        self.path_points     = np.array(self.args.path_points[1:]).astype(float).reshape(-1, 3)
-
         # Processing mesh
         self.tol_decimals = 1
 
@@ -66,8 +64,6 @@ class Geometry:
         self.plot_mesh_bc()
         self.set_subvolumes()          # define subvolumes and save their meshes and properties
         
-        self.get_path()
-
         print('Geometry processing done!')
 
     def load_geo_file(self, shape):
@@ -1066,126 +1062,6 @@ class Geometry:
         plt.savefig(os.path.join(self.folder, 'subvol_connections.png'))
         
         plt.close(fig)
-
-    def get_path(self):
-        if len(self.args.path_points) > 0:
-            if self.args.path_points[0] == 'relative':
-                self.path_points = self.scale_positions(self.path_points, inv = True)
-            elif self.args.path_points[0] == 'absolute':
-                pass
-            else:
-                self.path_points = None
-                raise Warning('Wrong --path_points keyword. Path will be ignored.')
-        else:
-            self.path_points = None
-        
-        if self.path_points is not None:
-            self.path_kappa = self.snap_path(self.path_points)
-
-    def snap_path(self, points):
-
-        sv_points = self.subvol_classifier.predict(points)
-        
-        if np.unique(sv_points).shape[0] == 1:
-            raise Warning('Invalid path points. Path conductivity will be turned off.')
-        else:
-            n_paths = sv_points.shape[0] - 1
-
-            all_paths = [np.array([sv_points[0]])]
-
-            for i_path in range(n_paths):
-                sv_start = sv_points[i_path    ] # starting subvolume
-                sv_end   = sv_points[i_path + 1] #   ending subvolume
-
-                path = np.array([sv_start, sv_end])
-
-                total_v = self.subvol_center[sv_end, :] - self.subvol_center[sv_start, :]
-                with np.errstate(divide = 'ignore', invalid = 'ignore', over = 'ignore'):
-                    total_v /=  np.linalg.norm(total_v)
-
-                local_start = sv_start
-                local_end   = sv_end
-                
-                start = time.time()
-                warn_flag = True
-                while local_start != local_end: # while both points do not meet
-
-                    if time.time() - start > 10 and warn_flag:
-                        print('Path is taking too long to be found. Please try again with another points.')
-                        warn_flag = False
-
-                    v = self.subvol_center[local_end, :] - self.subvol_center[local_start, :]
-                    v /=  np.linalg.norm(v)
-
-                    psbl_start = np.any(self.subvol_connections == local_start, axis = 1).nonzero()[0] # possible connections
-                    psbl_start = self.subvol_connections[psbl_start, :][self.subvol_connections[psbl_start, :] != local_start]
-
-                    if psbl_start.shape[0] > 1:
-                        i = (path == local_start).nonzero()[0][-1] # index in path where local_start is
-                        psbl_start = np.delete(psbl_start, psbl_start == path[i - 1]) # remove possible connections that were already done
-
-                    psbl_end = np.any(self.subvol_connections == local_end, axis = 1).nonzero()[0] # possible connections
-                    psbl_end = self.subvol_connections[psbl_end, :][self.subvol_connections[psbl_end, :] != local_end]
-
-                    if psbl_end.shape[0] > 1:
-                        i = (path == local_end).nonzero()[0][-1] # index in path where local_end is
-                        psbl_end = np.delete(psbl_end, psbl_end == path[i - 1]) # remove possible connections that were already done
-
-                    local_v_start = self.subvol_center[psbl_start, :] - self.subvol_center[local_start, :]
-                    local_v_start /=  np.linalg.norm(local_v_start)
-                    
-                    local_v_end = self.subvol_center[psbl_end, :] - self.subvol_center[local_end, :]
-                    local_v_end /=  np.linalg.norm(local_v_end)
-
-                    dot_start = (local_v_start* v).sum(axis = 1)
-                    dot_end   = (local_v_end  *-v).sum(axis = 1)
-
-                    i_start = (dot_start == dot_start.max()).nonzero()[0]
-                    
-                    if i_start.shape[0] > 1:
-                        total_dot_start = (local_v_start[i_start, :]* total_v).sum(axis = 1)
-                        i_start = i_start[total_dot_start == total_dot_start.max()][0]
-                    else:
-                        i_start = i_start[0]
-                    best_start = psbl_start[i_start]
-                
-                    i_end = (dot_end == dot_end.max()).nonzero()[0]
-                    if i_end.shape[0] > 1:
-                        total_dot_end = (local_v_end[i_end, :]*-total_v).sum(axis = 1)
-                        i_end = i_end[total_dot_end == total_dot_end.max()][0]
-                    else:
-                        i_end = i_end[0]
-                    best_end = psbl_end[i_end]
-
-                    if dot_start.max() >= dot_end.max():
-                        i = (path == local_start).nonzero()[0][-1]
-                        if best_start != local_end:
-                            if path[i-1] != best_start or local_start == sv_points[i_start]:
-                                path = np.insert(path, i+1, best_start)
-                        local_start = best_start
-                    else:
-                        i = (path == local_end).nonzero()[0][-1]
-                        if best_end != local_start:
-                            if path[i-1] != best_end or local_end == sv_points[i_end]:
-                                path = np.insert(path, i, best_end)
-                        local_end = best_end
-                
-                all_paths.append(path)
-            
-            all_paths = [all_paths[i][1:] if i > 0 else all_paths[i] for i in range(len(all_paths))]
-            path = np.concatenate(all_paths)
-            
-            fig, ax = self.plot_facet_boundaries(self.mesh)
-            ax.plot(self.subvol_center[path, 0],
-                    self.subvol_center[path, 1],
-                    self.subvol_center[path, 2], '--')
-            
-            for i in path:
-                ax.text(self.subvol_center[i, 0], self.subvol_center[i, 1], self.subvol_center[i, 2], '{:d}'.format(i))
-            fig.savefig(os.path.join(self.folder, 'path_kappa.png'))
-            plt.close(fig)
-
-            return path
 
     def plot_triangulation(self, mesh = None, fig = None, ax = None, l_color = 'k', linestyle = '-', dpi = 200):
         if mesh is None:
