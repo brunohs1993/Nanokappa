@@ -157,8 +157,7 @@ class Visualisation(Constants):
         del(data)
 
         # mean and stdev
-        self.n_mean = int(self.args.n_mean[0])
-        N = self.n_mean
+        N = 100
 
         self.mean_total_en = self.total_en[-N:].mean(axis = 0)
         self.mean_en_res   = self.en_res[-N:, :].mean(axis = 0)
@@ -481,7 +480,7 @@ class Visualisation(Constants):
                 ax['right'].errorbar(prof_x, mean_prof, yerr = std_prof, **prof_dict)
                 ax['bottom'].plot(conv_x, data_total, **conv_dict)
 
-                N = int(self.args.n_mean[0])
+                N = 100
                 rescale = np.arange(1, min(N, data_total.shape[0])+1)/N
 
                 rol_mean = np.convolve(data_total                , np.ones(N)/N, mode = 'full')[:-N+1]

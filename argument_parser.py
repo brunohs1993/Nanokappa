@@ -66,8 +66,6 @@ def initialise_parser(debug_flag):
                         type = str  , nargs = 1   , help    = 'Set matplotlib colormap to be used on all plots. Standard is jet.')
     parser.add_argument('--theme'         , '-th' , default = ['white'], choices = ['white', 'light', 'dark'],
                         type = str  , nargs = 1   , help    = 'Set theme color for all plots.')
-    parser.add_argument('--n_mean'        , '-nm' , default  = [100], 
-                        type = int  , nargs = 1   , help    = 'The number of datapoints to consider when calculating mean and stdev values. Each datapoint = 10 iterations. Default is 100.')
 
     parser.add_argument('--conv_crit'     , '-cc' , default = [0, 1],
                         type = float, nargs = 2   , help    = 'Value of convergence criteria and number of checks to keep it under criteria to consider convergence.')
