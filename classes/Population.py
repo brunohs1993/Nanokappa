@@ -803,10 +803,6 @@ class Population(Constants):
                         self.creation_rate[ii_f, unique_out[mu, 3].astype(int), unique_out[mu, 4].astype(int)] -= specular_D[ii_f, in_q[corr_indices][repeated], in_j[corr_indices][repeated]].sum()
 
             self.find_degeneracies(phonon)
-            if self.scat_model in ['k', 'wavevector', 'wave_vector']:
-
-                for i in range(self.degeneracies.shape[0]):
-                    self.creation_rate[:, self.degeneracies[i, 0], self.degeneracies[i, [1, 2]]] = self.creation_rate[:, self.degeneracies[i, 0], self.degeneracies[i, [1, 2]]].mean(axis = -1, keepdims = True)
 
             self.creation_rate = np.around(self.creation_rate, decimals = 10) # DEBUG
 
@@ -835,14 +831,6 @@ class Population(Constants):
 
             out_spec_modes = self.specular_function(a).astype(int)
             
-            if self.scat_model in ['k', 'wavevector', 'wave_vector']: # TESTE TESTE TESTE TESTE TESTE TESTE TESTE TESTE TESTE TESTE TESTE TESTE 
-                # Distributing energy equally among degenerate modes
-                deg_indices = self.degen_index[out_spec_modes[:, 0], out_spec_modes[:, 1]].astype(int)
-
-                indexes_change = np.logical_and(deg_indices > -1, np.random.rand(deg_indices.shape[0]) >= 0.5) # random assignment of any branch with equal probability
-                
-                out_spec_modes[indexes_change, 1] = self.degeneracies[deg_indices[indexes_change], 2]
-
             out_modes[indexes_spec, :] = out_spec_modes
 
         if np.any(indexes_diff):
@@ -916,8 +904,6 @@ class Population(Constants):
 
     def find_specular_correspondences(self, geo, phonon):
         
-        self.scat_model = self.args.bound_scat[0]
-
         facets = self.rough_facets
         normals = -np.round(geo.facets_normal[facets, :], decimals = 10)
         normals, inv_normals = np.unique(normals, axis = 0, return_inverse = True)
@@ -930,403 +916,218 @@ class Population(Constants):
 
         correspondent_modes = np.zeros((0, 7))
 
-        if self.scat_model in ['k', 'wavevector', 'wave_vector']:
-            tol = phonon.q_to_k(np.absolute(1/(2*phonon.data_mesh)))
+        k_grid = phonon.q_to_k(np.absolute(1/(2*phonon.data_mesh))) # size of the grid in each direction
 
-            near_k_func = NearestNDInterpolator(k, np.arange(phonon.number_of_qpoints)) # nearest interpolator function on K space
+        delta_omega = np.sum((phonon.group_vel*k_grid)**2, axis = 2)**0.5 # the acceptable variation of omega from the central value for each mode
+
+        for i_n, n in enumerate(normals):
+            gc.collect()
+            v_dot_n = np.sum(v*n, axis = 2) 
+            s_in  = v_dot_n < 0                      # modes coming to the facet
+            s_out = v_dot_n > 0                      # available modes going out of the facet
+
+            in_modes = np.vstack(s_in.nonzero()).T
+            out_modes = np.vstack(s_out.nonzero()).T
+            del s_in, s_out
             
-            for i_n, n in enumerate(normals):
-                v_dot_n = np.sum(v*n, axis = 2) 
-                s_in  = v_dot_n < 0                      # modes coming to the facet
-                s_out = v_dot_n > 0                      # available modes going out of the facet
+            omega_in  = phonon.omega[ in_modes[:, 0],  in_modes[:, 1]]
+            omega_out = phonon.omega[out_modes[:, 0], out_modes[:, 1]]
 
-                active_k = np.any(s_in, axis = 1) # bool, (Q,) - wavevectors that can arrive to the facet
+            delta_omega_in  = delta_omega[ in_modes[:, 0],  in_modes[:, 1]]
+            delta_omega_out = delta_omega[out_modes[:, 0], out_modes[:, 1]]
 
-                k_try   = k[active_k, :] - 2*n*np.sum(k[active_k, :]*n, axis = 1, keepdims = True) # reflect them specularly
-                _, disp = phonon.find_min_k(k_try, return_disp = True)                                             # check if thay stay in the FBZ
+            v_in = phonon.group_vel[in_modes[:, 0], in_modes[:, 1], :]
+            v_in = v_in - 2*n*(np.sum(v_in*n, axis = 1, keepdims = True))
 
-                active_k[active_k] = np.all(disp == 0, axis = 1) # normal processes can be specular
-                
-                # recalculating reflections of the ones that remained active (redundant but safe)
-                k_try = k[active_k, :] - 2*n*np.sum(k[active_k, :]*n, axis = 1, keepdims = True) # (Qa, 3)
+            v_out = phonon.group_vel[out_modes[:, 0], out_modes[:, 1], :]
 
-                # checking k availability
-                q_near = near_k_func(k_try)             # nearest qpoint to k_try
-                k_near = phonon.wavevectors[q_near, :]  # get the nearest k vector in relation to k_try
-                k_dist = np.absolute(k_try - k_near)    # calculate the distance between the two in each dimension
-                
-                # it should be a wavevector with at least one valid velocity and within grid tolerance
-                in_tol = np.logical_and(np.any(s_out[q_near, :], axis = 1), np.all(k_dist < tol, axis = 1))
-                
-                active_k[active_k] = in_tol # update the active to only those within tolerance
-                
-                # recalculating reflections of the ones that remained active (redundant but safe)
-                k_try = k[active_k, :] - 2*n*np.sum(k[active_k, :]*n, axis = 1, keepdims = True) # (Qa, 3)
-                
-                out_q = near_k_func(k_try)                            # out qpoints (Qa,)
-                in_q  = np.arange(phonon.number_of_qpoints)[active_k] # in  qpoints (Qa,)
+            v_in_norm = np.linalg.norm(v_in, axis = 1)
+            v_out_norm = np.linalg.norm(v_out, axis = 1)
 
-                is_in = s_in[in_q, :]
-                is_out = np.transpose(np.expand_dims(s_out[out_q, :], 0), (2, 1, 0))
-
-                valid_v = np.logical_and(is_in, is_out)
-
-                # valid reflections only with the same reflected velocity
-                active_k[active_k] = np.any(valid_v, axis = (0,2))
-
-                valid_v = valid_v[:, np.any(valid_v, axis = (0, 2)), :]
-
-                # recalculating reflections of the ones that remained active (redundant but safe)
-                k_try = k[active_k, :] - 2*n*np.sum(k[active_k, :]*n, axis = 1, keepdims = True) # (Qa, 3)
-                out_q = near_k_func(k_try)                            # out qpoints (Qa,)
-                in_q  = np.arange(phonon.number_of_qpoints)[active_k] # in  qpoints (Qa,)
-
-                in_delta  = np.sum(np.absolute(v[ in_q, :, :])*np.expand_dims(tol, (0, 1)), axis = 2) # (Qa, J)
-                out_delta = np.sum(np.absolute(v[out_q, :, :])*np.expand_dims(tol, (0, 1)), axis = 2) # (Qa, J)
-
-                in_omega  = phonon.omega[ in_q, :]
-                out_omega = phonon.omega[out_q, :]
-                
-                in_uplim    = in_omega  + in_delta
-                in_downlim  = in_omega  - in_delta
-
-                out_uplim   = out_omega + out_delta
-                out_downlim = out_omega - out_delta
-
-                out_uplim   = np.transpose(np.expand_dims(out_uplim  , 0), axes = (2, 1, 0)) # (J, Qa, 1)
-                out_downlim = np.transpose(np.expand_dims(out_downlim, 0), axes = (2, 1, 0)) # (J, Qa, 1)
-
-                overlap_range = np.where(in_uplim < out_uplim, in_uplim, out_uplim) - np.where(in_downlim > out_downlim, in_downlim, out_downlim) # (J, Qa, J)
-                overlap = overlap_range > 0
-                
-                omega_diff = np.absolute((in_omega - np.transpose(np.expand_dims(out_omega  , 0), axes = (2, 1, 0)))/in_omega) # (J, Qa, J)
-                omega_diff = np.where(overlap, omega_diff, np.inf) # (J, Qa, J)
-
-                # valid_corresp = np.logical_and(overlap, same_v) # correspondences with valid velocities and frequency intervals
-                valid_corresp = np.logical_and(overlap, valid_v) # correspondences with valid velocities and frequency intervals
-
-                valid_k = np.any(valid_corresp, axis = (0, 2))
-
-                active_k[active_k] = valid_k
-
-                valid_corresp = valid_corresp[:, valid_k, :]
-
-                omega_diff = omega_diff[:, valid_k, :]
-
-                omega_diff = np.where(valid_corresp, omega_diff, np.inf) # updating valid differences
-
-                min_diff = np.amin(omega_diff, axis = 0) # (Qa, J) - minimum relative omega differences
-
-                min_diff_branch = np.where(np.any(valid_corresp, axis = 0), np.argmax(omega_diff == min_diff, axis = 0), -1).astype(int)
-
-                k_try = k[active_k, :] - 2*n*np.sum(k[active_k, :]*n, axis = 1, keepdims = True) # (Qa, 3)
-                
-                in_q = np.arange(phonon.number_of_qpoints)[active_k] # in qpoints
-                out_q = near_k_func(k_try)                           # out qpoints (Qa,)
-
-                i_f = inv_normals == i_n
-
-                for i, q in enumerate(in_q):
-                    for j in range(phonon.number_of_branches):
-                        if min_diff_branch[i, j] == -1:
-                            true_spec[i_f, q, j] = False
-                        else:
-                            true_spec[i_f, q, j] = True
-                
-                i_q_in, spec_j_in = np.nonzero(min_diff_branch != -1) # specular active in q index, specular in branch
-                spec_q_in = in_q[i_q_in]                              # specular in q (true q index)
-
-                spec_q_out = out_q[i_q_in]                            # specular out q
-                spec_j_out = min_diff_branch[i_q_in, spec_j_in]       # specular out j
-
-                n_ts = i_q_in.shape[0]
-
-                fig, ax = plt.subplots(nrows = 3, ncols = 3, figsize = (15, 15), dpi = 300, sharex = 'row', sharey = 'row')
-                
-                b = np.eye(3)
-                is_normal = 1 - np.sum(b*np.absolute(n), axis = 1) < 1e-3
-
-                if np.any(is_normal):
-                    b = b[~is_normal, :]
-
-                # if b1 is parallel to b1
-                b1 = b[0, :]
-                b1 = b1 - n*np.sum(n*b1)  # make b1 orthogonal to the normal
-                b1 = b1/np.sum(b1**2)**0.5          # normalise b1
-
-                b2 = np.cross(n, b1)           # generate b2 = n x b1
-                
-                k_b1_in = np.sum(phonon.wavevectors[spec_q_in, :]*b1, axis = 1)
-                k_b1_out = np.sum(phonon.wavevectors[spec_q_out, :]*b1, axis = 1)
-                v_b1_in = np.sum(phonon.group_vel[spec_q_in, spec_j_in, :]*b1, axis = 1)
-                v_b1_out = np.sum(phonon.group_vel[spec_q_out, spec_j_out, :]*b1, axis = 1)
-
-                k_b2_in = np.sum(phonon.wavevectors[spec_q_in, :]*b2, axis = 1)
-                k_b2_out = np.sum(phonon.wavevectors[spec_q_out, :]*b2, axis = 1)
-                v_b2_in = np.sum(phonon.group_vel[spec_q_in, spec_j_in, :]*b2, axis = 1)
-                v_b2_out = np.sum(phonon.group_vel[spec_q_out, spec_j_out, :]*b2, axis = 1)
-
-                k_n_in = np.sum(phonon.wavevectors[spec_q_in, :]*n, axis = 1)
-                k_n_out = np.sum(phonon.wavevectors[spec_q_out, :]*n, axis = 1)
-                v_n_in = np.sum(phonon.group_vel[spec_q_in, spec_j_in, :]*n, axis = 1)
-                v_n_out = np.sum(phonon.group_vel[spec_q_out, spec_j_out, :]*n, axis = 1)
-
-                omega_in  = phonon.omega[spec_q_in , spec_j_in ]
-                omega_out = phonon.omega[spec_q_out, spec_j_out]
-
-                ax[0, 0].scatter(k_n_in, k_n_out, s = 1)
-                ax[1, 0].scatter(v_n_in, v_n_out, s = 1)
-
-                ax[0, 1].scatter(k_b1_in, k_b1_out, s = 1)
-                ax[1, 1].scatter(v_b1_in, v_b1_out, s = 1)
-
-                ax[0, 2].scatter(k_b2_in, k_b2_out, s = 1)
-                ax[1, 2].scatter(v_b2_in, v_b2_out, s = 1)
-
-                ax[2, 1].scatter(omega_in, omega_out, s = 1)
-
-                v_list = [r'$\vec{{n}}$', r'$\vec{{b}}_{{1}}$', r'$\vec{{b}}_{{2}}$']
-
-                for i in range(3):
-                    ax[0, i].set_xlabel(r'$\vec{{k}}_{{in}}\cdot$' + v_list[i])
-                    ax[0, i].set_ylabel(r'$\vec{{k}}_{{out}}\cdot$' + v_list[i])
-                    ax[1, i].set_xlabel(r'$\vec{{v}}_{{in}}\cdot$' + v_list[i])
-                    ax[1, i].set_ylabel(r'$\vec{{v}}_{{out}}\cdot$' + v_list[i])
-                
-                ax[2, 1].set_xlabel('$\omega_{in}$')
-                ax[2, 1].set_ylabel('$\omega_{out}$')
-
-                ax[2, 0].axis('off')
-                ax[2, 2].axis('off')
-                
-                for a in ax.ravel():
-                    a.yaxis.set_tick_params(labelleft=True)
-
-                plt.suptitle('Normal = <{:.2f}, {:.2f}, {:.2f}>. Angles = {:.2f}, {:.2f}, {:.2f}'.format(n[0], n[1], n[2], 
-                                                                                                    np.arccos(n[0])*180/np.pi,
-                                                                                                    np.arccos(n[1])*180/np.pi,
-                                                                                                    np.arccos(n[2])*180/np.pi))
-
-                plt.tight_layout()
-                plt.savefig(os.path.join(self.results_folder_name, f'spec{n}.png'))
-                plt.close(fig)
-
-                correspondent_modes = np.vstack((correspondent_modes, np.vstack((np.ones(n_ts)*n.reshape(-1, 1), spec_q_in, spec_j_in, spec_q_out, spec_j_out)).T))
-        
-        elif self.scat_model in ['v', 'vel', 'velocity', 'groupvel', 'group_vel']:
+            crit = 1e-3
             
-            k_grid = phonon.q_to_k(np.absolute(1/(2*phonon.data_mesh))) # size of the grid in each direction
+            # sorted vx
+            sorted_i_out = np.argsort(v_out[:, 0])
+            sorted_vx_out = v_out[sorted_i_out, 0]
+            
+            sorted_i_in = np.argsort(v_in[:, 0])
+            sorted_vx_in = v_in[sorted_i_in, 0]
 
-            delta_omega = np.sum((phonon.group_vel*k_grid)**2, axis = 2)**0.5 # the acceptable variation of omega from the central value for each mode
+            sorted_norm_out = v_out_norm[sorted_i_out]
+            sorted_norm_in = v_in_norm[sorted_i_in]
 
-            for i_n, n in enumerate(normals):
-                gc.collect()
-                v_dot_n = np.sum(v*n, axis = 2) 
-                s_in  = v_dot_n < 0                      # modes coming to the facet
-                s_out = v_dot_n > 0                      # available modes going out of the facet
+            right_i = np.searchsorted(sorted_vx_out, sorted_vx_in, side = 'right')
+            # going to the right
+            far_right = right_i == sorted_vx_out.shape[0]
 
-                in_modes = np.vstack(s_in.nonzero()).T
-                out_modes = np.vstack(s_out.nonzero()).T
-                del s_in, s_out
+            norm = np.fmax(sorted_norm_out[right_i[~far_right]], sorted_norm_in[~far_right])
+
+            far_right[~far_right] = (sorted_vx_out[right_i[~far_right]] - sorted_vx_in[~far_right])/norm > crit
+            done = np.copy(far_right)
+            while not np.all(done):
+                done[~done] = right_i[~done] == sorted_vx_out.shape[0]-1 # check the ones not done are at the border and mark them as done
+
+                norm = np.fmax(sorted_norm_out[right_i[~done] + 1], sorted_norm_in[~done])
                 
-                omega_in  = phonon.omega[ in_modes[:, 0],  in_modes[:, 1]]
-                omega_out = phonon.omega[out_modes[:, 0], out_modes[:, 1]]
-
-                delta_omega_in  = delta_omega[ in_modes[:, 0],  in_modes[:, 1]]
-                delta_omega_out = delta_omega[out_modes[:, 0], out_modes[:, 1]]
-
-                v_in = phonon.group_vel[in_modes[:, 0], in_modes[:, 1], :]
-                v_in = v_in - 2*n*(np.sum(v_in*n, axis = 1, keepdims = True))
-
-                v_out = phonon.group_vel[out_modes[:, 0], out_modes[:, 1], :]
-
-                v_in_norm = np.linalg.norm(v_in, axis = 1)
-                v_out_norm = np.linalg.norm(v_out, axis = 1)
-
-                crit = 1e-3
+                take_step = (sorted_vx_out[right_i[~done] + 1] - sorted_vx_in[~done])/norm < crit # check if the ones not done can take a step
                 
-                # sorted vx
-                sorted_i_out = np.argsort(v_out[:, 0])
-                sorted_vx_out = v_out[sorted_i_out, 0]
+                ind = (~done).nonzero()[0][take_step] # indices of the ones that will walk
+
+                done[~done] = ~take_step # the ones that won't walk are done
+
+                right_i[ind] += 1
+            
+            left_i = np.searchsorted(sorted_vx_out, sorted_vx_in, side = 'left')-1
+            # going to the left
+            far_left = left_i == -1
+
+            norm = np.fmax(sorted_norm_out[left_i[~far_left]-1], sorted_norm_in[~far_left])
+
+            far_left[~far_left] = (sorted_vx_in[~far_left] - sorted_vx_out[left_i[~far_left]])/norm > crit
+            done = np.copy(far_left)
+            while not np.all(done):
+                done[~done] = left_i[~done] == 0 # check the ones not done are at the border and mark them as done
+
+                norm = np.fmax(sorted_norm_out[left_i[~done]-1], sorted_norm_in[~done])
                 
-                sorted_i_in = np.argsort(v_in[:, 0])
-                sorted_vx_in = v_in[sorted_i_in, 0]
-
-                sorted_norm_out = v_out_norm[sorted_i_out]
-                sorted_norm_in = v_in_norm[sorted_i_in]
-
-                right_i = np.searchsorted(sorted_vx_out, sorted_vx_in, side = 'right')
-                # going to the right
-                far_right = right_i == sorted_vx_out.shape[0]
-
-                norm = np.fmax(sorted_norm_out[right_i[~far_right]], sorted_norm_in[~far_right])
-
-                far_right[~far_right] = (sorted_vx_out[right_i[~far_right]] - sorted_vx_in[~far_right])/norm > crit
-                done = np.copy(far_right)
-                while not np.all(done):
-                    done[~done] = right_i[~done] == sorted_vx_out.shape[0]-1 # check the ones not done are at the border and mark them as done
-
-                    norm = np.fmax(sorted_norm_out[right_i[~done] + 1], sorted_norm_in[~done])
-                    
-                    take_step = (sorted_vx_out[right_i[~done] + 1] - sorted_vx_in[~done])/norm < crit # check if the ones not done can take a step
-                    
-                    ind = (~done).nonzero()[0][take_step] # indices of the ones that will walk
-
-                    done[~done] = ~take_step # the ones that won't walk are done
-
-                    right_i[ind] += 1
+                take_step = (sorted_vx_in[~done] - sorted_vx_out[left_i[~done] - 1])/norm < crit # check if the ones not done can take a step
                 
-                left_i = np.searchsorted(sorted_vx_out, sorted_vx_in, side = 'left')-1
-                # going to the left
-                far_left = left_i == -1
+                ind = (~done).nonzero()[0][take_step] # indices of the ones that will walk
 
-                norm = np.fmax(sorted_norm_out[left_i[~far_left]-1], sorted_norm_in[~far_left])
+                done[~done] = ~take_step # the ones that won't walk are done
 
-                far_left[~far_left] = (sorted_vx_in[~far_left] - sorted_vx_out[left_i[~far_left]])/norm > crit
-                done = np.copy(far_left)
-                while not np.all(done):
-                    done[~done] = left_i[~done] == 0 # check the ones not done are at the border and mark them as done
+                left_i[ind] -= 1
 
-                    norm = np.fmax(sorted_norm_out[left_i[~done]-1], sorted_norm_in[~done])
-                    
-                    take_step = (sorted_vx_in[~done] - sorted_vx_out[left_i[~done] - 1])/norm < crit # check if the ones not done can take a step
-                    
-                    ind = (~done).nonzero()[0][take_step] # indices of the ones that will walk
+            # saving the possible reflections in vx
+            right_i[far_right] -= 1
+            left_i[far_left] += 1
+            
+            L = right_i - left_i + 1 # how many possible reflections for each incoming mode
+            
+            possible_reflections = np.zeros((L.sum(), 2), dtype = int) # initialise possible reflections array
+            N = 0 # initialise position
+            for i in range(sorted_vx_in.shape[0]): # for each SORTED vx_in
+                if L[i] > 0:
+                    possible_reflections[N:N+L[i], 0] = sorted_i_in[i]
+                    possible_reflections[N:N+L[i], 1] = sorted_i_out[left_i[i]:right_i[i]+1]
+                    N += L[i]
+            
+            ref_norm = np.fmax(v_in_norm[possible_reflections[:, 0]], v_out_norm[possible_reflections[:, 1]])
+            # DIRECTION Y
+            diff = np.absolute(v_in[possible_reflections[:, 0], 1] - v_out[possible_reflections[:, 1], 1])
+            possible_reflections = possible_reflections[diff/ref_norm < crit, :]
+            ref_norm = ref_norm[diff/ref_norm < crit]
+            
+            # DIRECTION Z
+            diff = np.absolute(v_in[possible_reflections[:, 0], 2] - v_out[possible_reflections[:, 1], 2])
+            possible_reflections = possible_reflections[diff/ref_norm < crit, :]
 
-                    done[~done] = ~take_step # the ones that won't walk are done
+            diff = np.absolute(omega_in[possible_reflections[:, 0]] - omega_out[possible_reflections[:, 1]])
+            delta = delta_omega_in[possible_reflections[:, 0]] + delta_omega_out[possible_reflections[:, 1]]
 
-                    left_i[ind] -= 1
+            possible_reflections = possible_reflections[diff < delta, :]
 
-                # saving the possible reflections in vx
-                right_i[far_right] -= 1
-                left_i[far_left] += 1
-                
-                L = right_i - left_i + 1 # how many possible reflections for each incoming mode
-                
-                possible_reflections = np.zeros((L.sum(), 2), dtype = int) # initialise possible reflections array
-                N = 0 # initialise position
-                for i in range(sorted_vx_in.shape[0]): # for each SORTED vx_in
-                    if L[i] > 0:
-                        possible_reflections[N:N+L[i], 0] = sorted_i_in[i]
-                        possible_reflections[N:N+L[i], 1] = sorted_i_out[left_i[i]:right_i[i]+1]
-                        N += L[i]
-                
-                ref_norm = np.fmax(v_in_norm[possible_reflections[:, 0]], v_out_norm[possible_reflections[:, 1]])
-                # DIRECTION Y
-                diff = np.absolute(v_in[possible_reflections[:, 0], 1] - v_out[possible_reflections[:, 1], 1])
-                possible_reflections = possible_reflections[diff/ref_norm < crit, :]
-                ref_norm = ref_norm[diff/ref_norm < crit]
-                
-                # DIRECTION Z
-                diff = np.absolute(v_in[possible_reflections[:, 0], 2] - v_out[possible_reflections[:, 1], 2])
-                possible_reflections = possible_reflections[diff/ref_norm < crit, :]
+            in_modes  =  in_modes[possible_reflections[:, 0], :]
+            out_modes = out_modes[possible_reflections[:, 1], :]
 
-                diff = np.absolute(omega_in[possible_reflections[:, 0]] - omega_out[possible_reflections[:, 1]])
-                delta = delta_omega_in[possible_reflections[:, 0]] + delta_omega_out[possible_reflections[:, 1]]
+            v_in  = v[ in_modes[:, 0],  in_modes[:, 1], :]
+            v_out = v[out_modes[:, 0], out_modes[:, 1], :]
 
-                possible_reflections = possible_reflections[diff < delta, :]
+            v_in  /= np.linalg.norm(v_in , axis = 1, keepdims = True)
+            v_out /= np.linalg.norm(v_out, axis = 1, keepdims = True)
+            
+            v_try = v_in - 2*n*np.sum(v_in*n, axis = 1, keepdims = True) # reflect
 
-                in_modes  =  in_modes[possible_reflections[:, 0], :]
-                out_modes = out_modes[possible_reflections[:, 1], :]
+            angle = np.arccos(np.sum(v_try*v_out, axis = 1))
+            angle[np.isnan(angle)] = np.pi
 
-                v_in  = v[ in_modes[:, 0],  in_modes[:, 1], :]
-                v_out = v[out_modes[:, 0], out_modes[:, 1], :]
+            in_modes  =  in_modes[angle < crit, :]
+            out_modes = out_modes[angle < crit, :]
+            
+            spec_q_in = in_modes[:, 0]           # in qpoints
+            spec_q_out = out_modes[:, 0] # out qpoints (Qa,)
 
-                v_in  /= np.linalg.norm(v_in , axis = 1, keepdims = True)
-                v_out /= np.linalg.norm(v_out, axis = 1, keepdims = True)
-                
-                v_try = v_in - 2*n*np.sum(v_in*n, axis = 1, keepdims = True) # reflect
+            spec_j_in = in_modes[:, 1]           # in qpoints
+            spec_j_out = out_modes[:, 1] # out qpoints (Qa,)
 
-                angle = np.arccos(np.sum(v_try*v_out, axis = 1))
-                angle[np.isnan(angle)] = np.pi
+            i_f = inv_normals == i_n
 
-                in_modes  =  in_modes[angle < crit, :]
-                out_modes = out_modes[angle < crit, :]
-                
-                spec_q_in = in_modes[:, 0]           # in qpoints
-                spec_q_out = out_modes[:, 0] # out qpoints (Qa,)
+            for i in in_modes:
+                true_spec[i_f, i[0], i[1]] = True
+            
+            n_ts = spec_q_in.shape[0]
 
-                spec_j_in = in_modes[:, 1]           # in qpoints
-                spec_j_out = out_modes[:, 1] # out qpoints (Qa,)
+            fig, ax = plt.subplots(nrows = 3, ncols = 3, figsize = (15, 15), dpi = 100, sharex = 'row', sharey = 'row')
+            
+            b = np.eye(3)
+            is_normal = 1 - np.sum(b*np.absolute(n), axis = 1) < 1e-3
 
-                i_f = inv_normals == i_n
+            if np.any(is_normal):
+                b = b[~is_normal, :]
 
-                for i in in_modes:
-                    true_spec[i_f, i[0], i[1]] = True
-                
-                n_ts = spec_q_in.shape[0]
+            # if b1 is parallel to b1
+            b1 = b[0, :]
+            b1 = b1 - n*np.sum(n*b1)  # make b1 orthogonal to the normal
+            b1 = b1/np.sum(b1**2)**0.5          # normalise b1
 
-                fig, ax = plt.subplots(nrows = 3, ncols = 3, figsize = (15, 15), dpi = 100, sharex = 'row', sharey = 'row')
-                
-                b = np.eye(3)
-                is_normal = 1 - np.sum(b*np.absolute(n), axis = 1) < 1e-3
+            b2 = np.cross(n, b1)           # generate b2 = n x b1
+            
+            k_b1_in = np.sum(phonon.wavevectors[spec_q_in, :]*b1, axis = 1)
+            k_b1_out = np.sum(phonon.wavevectors[spec_q_out, :]*b1, axis = 1)
+            v_b1_in = np.sum(phonon.group_vel[spec_q_in, spec_j_in, :]*b1, axis = 1)
+            v_b1_out = np.sum(phonon.group_vel[spec_q_out, spec_j_out, :]*b1, axis = 1)
 
-                if np.any(is_normal):
-                    b = b[~is_normal, :]
+            k_b2_in = np.sum(phonon.wavevectors[spec_q_in, :]*b2, axis = 1)
+            k_b2_out = np.sum(phonon.wavevectors[spec_q_out, :]*b2, axis = 1)
+            v_b2_in = np.sum(phonon.group_vel[spec_q_in, spec_j_in, :]*b2, axis = 1)
+            v_b2_out = np.sum(phonon.group_vel[spec_q_out, spec_j_out, :]*b2, axis = 1)
 
-                # if b1 is parallel to b1
-                b1 = b[0, :]
-                b1 = b1 - n*np.sum(n*b1)  # make b1 orthogonal to the normal
-                b1 = b1/np.sum(b1**2)**0.5          # normalise b1
+            k_n_in = np.sum(phonon.wavevectors[spec_q_in, :]*n, axis = 1)
+            k_n_out = np.sum(phonon.wavevectors[spec_q_out, :]*n, axis = 1)
+            v_n_in = np.sum(phonon.group_vel[spec_q_in, spec_j_in, :]*n, axis = 1)
+            v_n_out = np.sum(phonon.group_vel[spec_q_out, spec_j_out, :]*n, axis = 1)
 
-                b2 = np.cross(n, b1)           # generate b2 = n x b1
-                
-                k_b1_in = np.sum(phonon.wavevectors[spec_q_in, :]*b1, axis = 1)
-                k_b1_out = np.sum(phonon.wavevectors[spec_q_out, :]*b1, axis = 1)
-                v_b1_in = np.sum(phonon.group_vel[spec_q_in, spec_j_in, :]*b1, axis = 1)
-                v_b1_out = np.sum(phonon.group_vel[spec_q_out, spec_j_out, :]*b1, axis = 1)
+            omega_in  = phonon.omega[spec_q_in , spec_j_in ]
+            omega_out = phonon.omega[spec_q_out, spec_j_out]
 
-                k_b2_in = np.sum(phonon.wavevectors[spec_q_in, :]*b2, axis = 1)
-                k_b2_out = np.sum(phonon.wavevectors[spec_q_out, :]*b2, axis = 1)
-                v_b2_in = np.sum(phonon.group_vel[spec_q_in, spec_j_in, :]*b2, axis = 1)
-                v_b2_out = np.sum(phonon.group_vel[spec_q_out, spec_j_out, :]*b2, axis = 1)
+            ax[0, 0].scatter(k_n_in, k_n_out, s = 1)
+            ax[1, 0].scatter(v_n_in, v_n_out, s = 1)
 
-                k_n_in = np.sum(phonon.wavevectors[spec_q_in, :]*n, axis = 1)
-                k_n_out = np.sum(phonon.wavevectors[spec_q_out, :]*n, axis = 1)
-                v_n_in = np.sum(phonon.group_vel[spec_q_in, spec_j_in, :]*n, axis = 1)
-                v_n_out = np.sum(phonon.group_vel[spec_q_out, spec_j_out, :]*n, axis = 1)
+            ax[0, 1].scatter(k_b1_in, k_b1_out, s = 1)
+            ax[1, 1].scatter(v_b1_in, v_b1_out, s = 1)
 
-                omega_in  = phonon.omega[spec_q_in , spec_j_in ]
-                omega_out = phonon.omega[spec_q_out, spec_j_out]
+            ax[0, 2].scatter(k_b2_in, k_b2_out, s = 1)
+            ax[1, 2].scatter(v_b2_in, v_b2_out, s = 1)
 
-                ax[0, 0].scatter(k_n_in, k_n_out, s = 1)
-                ax[1, 0].scatter(v_n_in, v_n_out, s = 1)
+            ax[2, 1].scatter(omega_in, omega_out, s = 1)
 
-                ax[0, 1].scatter(k_b1_in, k_b1_out, s = 1)
-                ax[1, 1].scatter(v_b1_in, v_b1_out, s = 1)
+            v_list = [r'$\vec{{n}}$', r'$\vec{{b}}_{{1}}$', r'$\vec{{b}}_{{2}}$']
 
-                ax[0, 2].scatter(k_b2_in, k_b2_out, s = 1)
-                ax[1, 2].scatter(v_b2_in, v_b2_out, s = 1)
+            for i in range(3):
+                ax[0, i].set_xlabel(r'$\vec{{k}}_{{in}}\cdot$' + v_list[i])
+                ax[0, i].set_ylabel(r'$\vec{{k}}_{{out}}\cdot$' + v_list[i])
+                ax[1, i].set_xlabel(r'$\vec{{v}}_{{in}}\cdot$' + v_list[i])
+                ax[1, i].set_ylabel(r'$\vec{{v}}_{{out}}\cdot$' + v_list[i])
+            
+            ax[2, 1].set_xlabel('$\omega_{in}$')
+            ax[2, 1].set_ylabel('$\omega_{out}$')
 
-                ax[2, 1].scatter(omega_in, omega_out, s = 1)
+            ax[2, 0].axis('off')
+            ax[2, 2].axis('off')
 
-                v_list = [r'$\vec{{n}}$', r'$\vec{{b}}_{{1}}$', r'$\vec{{b}}_{{2}}$']
+            for a in ax.ravel():
+                a.yaxis.set_tick_params(labelleft=True)
 
-                for i in range(3):
-                    ax[0, i].set_xlabel(r'$\vec{{k}}_{{in}}\cdot$' + v_list[i])
-                    ax[0, i].set_ylabel(r'$\vec{{k}}_{{out}}\cdot$' + v_list[i])
-                    ax[1, i].set_xlabel(r'$\vec{{v}}_{{in}}\cdot$' + v_list[i])
-                    ax[1, i].set_ylabel(r'$\vec{{v}}_{{out}}\cdot$' + v_list[i])
-                
-                ax[2, 1].set_xlabel('$\omega_{in}$')
-                ax[2, 1].set_ylabel('$\omega_{out}$')
+            plt.suptitle('Normal = <{:.2f}, {:.2f}, {:.2f}>. Angles = {:.2f}, {:.2f}, {:.2f}'.format(n[0], n[1], n[2], 
+                                                                                                np.arccos(n[0])*180/np.pi,
+                                                                                                np.arccos(n[1])*180/np.pi,
+                                                                                                np.arccos(n[2])*180/np.pi))
 
-                ax[2, 0].axis('off')
-                ax[2, 2].axis('off')
+            plt.tight_layout()
+            plt.savefig(os.path.join(self.results_folder_name, f'spec{n}.png'))
+            plt.close(fig)
 
-                for a in ax.ravel():
-                    a.yaxis.set_tick_params(labelleft=True)
-
-                plt.suptitle('Normal = <{:.2f}, {:.2f}, {:.2f}>. Angles = {:.2f}, {:.2f}, {:.2f}'.format(n[0], n[1], n[2], 
-                                                                                                    np.arccos(n[0])*180/np.pi,
-                                                                                                    np.arccos(n[1])*180/np.pi,
-                                                                                                    np.arccos(n[2])*180/np.pi))
-
-                plt.tight_layout()
-                plt.savefig(os.path.join(self.results_folder_name, f'spec{n}.png'))
-                plt.close(fig)
-
-                correspondent_modes = np.vstack((correspondent_modes, np.vstack((np.ones(n_ts)*n.reshape(-1, 1), spec_q_in, spec_j_in, spec_q_out, spec_j_out)).T))
+            correspondent_modes = np.vstack((correspondent_modes, np.vstack((np.ones(n_ts)*n.reshape(-1, 1), spec_q_in, spec_j_in, spec_q_out, spec_j_out)).T))
 
         self.correspondent_modes = correspondent_modes
         self.specular_function   = NearestNDInterpolator(self.correspondent_modes[:, :-2], self.correspondent_modes[:, -2:])

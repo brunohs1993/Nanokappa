@@ -88,9 +88,6 @@ def initialise_parser(debug_flag):
     parser.add_argument('--reference_temp' , '-rt', default = ['local'],
                                       nargs = 1   , help    = [argparse.SUPPRESS, 'Set reference temperature to be considered in the system, in Kelvin. Also accepts "local", so deltas are calculated in relation to local temperature.'][int(debug_flag)]) 
     
-    parser.add_argument('--bound_scat'     , '-bs', default = ['velocity'], 
-                        type = str,   nargs = '*' , help    = [argparse.SUPPRESS, 'Which restriction to impose on the boundary scattering for specular reflections: reflect on velocity ["velocity", "vel", "v", "groupvel", "group_vel"] '+
-                                                              'or on wavevector ["k", "wavevector", "wave_vector"]'][int(debug_flag)])
     parser.add_argument('--output'        , '-op' , default = 'file',
                         type = str  , nargs = 1   , help    = [argparse.SUPPRESS, 'Where to print the output. "file" to save it in outuput.txt. "screen" to print on terminal.'][int(debug_flag)])
     
