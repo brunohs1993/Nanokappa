@@ -88,9 +88,6 @@ def initialise_parser(debug_flag):
     parser.add_argument('--reference_temp' , '-rt', default = ['local'],
                                       nargs = 1   , help    = [argparse.SUPPRESS, 'Set reference temperature to be considered in the system, in Kelvin. Also accepts "local", so deltas are calculated in relation to local temperature.'][int(debug_flag)]) 
     
-    parser.add_argument('--reservoir_gen' , '-gn' , default = ['constant'], choices = ['fixed_rate', 'one_to_one', 'constant'],
-                        type = str  , nargs = '*' , help    = [argparse.SUPPRESS, 'Set the type of generation of particles in the reservoir. "fixed_rate" means the generation is independent from the particles leaving the domain. '+
-                                                              '"one_to_one" means that a particle will be generated only when a particle leaves the domain (one leaves, one enters).'][int(debug_flag)])
     parser.add_argument('--energy_normal' , '-en' , default = ['mean'],
                         type = str  , nargs = 1   , help    = [argparse.SUPPRESS, 'Set the energy normalisation in subvolume. "fixed" is divided by the expected number of particles in the subvolume (standard).'+
                                                              ' "mean" is the aritmetic mean.'][int(debug_flag)])

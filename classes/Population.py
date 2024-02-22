@@ -69,7 +69,6 @@ class Population(Constants):
         self.subvol_volume  = geometry.subvol_volume  # angstrom³
 
         self.bound_cond          = geometry.bound_cond
-        self.res_gen   = self.args.reservoir_gen[0]
         
         self.rough_facets        = geometry.rough_facets        # which facets have roughness as BC
         self.rough_facets_values = geometry.rough_facets_values # their values of roughness and correlation length
@@ -344,140 +343,40 @@ class Population(Constants):
 
             self.res_norm *= self.dt*self.particle_density*geometry.facets_area[self.res_facet]*self.n_dt_to_conv
 
-    def fill_reservoirs(self, geometry, phonon, n_leaving = None):
+    def fill_reservoirs(self, geometry, phonon, n_leaving):
 
-        if self.res_gen == 'constant':
-            fixed_np      = np.floor(self.enter_prob).astype(int) # number of particles that will enter every iteration
-            
-            self.res_counter += self.enter_prob - fixed_np
+        # initialise new arrays
+        self.res_positions = np.zeros((0, 3))
+        self.res_modes     = np.zeros((0, 2), dtype = int)
+        self.res_facet_id  = np.zeros(0, dtype = int)
+        self.res_dt_in     = np.zeros(0, dtype = int)
 
-            in_modes_mask = (self.res_counter >= 1).astype(int) # shape = (R, Q, J)
+        for i in range(self.n_of_reservoirs):                  # for each reservoir
+            facet  = self.res_facet[i]                         # get its facet index
+            n      = n_leaving[i]                              # the number of particles on that facet
+            if n > 0:
+                roulette = np.cumsum(self.enter_prob[i, :, :])
+                roulette /= roulette.max()
 
-            self.res_counter -= in_modes_mask
+                r = np.random.rand(n) # generating dies
 
-            in_modes_np = fixed_np + in_modes_mask
+                flat_i = np.searchsorted(roulette, r) # searching for modes
 
-            # calculate how many particles entered each facet
-            N_p_facet = in_modes_np.sum(axis = (1, 2))    # shape = (R,)
+                # getting the new qpoints and branches
+                new_q  = np.floor(flat_i/phonon.number_of_branches).astype(int)
+                new_j = flat_i - new_q*phonon.number_of_branches
 
-            # initialise new arrays
-            self.res_positions = np.zeros((0, 3))
-            self.res_modes     = np.zeros((0, 2), dtype = int)
-            self.res_facet_id  = np.zeros(0, dtype = int)
-            self.res_dt_in     = np.zeros(0, dtype = int)
+                new_modes = np.vstack((new_q, new_j)).T
 
-            for i in range(self.n_of_reservoirs):                         # for each reservoir
-                n      = N_p_facet[i]                                     # the number of particles on that facet
-                if n > 0:
-                    facet  = self.res_facet[i]                                # get its facet index
-                    # mesh   = geometry.res_meshes[i]                           # select boundary
-                    
-                    # adding fixed particles
-                    c = in_modes_np[i, :, :].max()  # gets the maximum number of particles of a single mode to be generated
-                    while c > 0:
-                        
-                        c_modes = np.vstack(np.where(in_modes_np[i, :, :] >= c)).T
+                self.res_modes = np.vstack((self.res_modes, new_modes)) # storing
+                
+                self.res_dt_in = np.concatenate((self.res_dt_in, self.dt*np.random.rand(n))) # random generated time inside domain
+                self.res_facet_id = np.concatenate((self.res_facet_id, (np.ones(n)*facet).astype(int))) # add to the reservoir id
 
-                        if c == 1:
-                            c_dt_in = self.dt*(1-(self.res_counter[i, c_modes[:, 0], c_modes[:, 1]]/self.enter_prob[i, c_modes[:, 0], c_modes[:, 1]]))
-                        else:
-                            r = np.random.rand(c_modes.shape[0])
-                            c_dt_in = self.dt*(1-(c-1+r)/self.enter_prob[i, c_modes[:, 0], c_modes[:, 1]])
-                        
-                        c -= 1
-                        
-                        self.res_dt_in = np.concatenate((self.res_dt_in, c_dt_in)) # add to the time drifted inside the domain
-                        self.res_modes = np.vstack((self.res_modes, c_modes.astype(int))) # add to the modes
+                # generate positions on boundary
+                new_positions = geometry.mesh.sample_surface(n, facets = facet)
 
-                    self.res_facet_id  = np.concatenate((self.res_facet_id, (np.ones(n)*facet).astype(int))) # add to the reservoir id
-
-                    # generate positions on boundary
-                    new_positions = geometry.mesh.sample_surface(n, facets = facet)
-
-                    self.res_positions = np.vstack((self.res_positions , new_positions ))                  # add to the positions
-
-        elif self.res_gen == 'fixed_rate':
-            # generate random numbers
-            dice = np.random.rand(self.n_of_reservoirs, phonon.number_of_qpoints, phonon.number_of_branches)
-
-            # check if particles entered the domain comparing with their probability
-            fixed_np      = np.floor(self.enter_prob).astype(int) # number of particles that will enter every iteration
-            
-            in_modes_mask = (dice <= (self.enter_prob - fixed_np)).astype(int) # shape = (R, Q, J)
-            
-            in_modes_np   = fixed_np + in_modes_mask
-
-            # calculate how many particles entered each facet
-            N_p_facet = in_modes_np.sum(axis = (1, 2))    # shape = (R,)
-
-            # initialise new arrays
-            self.res_positions = np.zeros((0, 3))
-            self.res_modes     = np.zeros((0, 2), dtype = int)
-            self.res_facet_id  = np.zeros(0, dtype = int)
-            self.res_dt_in     = np.zeros(0, dtype = int)
-
-            for i in range(self.n_of_reservoirs):                         # for each reservoir
-                n      = N_p_facet[i]                                     # the number of particles on that facet
-                if n > 0:
-                    facet  = self.res_facet[i]                                # get its facet index
-                    
-                    # adding fixed particles
-                    c = in_modes_np[i, :, :].max()  # gets the maximum number of particles of a single mode to be generated
-                    while c > 0:
-                        
-                        c_modes = np.vstack(np.where(in_modes_np[i, :, :] >= c)).T
-
-                        if c == 1:
-                            c_dt_in = self.dt*(1-(dice[i, c_modes[:, 0], c_modes[:, 1]]/self.enter_prob[i, c_modes[:, 0], c_modes[:, 1]]))
-                        else:
-                            r = np.random.rand(c_modes.shape[0])
-                            c_dt_in = self.dt*(1-(c-1+r)/self.enter_prob[i, c_modes[:, 0], c_modes[:, 1]])
-                        
-                        c -= 1
-                        
-                        self.res_dt_in = np.concatenate((self.res_dt_in, c_dt_in)) # add to the time drifted inside the domain
-                        self.res_modes = np.vstack((self.res_modes, c_modes.astype(int))) # add to the modes
-
-                    self.res_facet_id  = np.concatenate((self.res_facet_id, (np.ones(n)*facet).astype(int))) # add to the reservoir id
-
-                    # generate positions on boundary
-                    new_positions = geometry.mesh.sample_surface(n, facets = facet)
-
-                    self.res_positions = np.vstack((self.res_positions , new_positions ))                  # add to the positions
-            
-        elif self.res_gen == 'one_to_one':
-            # initialise new arrays
-            self.res_positions = np.zeros((0, 3))
-            self.res_modes     = np.zeros((0, 2), dtype = int)
-            self.res_facet_id  = np.zeros(0, dtype = int)
-            self.res_dt_in     = np.zeros(0, dtype = int)
-
-            for i in range(self.n_of_reservoirs):                  # for each reservoir
-                facet  = self.res_facet[i]                         # get its facet index
-                n      = n_leaving[i]                              # the number of particles on that facet
-                if n > 0:
-                    roulette = np.cumsum(self.enter_prob[i, :, :])
-                    roulette /= roulette.max()
-
-                    r = np.random.rand(n) # generating dies
-
-                    flat_i = np.searchsorted(roulette, r) # searching for modes
-
-                    # getting the new qpoints and branches
-                    new_q  = np.floor(flat_i/phonon.number_of_branches).astype(int)
-                    new_j = flat_i - new_q*phonon.number_of_branches
-
-                    new_modes = np.vstack((new_q, new_j)).T
-
-                    self.res_modes = np.vstack((self.res_modes, new_modes)) # storing
-                    
-                    self.res_dt_in = np.concatenate((self.res_dt_in, self.dt*np.random.rand(n))) # random generated time inside domain
-                    self.res_facet_id = np.concatenate((self.res_facet_id, (np.ones(n)*facet).astype(int))) # add to the reservoir id
-
-                    # generate positions on boundary
-                    new_positions = geometry.mesh.sample_surface(n, facets = facet)
-
-                    self.res_positions = np.vstack((self.res_positions , new_positions ))                  # add to the positions
+                self.res_positions = np.vstack((self.res_positions , new_positions ))                  # add to the positions
         
         if self.res_modes.shape[0]>0:
             
@@ -1734,10 +1633,7 @@ class Population(Constants):
         self.drift()                                    # drift particles
 
         if self.n_of_reservoirs > 0:
-            if self.res_gen in ['fixed_rate', 'constant']:
-                self.fill_reservoirs(geometry, phonon)          # refill reservoirs
-            elif self.res_gen == 'one_to_one':
-                self.fill_reservoirs(geometry, phonon, n_leaving = self.N_leaving)          # refill reservoirs
+            self.fill_reservoirs(geometry, phonon, self.N_leaving)          # refill reservoirs
             self.add_reservoir_particles(geometry)  # add reservoir particles that come in the domain
 
         self.boundary_scattering(geometry, phonon)      # perform boundary scattering/periodicity and particle deletion
