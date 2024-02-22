@@ -40,8 +40,6 @@ class Population(Constants):
         
         self.n_dt_to_conv = 10 # number of timesteps for each convergence datapoint
 
-        self.norm = self.args.energy_normal[0]
-        
         self.n_of_subvols   = geometry.n_of_subvols
 
         self.particle_type = self.args.particles[0]
@@ -337,11 +335,6 @@ class Population(Constants):
         self.res_heat_flux        = np.zeros((self.n_of_reservoirs, 3))
 
         self.res_norm = np.zeros(self.n_of_reservoirs)
-        if self.norm == 'fixed':
-            for i in range(self.n_of_reservoirs):
-                self.res_norm[i] = np.absolute(np.sum(phonon.group_vel[1:, :, :]*geometry.facets_normal[self.res_facet[i]], axis = 2)).mean()
-
-            self.res_norm *= self.dt*self.particle_density*geometry.facets_area[self.res_facet]*self.n_dt_to_conv
 
     def fill_reservoirs(self, geometry, phonon, n_leaving):
 
@@ -396,9 +389,8 @@ class Population(Constants):
             self.res_occupation = phonon.calculate_occupation(self.res_temperatures, self.res_omega)
             if self.T_reference == 'local':
                 self.res_energies = np.zeros(self.res_omega.shape)
-                if self.norm == 'mean':
-                    for i in range(self.n_of_reservoirs):
-                        self.res_norm[i] += indexes.sum()
+                for i in range(self.n_of_reservoirs):
+                    self.res_norm[i] += indexes.sum()
             else:
                 dn = phonon.calculate_occupation(self.res_temperatures, self.res_omega) - self.reference_occupation[self.res_modes[:, 0], self.res_modes[:, 1]]
 
@@ -409,8 +401,7 @@ class Population(Constants):
                     self.res_energy_balance[i] = self.res_energies[indexes].sum()
                     self.res_heat_flux[i, :]   = (self.res_group_vel[indexes, :]*self.res_energies[indexes].reshape(-1, 1)).sum(axis = 0)
 
-                    if self.norm == 'mean':
-                        self.res_norm[i] += indexes.sum()
+                    self.res_norm[i] += indexes.sum()
 
     def add_reservoir_particles(self, geometry):
         '''Add the particles that came from the reservoir to the main population. Calculates flux balance for each reservoir.'''
@@ -606,11 +597,8 @@ class Population(Constants):
             i = np.nonzero(self.subvol_id == sv)[0]
             self.subvol_energy[sv] = self.energies[i].sum()
 
-        if self.norm == 'fixed':
-            normalisation = phonon.number_of_active_modes/(self.particle_density*geometry.subvol_volume)
-        elif self.norm == 'mean':
-            normalisation = phonon.number_of_active_modes/self.subvol_N_p
-            normalisation = np.where(np.isnan(normalisation), 0, normalisation)
+        normalisation = phonon.number_of_active_modes/self.subvol_N_p
+        normalisation = np.where(np.isnan(normalisation), 0, normalisation)
         self.subvol_energy = self.subvol_energy*normalisation
         
         self.subvol_energy = phonon.normalise_to_density(self.subvol_energy)
@@ -625,10 +613,7 @@ class Population(Constants):
             ind = np.nonzero(self.subvol_id == i)[0] # 1d subvol id
             heat_flux[i, :] = np.sum(self.group_vel[ind, :]*self.energies[ind].reshape(-1, 1), axis = 0)
 
-        if self.norm == 'fixed':
-            normalisation = phonon.number_of_active_modes/(self.particle_density*geometry.subvol_volume.reshape(-1, 1))
-        elif self.norm == 'mean':
-            normalisation = phonon.number_of_active_modes/self.subvol_N_p.reshape(-1, 1)
+        normalisation = phonon.number_of_active_modes/self.subvol_N_p.reshape(-1, 1)
         
         heat_flux = heat_flux*normalisation
         
@@ -1484,8 +1469,7 @@ class Population(Constants):
                         energies = self.hbar*self.omega[indexes_del][indexes_res]*dn
                         self.res_energy_balance[i] -= energies.sum()
 
-                        if self.norm == 'mean':
-                            self.res_norm[i] += indexes_res.sum()
+                        self.res_norm[i] += indexes_res.sum()
 
                         # adding heat flux
                         hflux = energies.reshape(-1, 1)*self.group_vel[indexes_del, :][indexes_res, :]/np.sum(self.group_vel[indexes_del, :][indexes_res, :]*geometry.facets_normal[facet, :], axis = 1, keepdims = True)
@@ -1585,8 +1569,7 @@ class Population(Constants):
     def restart_reservoir_balance(self):
         self.res_heat_flux = np.zeros((self.n_of_reservoirs, 3))
         self.res_energy_balance = np.zeros(self.n_of_reservoirs)
-        if self.norm == 'mean':
-            self.res_norm = np.zeros(self.n_of_reservoirs)
+        self.res_norm = np.zeros(self.n_of_reservoirs)
 
     def lifetime_scattering(self, phonon):
         '''Performs lifetime scattering.'''
