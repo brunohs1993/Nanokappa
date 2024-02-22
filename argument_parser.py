@@ -84,8 +84,7 @@ def initialise_parser(debug_flag):
     parser.add_argument('--part_dist'      , '-pd', default = ['random_subvol'],
                         type = str  , nargs = 1   , help    = [argparse.SUPPRESS, 'How to distribute particles. It can be used any combination of random/center _ domain/subvol, or input an external file ' +
                                                                                   'of particle data. The file should have the same structure as particle_data.txt given in the results.'][int(debug_flag)])
-    parser.add_argument('--empty_subvols'  , '-es', default = [],
-                        type = int  , nargs = '*' , help    = [argparse.SUPPRESS, 'Subvolumes indexes to keep empty at initialisation.'][int(debug_flag)])
+    
     parser.add_argument('--subvol_material', '-sm', default = [],
                         type = int  , nargs = '*' , help    = [argparse.SUPPRESS, 'Material index of each subvolume, according to the order given at -pf and -hf.'][int(debug_flag)])
     

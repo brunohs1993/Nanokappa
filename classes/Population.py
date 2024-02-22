@@ -44,9 +44,6 @@ class Population(Constants):
         
         self.n_of_subvols   = geometry.n_of_subvols
 
-        self.empty_subvols      = self.args.empty_subvols
-        self.n_of_empty_subvols = len(self.empty_subvols)
-        
         self.particle_type = self.args.particles[0]
 
         if self.particle_type == 'pmps':
@@ -60,7 +57,7 @@ class Population(Constants):
         elif self.particle_type == 'pv':
             self.particle_density = float(self.args.particles[1])
             self.N_p              = int(np.ceil(self.particle_density*geometry.volume))
-            self.particles_pmps   = self.N_p/(phonon.number_of_active_modes*(self.n_of_subvols - self.n_of_empty_subvols))
+            self.particles_pmps   = self.N_p/(phonon.number_of_active_modes*self.n_of_subvols)
         
         self.dt = float(self.args.timestep[0])   # ps
         self.t  = 0.0
@@ -134,7 +131,7 @@ class Population(Constants):
 
         if self.particles_pmps >= 1:
             # if particles per mode, per subvolume are defined, use tiling
-            modes = np.tile( self.unique_modes,  (int(np.ceil(self.particles_pmps*(self.n_of_subvols-self.n_of_empty_subvols))), 1) )
+            modes = np.tile( self.unique_modes,  (int(np.ceil(self.particles_pmps*self.n_of_subvols)), 1) )
             modes = modes[:self.N_p, :]
         else:
             # if not, generate randomly
@@ -210,9 +207,8 @@ class Population(Constants):
                 
                 counter = np.zeros(self.n_of_subvols, dtype = int)
 
-                n = self.N_p*geometry.subvol_volume/(geometry.subvol_volume.sum()-geometry.subvol_volume[self.empty_subvols].sum()) # number of particles for each subvolume
+                n = self.N_p*geometry.subvol_volume/geometry.subvol_volume.sum() # number of particles for each subvolume
                 n = np.ceil(n).astype(int)
-                n[self.empty_subvols] = 0
 
                 x = [np.zeros((0, 3)) for _ in range(self.n_of_subvols)]
 
@@ -223,16 +219,14 @@ class Population(Constants):
                     sv_id = geometry.subvol_classifier.predict(x_new)
 
                     for i in range(self.n_of_subvols):
-                        if i not in self.empty_subvols:
-                            
-                            N = n[i] - counter[i]
-                            
-                            ind = np.nonzero(sv_id == i)[0]
-                            ind = ind[:N]
+                        N = n[i] - counter[i]
+                        
+                        ind = np.nonzero(sv_id == i)[0]
+                        ind = ind[:N]
 
-                            x[i] = np.vstack((x[i], x_new[ind, :]))
+                        x[i] = np.vstack((x[i], x_new[ind, :]))
 
-                            counter[i] = x[i].shape[0]
+                        counter[i] = x[i].shape[0]
                     
                     if sys.stdout.isatty():
                         # update the bar
@@ -248,24 +242,21 @@ class Population(Constants):
             elif self.args.part_dist[0] == 'center_subvol':
                 counter = 0
                 
-                indexes                     = np.ones(self.n_of_subvols).astype(bool)
-                indexes[self.empty_subvols] = False
-
+                indexes = np.ones(self.n_of_subvols).astype(bool)
+                
                 filled_volume = geometry.subvol_volume[indexes].sum()
 
                 for i in range(self.n_of_subvols):
-                    if i not in self.empty_subvols:
+                    number_of_particles = int(np.ceil(self.N_p*(geometry.subvol_volume[i]/filled_volume)))
+                    
+                    if counter + number_of_particles > self.N_p:
+                        number_of_particles = self.N_p - counter
+                        counter = self.N_p
+                    else:
+                        counter += number_of_particles
 
-                        number_of_particles = int(np.ceil(self.N_p*(geometry.subvol_volume[i]/filled_volume)))
-                        
-                        if counter + number_of_particles > self.N_p:
-                            number_of_particles = self.N_p - counter
-                            counter = self.N_p
-                        else:
-                            counter += number_of_particles
-
-                        new_positions = self.generate_positions(number_of_particles, geometry.subvol_meshes[i], key = 'center')
-                        self.positions = np.vstack((self.positions, new_positions))
+                    new_positions = self.generate_positions(number_of_particles, geometry.subvol_meshes[i], key = 'center')
+                    self.positions = np.vstack((self.positions, new_positions))
 
             # assigning properties from Phonon
             self.modes = self.initialise_modes(phonon) # getting modes
