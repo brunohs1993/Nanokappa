@@ -75,8 +75,6 @@ class Population(Constants):
             self.slice_axis    = geometry.slice_axis
             self.slice_length  = geometry.slice_length  # angstrom
         
-        self.subvol_volume  = geometry.subvol_volume  # angstrom³
-
         self.bound_cond          = geometry.bound_cond
         
         self.rough_facets        = geometry.rough_facets        # which facets have roughness as BC
@@ -162,6 +160,8 @@ class Population(Constants):
         # Probability of a particle entering the domain
         enter_prob = group_vel_parallel*self.dt/bound_thickness.reshape(-1, 1, 1)   # shape = (R, Q, J)
         enter_prob = np.where(enter_prob < 0, 0, enter_prob)
+        enter_prob /= enter_prob.sum(axis = (1, 2), keepdims = True)
+        enter_prob = np.vstack([enter_prob[i, :, :].ravel(order = 'F') for i in range(enter_prob.shape[0])]) # Fortran order to match with phonon.unique_modes
 
         return enter_prob
 
@@ -199,7 +199,7 @@ class Population(Constants):
 
             # assigning properties from Phonon
             self.modes = self.initialise_modes(phonon) # getting modes
-            self.omega, self.group_vel, self.wavevectors = self.assign_properties(self.modes, phonon)
+            self.omega, self.group_vel = self.assign_properties(self.modes, phonon)
             
             # initialising slice id
             self.subvol_id = self.get_subvol_id(self.positions, geometry, verbose = True)
@@ -209,7 +209,7 @@ class Population(Constants):
             
             self.occupation = phonon.calculate_occupation(self.temperatures, self.omega)
 
-            self.calculate_energy(geometry, phonon)
+            self.calculate_energy(phonon)
         else:
             try:
                 data = np.loadtxt(self.args.particles[0], delimiter = ',', comments = '#', dtype = float)
@@ -222,7 +222,7 @@ class Population(Constants):
             self.occupation = np.copy(data[:, 5])
             self.subvol_id = self.get_subvol_id(self.positions, geometry)
 
-            self.omega, self.group_vel, self.wavevectors = self.assign_properties(self.modes, phonon)
+            self.omega, self.group_vel = self.assign_properties(self.modes, phonon)
 
             self.temperatures, self.subvol_temperature = self.assign_temperatures(self.positions, geometry)
             old_T = np.zeros(self.n_of_subvols)
@@ -246,8 +246,8 @@ class Population(Constants):
         self.collision_cond = self.get_collision_condition(self.collision_facets)
 
         print('Initialising local quantities...')
-        self.calculate_energy(geometry, phonon)
-        self.subvol_heat_flux = self.calculate_heat_flux(geometry, phonon)
+        self.calculate_energy(phonon)
+        self.subvol_heat_flux = self.calculate_heat_flux(phonon)
         self.calculate_kappa(geometry)
 
     def initialise_reservoirs(self, geometry, phonon):
@@ -270,109 +270,41 @@ class Population(Constants):
         self.res_facet_temperature[mask_flux] = facets_temp.mean()            # initialising with the mean of the imposed temperatures
 
         self.enter_prob = self.enter_probability(geometry, phonon)
-        self.res_counter = np.random.rand(*self.enter_prob.shape)
-        self.N_leaving  = np.sum(self.enter_prob, axis = (1, 2)).round().astype(int)
 
         self.res_energy_balance   = np.zeros(self.n_of_reservoirs)
         self.res_heat_flux        = np.zeros((self.n_of_reservoirs, 3))
 
-        self.res_norm = np.zeros(self.n_of_reservoirs)
+    def select_reservoir_modes(self, collision_facets, omega_in, occupation_in, velocities_in, geometry, phonon):
 
-    def fill_reservoirs(self, geometry, phonon, n_leaving):
+        n_particles = collision_facets.shape[0]
+        new_modes = np.zeros((n_particles, 2), dtype = int)
+        new_temperatures = np.zeros(n_particles)
 
-        # initialise new arrays
-        self.res_positions = np.zeros((0, 3))
-        self.res_modes     = np.zeros((0, 2), dtype = int)
-        self.res_facet_id  = np.zeros(0, dtype = int)
-        self.res_dt_in     = np.zeros(0, dtype = int)
-
-        for i in range(self.n_of_reservoirs):                  # for each reservoir
-            facet  = self.res_facet[i]                         # get its facet index
-            n      = n_leaving[i]                              # the number of particles on that facet
+        for i in range(self.n_of_reservoirs):                # for each reservoir
+            indices = collision_facets == self.res_facet[i]  # get its facet index
+            n       = int(indices.sum())                     # the number of particles on that facet
             if n > 0:
-                roulette = np.cumsum(self.enter_prob[i, :, :])
-                roulette /= roulette.max()
+                # picking new modes
+                flat_i = np.random.choice(phonon.number_of_modes,
+                                          size = n,
+                                          replace = True,
+                                          p = self.enter_prob[i, :])
 
-                r = np.random.rand(n) # generating dies
-
-                flat_i = np.searchsorted(roulette, r) # searching for modes
-
-                # getting the new qpoints and branches
-                new_q  = np.floor(flat_i/phonon.number_of_branches).astype(int)
-                new_j = flat_i - new_q*phonon.number_of_branches
-
-                new_modes = np.vstack((new_q, new_j)).T
-
-                self.res_modes = np.vstack((self.res_modes, new_modes)) # storing
+                new_modes[indices, :] = phonon.unique_modes[flat_i, :]
                 
-                self.res_dt_in = np.concatenate((self.res_dt_in, self.dt*np.random.rand(n))) # random generated time inside domain
-                self.res_facet_id = np.concatenate((self.res_facet_id, (np.ones(n)*facet).astype(int))) # add to the reservoir id
+                energy = self.hbar*omega_in[indices]*(occupation_in[indices] - phonon.calculate_occupation(self.res_facet_temperature[i], omega_in[indices])) # hbar*omega*dn
+                heat_flux = energy.reshape(-1, 1)*velocities_in[indices, :]/(velocities_in[indices, :]*geometry.facets_normal[self.res_facet[i], :]).sum(axis = 1, keepdims = True)
 
-                # generate positions on boundary
-                new_positions = geometry.mesh.sample_surface(n, facets = facet)
+                self.res_heat_flux[i, :] += heat_flux.sum(axis = 0) # saving reservoir heat flux
 
-                self.res_positions = np.vstack((self.res_positions , new_positions ))                  # add to the positions
-        
-        if self.res_modes.shape[0]>0:
-            
-            self.res_group_vel   = phonon.group_vel[self.res_modes[:, 0], self.res_modes[:, 1], :]        # retrieve velocities
+                self.res_energy_balance[i] -= energy.sum() # saving reservoir energy balance 
+                
+                new_temperatures[indices] = self.res_facet_temperature[i]
 
-            self.res_omega       = phonon.omega[self.res_modes[:, 0], self.res_modes[:, 1]]               # retrieve frequencies
-            
-            self.res_wavevectors = phonon.wavevectors[self.res_modes[:, 0], :]
-        
-        # ADD FLUX BOUNDARY CONDITION HERE
+        new_omega = phonon.omega[new_modes[:, 0], new_modes[:, 1]]                # retrieve frequencies and occupations
+        new_occupation = phonon.calculate_occupation(new_temperatures, new_omega)
 
-        indexes = np.where(self.res_facet_id.reshape(-1, 1) == self.res_facet)[1]   # getting RESERVOIR indexes
-
-        self.res_temperatures = self.res_facet_temperature[indexes] # impose temperature values to the right particles
-
-        if self.res_modes.shape[0]>0:
-            self.res_occupation = phonon.calculate_occupation(self.res_temperatures, self.res_omega)
-            if self.T_reference == 'local':
-                self.res_energies = np.zeros(self.res_omega.shape)
-                for i in range(self.n_of_reservoirs):
-                    self.res_norm[i] += indexes.sum()
-            else:
-                dn = phonon.calculate_occupation(self.res_temperatures, self.res_omega) - self.reference_occupation[self.res_modes[:, 0], self.res_modes[:, 1]]
-
-                self.res_energies = self.hbar*self.res_omega*dn
-                for i in range(self.n_of_reservoirs):
-                    facet   = self.res_facet[i]
-                    indexes = self.res_facet_id == facet
-                    self.res_energy_balance[i] = self.res_energies[indexes].sum()
-                    self.res_heat_flux[i, :]   = (self.res_group_vel[indexes, :]*self.res_energies[indexes].reshape(-1, 1)).sum(axis = 0)
-
-                    self.res_norm[i] += indexes.sum()
-
-    def add_reservoir_particles(self, geometry):
-        '''Add the particles that came from the reservoir to the main population. Calculates flux balance for each reservoir.'''
-
-        if self.res_modes.shape[0]>0:
-            (self.res_n_timesteps        ,
-             self.res_collision_facets   ,
-             self.res_collision_positions) = self.timesteps_to_boundary(self.res_positions,
-                                                                        self.res_group_vel,
-                                                                        geometry          )
-            
-            self.res_n_timesteps -= self.res_dt_in/self.dt
-            self.res_positions   += self.res_group_vel*self.res_dt_in.reshape(-1, 1)
-
-            self.res_collision_cond = self.get_collision_condition(self.res_collision_facets)
-            
-            self.positions           = np.vstack((self.positions  , self.res_positions  ))
-            self.modes               = np.vstack((self.modes      , self.res_modes      ))
-            self.group_vel           = np.vstack((self.group_vel  , self.res_group_vel  ))
-            self.wavevectors         = np.vstack((self.wavevectors, self.res_wavevectors))
-
-            self.n_timesteps         = np.concatenate((self.n_timesteps        , self.res_n_timesteps        ))
-            self.collision_facets    = np.concatenate((self.collision_facets   , self.res_collision_facets   ))
-            self.collision_positions = np.concatenate((self.collision_positions, self.res_collision_positions))
-            self.collision_cond      = np.concatenate((self.collision_cond     , self.res_collision_cond     ))
-            self.temperatures        = np.concatenate((self.temperatures       , self.res_temperatures       ))
-            self.omega               = np.concatenate((self.omega              , self.res_omega              ))
-            self.occupation          = np.concatenate((self.occupation         , self.res_occupation         ))
-            self.energies            = np.concatenate((self.energies           , self.res_energies           ))
+        return new_modes, new_occupation, new_omega
 
     def assign_properties(self, modes, phonon):
         '''Get properties from the indexes.'''
@@ -381,9 +313,8 @@ class Population(Constants):
 
         omega      = phonon.omega[ modes[:,0], modes[:,1] ]        # THz * rad
         group_vel  = phonon.group_vel[ modes[:,0], modes[:,1], : ] # THz * angstrom
-        wavevector = phonon.wavevectors[modes[:, 0], :]
 
-        return omega, group_vel, wavevector
+        return omega, group_vel
 
     def assign_temperatures(self, positions, geometry):
         '''Atribute initial temperatures imposing fixed temperatures on first and last slice. Constant at T_cold unless specified otherwise.'''
@@ -510,7 +441,7 @@ class Population(Constants):
 
         self.subvol_id = self.get_subvol_id(self.positions, geometry)
 
-        self.calculate_energy(geometry, phonon)
+        self.calculate_energy(phonon)
 
         self.subvol_temperature = phonon.temperature_function(self.subvol_energy)
 
@@ -524,7 +455,7 @@ class Population(Constants):
             self.temperature_interpolator = self.temp_interp(geometry.subvol_center, self.subvol_temperature)
             self.temperatures = self.temperature_interpolator(self.positions)
         
-    def calculate_energy(self, geometry, phonon):
+    def calculate_energy(self, phonon):
         
         if self.T_reference == 'local':
             dn = self.occupation - phonon.calculate_occupation(self.subvol_temperature[self.subvol_id], self.omega)
@@ -547,7 +478,7 @@ class Population(Constants):
         
         self.subvol_energy += ref
 
-    def calculate_heat_flux(self, geometry, phonon):
+    def calculate_heat_flux(self, phonon):
         
         heat_flux = np.zeros((self.n_of_subvols, 3))
 
@@ -654,7 +585,6 @@ class Population(Constants):
 
         self.positions           = np.delete(self.positions          , indexes, axis = 0)
         self.group_vel           = np.delete(self.group_vel          , indexes, axis = 0)
-        self.wavevectors         = np.delete(self.wavevectors        , indexes, axis = 0)
         self.omega               = np.delete(self.omega              , indexes, axis = 0)
         self.occupation          = np.delete(self.occupation         , indexes, axis = 0)
         self.energies            = np.delete(self.energies           , indexes, axis = 0)
@@ -1078,6 +1008,60 @@ class Population(Constants):
 
         np.savetxt(os.path.join(self.results_folder_name, 'specular_correspondences.txt'), self.correspondent_modes, fmt = '%.3f %.3f %.3f %d %d %d %d')
 
+    def reservoir_boundary_condition(self, positions,
+                                           group_velocities,
+                                           collision_facets,
+                                           collision_positions,
+                                           calculated_ts,
+                                           occupation_in,
+                                           omega_in,
+                                           geometry,
+                                           phonon,
+                                           indexes_del_extra):
+        
+        # particles already scattered this timestep are calculated from their current position (at a boundary)
+        previous_positions = copy.deepcopy(positions)
+
+        # first scattering particles start from their position at the beginning of the timestep
+        first = calculated_ts == 0
+        previous_positions[first, :] -= group_velocities[first, :]*self.dt
+
+        # the calculated timestep is up to the next scattering event
+        dist = np.linalg.norm(collision_positions - previous_positions, axis = 1)
+        vel = np.linalg.norm(group_velocities, axis = 1)
+        
+        new_calculated_ts = calculated_ts + dist/(vel*self.dt)
+
+        # update particle positions to the collision posiiton
+        new_positions = collision_positions
+        
+        # select new modes and get their properties
+        new_modes, new_occupation, new_omega = self.select_reservoir_modes(collision_facets, omega_in, occupation_in, group_velocities, geometry, phonon)
+
+        # update v
+        new_group_vel  = phonon.group_vel[new_modes[:, 0], new_modes[:, 1], :]
+
+        # find next scattering event
+        (new_ts_to_boundary     ,
+         new_collision_facets   ,
+         new_collision_positions,
+         indexes_del_extra      ) = self.timesteps_to_boundary(new_positions, new_group_vel, geometry, indexes_del_extra)
+        
+        new_collision_cond = np.empty(new_collision_facets.shape, dtype = str)
+        new_collision_cond[~indexes_del_extra] = self.bound_cond[new_collision_facets[~indexes_del_extra].astype(int)]
+        
+        return (new_modes,
+                new_positions,
+                new_group_vel,
+                new_omega,
+                new_occupation,
+                new_ts_to_boundary,
+                new_calculated_ts,
+                new_collision_positions,
+                new_collision_facets,
+                new_collision_cond,
+                indexes_del_extra)
+
     def periodic_boundary_condition(self, positions, group_velocities, collision_facets, collision_positions, calculated_ts, geometry, indexes_del_extra):
         
         collision_facets = collision_facets.astype(int) # ensuring collision facets are integers
@@ -1175,55 +1159,38 @@ class Population(Constants):
 
         new_n_timesteps = copy.copy(self.n_timesteps) # (N_p,)
 
-        self.N_leaving = np.zeros(self.n_of_reservoirs, dtype = int)
-
         # while there are any particles with the timestep not completely calculated
         while np.any(calculated_ts < 1):
 
-            # I. Deleting particles entering reservoirs
+            # I. Reflecting particles entering reservoirs
 
-            # identifying particles hitting rough facets
-            indexes_del = np.logical_and(calculated_ts       <   1 ,
+            indexes_res = np.logical_and(calculated_ts       <   1 ,
                                          np.in1d(self.collision_cond, ['T', 'F']))
-            indexes_del = np.logical_and(indexes_del, 
+            indexes_res = np.logical_and(indexes_res, 
                                          (1-calculated_ts) > new_n_timesteps)
-            indexes_del = np.logical_or(indexes_del, indexes_del_extra)
-
-            if np.any(indexes_del):
-                rand_res_index = np.random.rand(0, self.n_of_reservoirs, indexes_del_extra.sum()) # indexes_del_extra will be regenerated randomly on the reservoirs
-
-                if self.n_of_reservoirs > 0: # if there are any reservoirs
-                    
-                    for i in range(self.n_of_reservoirs): # for each one
-
-                        facet = self.res_facet[i]         # get their facet index
-
-                        indexes_res = self.collision_facets[indexes_del] == facet # get which particles are leaving through it
-
-                        self.N_leaving[i] += int(indexes_res.sum())
-                        self.N_leaving[i] += int((rand_res_index == i).sum())
-
-                        # subtracting energy
-                        if self.T_reference == 'local':
-                            dn = self.occupation[indexes_del][indexes_res] - phonon.calculate_occupation(self.res_facet_temperature[i], self.omega[indexes_del][indexes_res])
-                        else:
-                            dn = self.occupation[indexes_del][indexes_res] - self.reference_occupation[self.modes[indexes_del, 0][indexes_res], self.modes[indexes_del, 1][indexes_res]]
-                        
-                        energies = self.hbar*self.omega[indexes_del][indexes_res]*dn
-                        self.res_energy_balance[i] -= energies.sum()
-
-                        self.res_norm[i] += indexes_res.sum()
-
-                        # adding heat flux
-                        hflux = energies.reshape(-1, 1)*self.group_vel[indexes_del, :][indexes_res, :]/np.sum(self.group_vel[indexes_del, :][indexes_res, :]*geometry.facets_normal[facet, :], axis = 1, keepdims = True)
-                        self.res_heat_flux[i, :] += hflux.sum(axis = 0)
-
-                self.delete_particles(indexes_del)
-                calculated_ts     = calculated_ts[~indexes_del]
-                new_n_timesteps   = new_n_timesteps[~indexes_del]
-                indexes_all       = indexes_all[~indexes_del]
-                indexes_del_extra = indexes_del_extra[~indexes_del]
             
+            if np.any(indexes_res):
+                (self.modes[indexes_res, :]              ,
+                 self.positions[indexes_res, :]          ,
+                 self.group_vel[indexes_res, :]          ,
+                 self.omega[indexes_res]                 ,
+                 self.occupation[indexes_res]            ,
+                 new_n_timesteps[indexes_res]            ,
+                 calculated_ts[indexes_res]              ,
+                 self.collision_positions[indexes_res, :],
+                 self.collision_facets[indexes_res]      ,
+                 self.collision_cond[indexes_res]        ,
+                 indexes_del_extra[indexes_res]          ) = self.reservoir_boundary_condition(self.positions[indexes_res, :]          ,
+                                                                                               self.group_vel[indexes_res, :]          ,
+                                                                                               self.collision_facets[indexes_res]      ,
+                                                                                               self.collision_positions[indexes_res, :],
+                                                                                               calculated_ts[indexes_res]              ,
+                                                                                               self.occupation[indexes_res]            ,
+                                                                                               self.omega[indexes_res]                 ,
+                                                                                               geometry                                ,
+                                                                                               phonon                                  ,
+                                                                                               indexes_del_extra[indexes_res])
+
             # II. Applying Periodicities:
             
             # identifying particles hitting facets with periodic boundary condition
@@ -1312,7 +1279,6 @@ class Population(Constants):
     def restart_reservoir_balance(self):
         self.res_heat_flux = np.zeros((self.n_of_reservoirs, 3))
         self.res_energy_balance = np.zeros(self.n_of_reservoirs)
-        self.res_norm = np.zeros(self.n_of_reservoirs)
 
     def lifetime_scattering(self, phonon):
         '''Performs lifetime scattering.'''
@@ -1358,10 +1324,6 @@ class Population(Constants):
 
         self.drift()                                    # drift particles
 
-        if self.n_of_reservoirs > 0:
-            self.fill_reservoirs(geometry, phonon, self.N_leaving)          # refill reservoirs
-            self.add_reservoir_particles(geometry)  # add reservoir particles that come in the domain
-
         self.boundary_scattering(geometry, phonon)      # perform boundary scattering/periodicity and particle deletion
 
         self.refresh_temperatures(geometry, phonon)     # refresh cell temperatures
@@ -1373,7 +1335,7 @@ class Population(Constants):
         self.t = self.current_timestep*self.dt          # 1 dt passed
         
         if ( self.current_timestep % self.n_dt_to_conv) == 0:
-            self.subvol_heat_flux = self.calculate_heat_flux(geometry, phonon)
+            self.subvol_heat_flux = self.calculate_heat_flux(phonon)
             self.calculate_kappa(geometry)
             self.adjust_reservoir_balance(geometry, phonon)
             self.write_convergence(geometry)      # write data on file
@@ -1712,11 +1674,10 @@ class Population(Constants):
                 header ='subvols final state data \n' + \
                         'Date and time: {}\n'.format(time) + \
                         'hdf file = {}, POSCAR file = {}\n'.format(self.args.hdf_file, self.args.poscar_file) + \
-                        'subvol id, subvol x, subvol y, subvol z, subvol volume, T [K], sigma T [K], HF x [W/m^2], HF y [W/m^2], HF z [W/m^2], sigma HF x [W/m^2], sigma HF y [W/m^2], sigma HF z [W/m^2], kappa [W/m K], sigma kappa [W/m K]'
+                        'subvol id, subvol x, subvol y, subvol z, T [K], sigma T [K], HF x [W/m^2], HF y [W/m^2], HF z [W/m^2], sigma HF x [W/m^2], sigma HF y [W/m^2], sigma HF z [W/m^2], kappa [W/m K], sigma kappa [W/m K]'
 
                 data = np.hstack((np.arange(self.n_of_subvols).reshape(-1, 1),
                                   geometry.subvol_center                     ,
-                                  self.subvol_volume.reshape(-1, 1)          ,
                                   self.view.mean_T.reshape(-1, 1)            ,
                                   self.view.std_T.reshape(-1, 1)             ,
                                   self.view.mean_sv_phi.reshape(-1, 3)       ,
@@ -1725,24 +1686,23 @@ class Population(Constants):
                                   self.view.std_sv_k.reshape(-1, 1)          ))
                 
                 # comma separated
-                np.savetxt(filename, data, '%d, %.3e, %.3e, %.3e, %.3e, %.3f, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e', delimiter = ',', header = header)
+                np.savetxt(filename, data, '%d, %.3e, %.3e, %.3e, %.3f, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e', delimiter = ',', header = header)
             
             else:
                 header ='subvols final state data \n' + \
                         'Date and time: {}\n'.format(time) + \
                         'hdf file = {}, POSCAR file = {}\n'.format(self.args.hdf_file, self.args.poscar_file) + \
-                        'subvol id, subvol position, subvol volume, T [K], sigma T [K], HF x [W/m^2], HF y [W/m^2], HF z [W/m^2], sigma HF x [W/m^2], sigma HF y [W/m^2], sigma HF z [W/m^2]'
+                        'subvol id, subvol position, T [K], sigma T [K], HF x [W/m^2], HF y [W/m^2], HF z [W/m^2], sigma HF x [W/m^2], sigma HF y [W/m^2], sigma HF z [W/m^2]'
 
                 data = np.hstack((np.arange(self.n_of_subvols).reshape(-1, 1),
                                 geometry.subvol_center,
-                                self.subvol_volume.reshape(-1, 1),
                                 self.view.mean_T.reshape(-1, 1),
                                 self.view.std_T.reshape(-1, 1),
                                 self.view.mean_sv_phi.reshape(-1, 3) ,
                                 self.view.std_sv_phi.reshape(-1, 3)))
                 
                 # comma separated
-                np.savetxt(filename, data, '%d, %.3e, %.3e, %.3e, %.3e, %.3f, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e', delimiter = ',', header = header)
+                np.savetxt(filename, data, '%d, %.3e, %.3e, %.3e, %.3f, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e, %.3e', delimiter = ',', header = header)
 
                 # connections data
                 filename = os.path.join(self.results_folder_name, 'subvol_connections.txt')

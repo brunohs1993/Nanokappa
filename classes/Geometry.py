@@ -462,7 +462,6 @@ class Geometry:
 
             self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
                                                       xc = self.subvol_center)
-            self.subvol_volume = self.calculate_subvol_volume(algorithm = 'mc', tol = 1e-4, return_centers = False)
 
             self.get_subvol_connections()
 
@@ -482,11 +481,6 @@ class Geometry:
             self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
                                                       xc = self.subvol_center)
 
-            try: # try slicing the mesh first
-                self.subvol_volume = self.calculate_subvol_volume()
-            except: # if it gives an error, try with quasi monte carlo / sobol sampling
-                self.subvol_volume = self.calculate_subvol_volume(algorithm = 'mc')
-        
         elif self.subvol_type == 'grid':
             self.grid = np.array(self.args.subvolumes[1:4]).astype(int)
 
@@ -532,119 +526,11 @@ class Geometry:
             self.subvol_classifier = SubvolClassifier(n  = self.n_of_subvols,
                                                       xc = self.subvol_center)
 
-            self.subvol_volume = self.calculate_subvol_volume(algorithm = 'mc', tol = 1e-4, verbose = False)
-
         else:
             print('Invalid subvolume type!')
             print('Stopping simulation...')
             quit()
         
-    def calculate_subvol_volume(self, algorithm = 'mc', tol = 1e-4, return_centers = False, verbose = False):
-        if verbose:
-            print('Calculating volumes... Algorithm:', algorithm)
-        # calculating subvol cover and volume
-
-        if self.subvol_type in ['slice', 'grid'] and self.shape in ['cuboid', 'box']:
-            subvol_volume = self.volume*np.ones(self.n_of_subvols)/self.n_of_subvols
-
-        elif algorithm == 'qmc':
-            ################# RANDOM SAMPLES ########################
-            
-            cover = np.zeros(self.n_of_subvols)
-            err   = np.ones(self.n_of_subvols)
-
-            n_t  = 0
-
-            ns = int(2**10)
-            gen = Sobol(3)
-
-            cnt = 1
-            samples        = np.zeros((0, 3))
-            scaled_samples = np.zeros((0, 3))
-            while err.max() > tol:
-                
-                new_samples = gen.random(ns)*self.bounds.ptp(axis = 0)+self.bounds[0, :]
-
-                new_samples_in = np.nonzero(self.mesh.contains(new_samples))[0]
-
-                new_samples = new_samples[new_samples_in, :]
-                
-                samples = np.vstack((samples, new_samples))
-                scaled_samples = np.vstack((scaled_samples, self.scale_positions(new_samples)))
-
-                n_t = samples.shape[0]
-                
-                r = self.subvol_classifier.predict(scaled_samples)
-
-                u_r, counts = np.unique(r, return_counts = True)
-
-                new_cover = np.zeros(self.n_of_subvols)
-                new_cover[u_r] = counts.sum()/counts
-                
-                with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
-                    err = np.absolute((new_cover - cover)/cover)
-                    err[np.isnan(err)] = 1
-                if verbose:
-                    print('{:4d} - Samples: {:>8.2e} - Max error: {:>8.2e}'.format(cnt, n_t, err.max()))
-
-                cnt += 1
-                cover = copy.copy(new_cover)
-
-            subvol_volume = cover*self.volume
-
-            if return_centers:
-                r = np.argmax(self.subvol_classifier.predict(scaled_samples), axis = 1)
-                subvol_center = np.zeros((self.n_of_subvols, 3))
-                for sv in range(self.n_of_subvols):
-                    subvol_center[sv, :] = np.mean(samples[ r == sv, :], axis = 0)
-            
-        elif algorithm == 'mc':
-            
-            cover = np.zeros(self.n_of_subvols)
-            err   = np.ones(self.n_of_subvols)
-
-            nt  = 0
-            ns = int(2**10)
-
-            cnt = 1
-            samples        = np.zeros((0, 3))
-            scaled_samples = np.zeros((0, 3))
-            while err.max() > tol:
-                
-                new_samples = self.mesh.sample_volume(ns)
-
-                samples = np.vstack((samples, new_samples))
-                
-                r = self.subvol_classifier.predict(new_samples)
-
-                nr = np.array([(r == i).sum(dtype = int) for i in range(self.n_of_subvols)])
-
-                new_cover = (cover*nt + nr)/(nt+ns)
-
-                nt += ns
-
-                with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
-                    err = np.absolute((new_cover - cover)/cover)
-                    err[np.isnan(err)] = 1
-                if verbose:
-                    print('{:4d} - Samples: {:>8.2e} - Max error: {:>8.2e}'.format(cnt, nt, err.max()))
-
-                cnt += 1
-                cover = copy.copy(new_cover)
-
-            subvol_volume = cover*self.volume
-
-            if return_centers:
-                r = self.subvol_classifier.predict(samples)
-                subvol_center = np.zeros((self.n_of_subvols, 3))
-                for sv in range(self.n_of_subvols):
-                    subvol_center[sv, :] = np.mean(samples[ r == sv, :], axis = 0)
-
-        if return_centers:
-            return subvol_volume, subvol_center
-        else:
-            return subvol_volume
-
     def get_bound_facets(self, args):
 
         # initialize boundary condition array with the last one

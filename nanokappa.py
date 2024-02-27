@@ -70,20 +70,7 @@ print('---------- o ----------- o ------------- o ------------')
 
 geo = Geometry(args)
 
-#######
-# The following implementation of phonons as a list of phonon objects
-# was a starting point to implement simulations with multiple materials.
-# For now, however, the Population class only accepts one material,
-# so this snippet is useless at the current state.
-
-# if len(args.mat_folder) == 1:
-#     phonons = Phonon(args, 0)
-# else:
-#     phonons = [Phonon(args, i) for i in range(len(args.mat_folder))]
-
-##########
-
-# Only one material:
+# material  data
 phonons = Phonon(args, 0)
 
 pop = Population(args, geo, phonons)
