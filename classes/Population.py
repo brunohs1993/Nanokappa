@@ -65,8 +65,6 @@ class Population(Constants):
             del data
             self.particles_pmps   = self.N_p/(phonon.number_of_active_modes*self.n_of_subvols)
             self.particle_density = self.N_p/geometry.volume
-            
-            
         
         self.dt = float(self.args.timestep[0])   # ps
         self.t  = 0.0
@@ -135,14 +133,9 @@ class Population(Constants):
         # creating unique mode matrix
         self.unique_modes = np.vstack(np.where(~phonon.inactive_modes_mask)).T
 
-        if self.particles_pmps >= 1:
-            # if particles per mode, per subvolume are defined, use tiling
-            modes = np.tile( self.unique_modes,  (int(np.ceil(self.particles_pmps*self.n_of_subvols)), 1) )
-            modes = modes[:self.N_p, :]
-        else:
-            # if not, generate randomly
-            modes = np.random.randint(low = 0, high = phonon.number_of_active_modes , size = self.N_p)
-            modes = self.unique_modes[modes, :]
+        # generate randomly
+        modes = np.random.randint(low = 0, high = phonon.number_of_active_modes , size = self.N_p)
+        modes = self.unique_modes[modes, :]
 
         return modes.astype(int)
 
@@ -152,10 +145,10 @@ class Population(Constants):
 
         bound_thickness = phonon.number_of_active_modes/(self.particle_density*geometry.facets_area[self.res_facet])
 
-        vel = np.transpose(phonon.group_vel, (0, 2, 1))           # shape = (Q, 3, J) - Group velocities of each mode
+        vel = np.transpose(phonon.group_vel, (0, 2, 1))      # shape = (Q, 3, J) - Group velocities of each mode
         normals = -geometry.facets_normal[self.res_facet, :] # shape = (R, 3)    - unit normals of each facet with boundary conditions
-                                                                  # OBS: normals are reversed to point inwards (in the direction of entering particles).
-        group_vel_parallel = np.dot(normals, vel)                 # shape = (R, Q, J) - dot product = projection of velocity over normal
+                                                             # OBS: normals are reversed to point inwards (in the direction of entering particles).
+        group_vel_parallel = np.dot(normals, vel)            # shape = (R, Q, J) - dot product = projection of velocity over normal
         
         # Probability of a particle entering the domain
         enter_prob = group_vel_parallel*self.dt/bound_thickness.reshape(-1, 1, 1)   # shape = (R, Q, J)
@@ -165,7 +158,7 @@ class Population(Constants):
 
         return enter_prob
 
-    def generate_positions(self, number_of_particles, mesh, key):
+    def generate_positions(self, number_of_particles, mesh):
         '''Initialise positions of a given number of particles'''
         
         positions = mesh.sample_volume(number_of_particles)
@@ -194,8 +187,7 @@ class Population(Constants):
 
         if self.args.particles[0] in ['total', 'pv', 'pmps']:
             # initialising positions one mode at a time (slower but uses less memory)
-            number_of_particles = self.N_p
-            self.positions = self.generate_positions(number_of_particles, geometry.mesh, key = 'random')
+            self.positions = self.generate_positions(self.N_p, geometry.mesh)
 
             # assigning properties from Phonon
             self.modes = self.initialise_modes(phonon) # getting modes
@@ -542,7 +534,7 @@ class Population(Constants):
 
         self.n_timesteps -= 1                    # -1 timestep in the counter to boundary scattering
 
-    def timesteps_to_boundary(self, positions, velocities, geometry, indexes_del_extra = None):
+    def timesteps_to_boundary(self, positions, velocities, geometry):
         '''Calculate how many timesteps to boundary scattering.'''
 
         if positions.shape[0] == 0:
@@ -552,30 +544,24 @@ class Population(Constants):
             
             return ts_to_boundary, index_facets, collision_pos
 
-        mesh_pos = np.zeros((0, 3))
-        mesh_facets = np.zeros(0, dtype = int)
+        collision_pos = np.zeros((0, 3))
+        index_facets = np.zeros(0, dtype = int)
         ts_to_boundary = np.zeros(0, dtype = float)
         stride = int(1e6)
         start = 0
         while start < positions.shape[0]:
-            new_mesh_pos, new_ts_to_boundary, new_mesh_facets = geometry.mesh.find_boundary(positions[start:start+stride, :], velocities[start:start+stride, :]) # find collision in true boundary
+            new_collision_pos, new_ts_to_boundary, new_index_facets = geometry.mesh.find_boundary(positions[start:start+stride, :], velocities[start:start+stride, :]) # find collision in true boundary
             
             new_ts_to_boundary /= self.dt
 
-            mesh_pos = np.concatenate((mesh_pos, new_mesh_pos), axis = 0)
-            mesh_facets = np.concatenate((mesh_facets, new_mesh_facets), axis = 0, dtype = int)
+            collision_pos = np.concatenate((collision_pos, new_collision_pos), axis = 0)
+            index_facets = np.concatenate((index_facets, new_index_facets), axis = 0, dtype = int)
             
             ts_to_boundary = np.concatenate((ts_to_boundary, new_ts_to_boundary), axis = 0, dtype = float)
 
             start += stride
 
-        index_facets = mesh_facets
-        collision_pos = mesh_pos
-        
-        if indexes_del_extra is None:
-            return ts_to_boundary, index_facets, collision_pos
-        else:
-            return ts_to_boundary, index_facets, collision_pos, indexes_del_extra
+        return ts_to_boundary, index_facets, collision_pos
 
     def delete_particles(self, indexes):
         '''Delete all information about particles according to the given indexes.
@@ -780,7 +766,6 @@ class Population(Constants):
         normals = -np.round(geo.facets_normal[facets, :], decimals = 10)
         normals, inv_normals = np.unique(normals, axis = 0, return_inverse = True)
 
-        k = phonon.wavevectors
         v = phonon.group_vel
         
         # array of INCOMING modes that CAN be specularly reflected to other mode - Initially all false
@@ -1016,8 +1001,7 @@ class Population(Constants):
                                            occupation_in,
                                            omega_in,
                                            geometry,
-                                           phonon,
-                                           indexes_del_extra):
+                                           phonon):
         
         # particles already scattered this timestep are calculated from their current position (at a boundary)
         previous_positions = copy.deepcopy(positions)
@@ -1044,11 +1028,9 @@ class Population(Constants):
         # find next scattering event
         (new_ts_to_boundary     ,
          new_collision_facets   ,
-         new_collision_positions,
-         indexes_del_extra      ) = self.timesteps_to_boundary(new_positions, new_group_vel, geometry, indexes_del_extra)
+         new_collision_positions) = self.timesteps_to_boundary(new_positions, new_group_vel, geometry)
         
-        new_collision_cond = np.empty(new_collision_facets.shape, dtype = str)
-        new_collision_cond[~indexes_del_extra] = self.bound_cond[new_collision_facets[~indexes_del_extra].astype(int)]
+        new_collision_cond = self.bound_cond[new_collision_facets.astype(int)]
         
         return (new_modes,
                 new_positions,
@@ -1059,10 +1041,9 @@ class Population(Constants):
                 new_calculated_ts,
                 new_collision_positions,
                 new_collision_facets,
-                new_collision_cond,
-                indexes_del_extra)
+                new_collision_cond)
 
-    def periodic_boundary_condition(self, positions, group_velocities, collision_facets, collision_positions, calculated_ts, geometry, indexes_del_extra):
+    def periodic_boundary_condition(self, positions, group_velocities, collision_facets, collision_positions, calculated_ts, geometry):
         
         collision_facets = collision_facets.astype(int) # ensuring collision facets are integers
 
@@ -1079,16 +1060,15 @@ class Population(Constants):
         new_positions = collision_positions + L                                                     # translate particles
 
         # finding next scattering event
-        new_ts_to_boundary, new_collision_facets, new_collision_positions, indexes_del_extra = self.timesteps_to_boundary(new_positions, group_velocities, geometry, indexes_del_extra)
+        new_ts_to_boundary, new_collision_facets, new_collision_positions = self.timesteps_to_boundary(new_positions, group_velocities, geometry)
 
         calculated_ts += np.linalg.norm((collision_positions - previous_positions), axis = 1)/np.linalg.norm((group_velocities*self.dt), axis = 1)
 
-        new_collision_facets[indexes_del_extra] = 0
         new_collision_facets = new_collision_facets.astype(int)
             
         new_collision_cond = self.bound_cond[new_collision_facets]
 
-        return new_positions, new_ts_to_boundary, new_collision_facets, new_collision_positions, new_collision_cond, calculated_ts, indexes_del_extra
+        return new_positions, new_ts_to_boundary, new_collision_facets, new_collision_positions, new_collision_cond, calculated_ts
 
     def roughness_boundary_condition(self, positions,
                                            group_velocities,
@@ -1099,8 +1079,7 @@ class Population(Constants):
                                            occupation_in,
                                            omega_in,
                                            geometry,
-                                           phonon,
-                                           indexes_del_extra):
+                                           phonon):
         
         # particles already scattered this timestep are calculated from their current position (at a boundary)
         previous_positions = copy.deepcopy(positions)
@@ -1127,11 +1106,9 @@ class Population(Constants):
         # find next scattering event
         (new_ts_to_boundary     ,
          new_collision_facets   ,
-         new_collision_positions,
-         indexes_del_extra      ) = self.timesteps_to_boundary(new_positions, new_group_vel, geometry, indexes_del_extra)
+         new_collision_positions) = self.timesteps_to_boundary(new_positions, new_group_vel, geometry)
         
-        new_collision_cond = np.empty(new_collision_facets.shape, dtype = str)
-        new_collision_cond[~indexes_del_extra] = self.bound_cond[new_collision_facets[~indexes_del_extra].astype(int)]
+        new_collision_cond = self.bound_cond[new_collision_facets.astype(int)]
         
         return (new_modes,
                 new_positions,
@@ -1142,8 +1119,7 @@ class Population(Constants):
                 new_calculated_ts,
                 new_collision_positions,
                 new_collision_facets,
-                new_collision_cond,
-                indexes_del_extra)
+                new_collision_cond)
 
     def boundary_scattering(self, geometry, phonon):
         '''Applies boundary scattering or other conditions to the particles where it happened, given their indexes.'''
@@ -1151,8 +1127,6 @@ class Population(Constants):
         self.subvol_id = self.get_subvol_id(self.positions, geometry) # getting subvol
 
         indexes_all = self.n_timesteps < 0                      # find scattering particles (N_p,)
-
-        indexes_del_extra = np.zeros(indexes_all.shape, dtype = bool) # particles to be deleted due to errors and such
 
         calculated_ts              = np.ones(indexes_all.shape) # start the tracking of calculation as 1 (N_p,)
         calculated_ts[indexes_all] = 0                          # set it to 0 for scattering particles   (N_p,)
@@ -1179,8 +1153,7 @@ class Population(Constants):
                  calculated_ts[indexes_res]              ,
                  self.collision_positions[indexes_res, :],
                  self.collision_facets[indexes_res]      ,
-                 self.collision_cond[indexes_res]        ,
-                 indexes_del_extra[indexes_res]          ) = self.reservoir_boundary_condition(self.positions[indexes_res, :]          ,
+                 self.collision_cond[indexes_res]        ) = self.reservoir_boundary_condition(self.positions[indexes_res, :]          ,
                                                                                                self.group_vel[indexes_res, :]          ,
                                                                                                self.collision_facets[indexes_res]      ,
                                                                                                self.collision_positions[indexes_res, :],
@@ -1188,8 +1161,7 @@ class Population(Constants):
                                                                                                self.occupation[indexes_res]            ,
                                                                                                self.omega[indexes_res]                 ,
                                                                                                geometry                                ,
-                                                                                               phonon                                  ,
-                                                                                               indexes_del_extra[indexes_res])
+                                                                                               phonon                                  )
 
             # II. Applying Periodicities:
             
@@ -1198,7 +1170,6 @@ class Population(Constants):
                                         self.collision_cond == 'P')
             indexes_per = np.logical_and(indexes_per               ,
                                          (1-calculated_ts) > new_n_timesteps)
-            indexes_per = np.logical_and(indexes_per, ~indexes_del_extra)
 
             if np.any(indexes_per):
 
@@ -1208,25 +1179,20 @@ class Population(Constants):
                 self.collision_facets[indexes_per]      ,
                 self.collision_positions[indexes_per, :],
                 self.collision_cond[indexes_per]        ,
-                calculated_ts[indexes_per]              ,
-                indexes_del_extra[indexes_per]          ) = self.periodic_boundary_condition(self.positions[indexes_per, :]          ,
+                calculated_ts[indexes_per]              ) = self.periodic_boundary_condition(self.positions[indexes_per, :]          ,
                                                                                              self.group_vel[indexes_per, :]          ,
                                                                                              self.collision_facets[indexes_per]      ,
                                                                                              self.collision_positions[indexes_per, :],
                                                                                              calculated_ts[indexes_per]              ,
-                                                                                             geometry                                ,
-                                                                                             indexes_del_extra[indexes_per]          )
+                                                                                             geometry                                )
 
             # III. Performing scattering:
 
             # identifying particles hitting rough facets
             indexes_ref = np.logical_and(calculated_ts       <   1 ,
                                          self.collision_cond == 'R')
-            # print('ref', indexes_ref.sum())
             indexes_ref = np.logical_and(indexes_ref               ,
                                          (1-calculated_ts) > new_n_timesteps)
-            # print('ref', indexes_ref.sum())
-            indexes_ref = np.logical_and(indexes_ref, ~indexes_del_extra)
 
             if np.any(indexes_ref):
                 (self.modes[indexes_ref, :]              ,
@@ -1238,8 +1204,7 @@ class Population(Constants):
                  calculated_ts[indexes_ref]              ,
                  self.collision_positions[indexes_ref, :],
                  self.collision_facets[indexes_ref]      ,
-                 self.collision_cond[indexes_ref]        ,
-                 indexes_del_extra[indexes_ref]          ) = self.roughness_boundary_condition(self.positions[indexes_ref, :]          ,
+                 self.collision_cond[indexes_ref]        ) = self.roughness_boundary_condition(self.positions[indexes_ref, :]          ,
                                                                                                self.group_vel[indexes_ref, :]          ,
                                                                                                self.collision_facets[indexes_ref]      ,
                                                                                                self.collision_positions[indexes_ref, :],
@@ -1248,15 +1213,13 @@ class Population(Constants):
                                                                                                self.occupation[indexes_ref]            ,
                                                                                                self.omega[indexes_ref]                 ,
                                                                                                geometry                                ,
-                                                                                               phonon                                  ,
-                                                                                               indexes_del_extra[indexes_ref])
+                                                                                               phonon                                  )
 
             # IV. Drifting those who will not be scattered again in this timestep
 
             # identifying drifting particles
             indexes_drift = np.logical_and(calculated_ts < 1                  ,
                                            (1-calculated_ts) < new_n_timesteps)
-            indexes_drift = np.logical_and(indexes_drift, ~indexes_del_extra)
 
             if np.any(indexes_drift):
                 self.positions[indexes_drift, :] += self.group_vel[indexes_drift, :]*self.dt*(1-calculated_ts[indexes_drift]).reshape(-1, 1)
