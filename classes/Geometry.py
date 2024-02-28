@@ -363,13 +363,6 @@ class Geometry:
                                side,
                                lid + 2*N+1))
             
-            fig, ax = plt.subplots(nrows = 1, ncols = 1, subplot_kw={'projection':'3d'})
-
-            for f in faces:
-                ax.plot(vertices[f[[0, 1, 2, 0]], 0],
-                        vertices[f[[0, 1, 2, 0]], 1],
-                        vertices[f[[0, 1, 2, 0]], 2])
-            
         elif shape in ['freewire']:
             
             R = np.array([dims[i] for i in range(0, len(dims)-1, 2)], dtype = float) # radii

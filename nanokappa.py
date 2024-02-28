@@ -31,7 +31,9 @@ args = generate_results_folder(args)
 # saving arguments on file
 args_filename = os.path.join(args.results_folder, 'arguments.txt')
 
-if args.output == 'file':
+output = args.output[0]
+
+if output == 'file':
     output_file = open(os.path.join(args.results_folder, 'output.txt'), 'a')
     sys.stdout = output_file
 
@@ -71,7 +73,7 @@ print('---------- o ----------- o ------------- o ------------')
 geo = Geometry(args)
 
 # material  data
-phonons = Phonon(args, 0)
+phonons = Phonon(args)
 
 pop = Population(args, geo, phonons)
 
@@ -88,8 +90,6 @@ print('Saving end of run particle data...')
 pop.write_final_state(geo)
 
 pop.f.close()
-
-pop.save_plot_real_time()
 
 pop.view.postprocess()
 
@@ -109,5 +109,5 @@ seconds = total_time.seconds - 3600*hours - 60*minutes
 print("Total time: {:>02d} days {:>02d} h {:>02d} min {:>02d} s\n".format(total_time.days, hours, minutes, seconds))
 print('---------- o ----------- o ------------- o ------------')
 
-if args.output == 'file':
+if output == 'file':
     output_file.close()

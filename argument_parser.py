@@ -21,12 +21,11 @@ def initialise_parser(debug_flag):
     parser.add_argument('--mat_rotation'   , '-mr', default = [],
                                       nargs = '*' , help    = 'Material index, Euler angles in degrees to be applied to given material and ' +
                                                               'the order to be applied (see scipy.rotation.from_euler).')
-    parser.add_argument('--isotope_scat'   , '-is', default = [],
-                        type = int,   nargs = '*' , help    = 'Which materials need to consider mass scattering. Default is none.')
     
     parser.add_argument('--particles'      , '-p' , default = ['pmps', 1],
                                       nargs = '*'   , help    = 'Number of particles. First argument is a string: "total" for total number, "pmps" for number per mode, per ' +
-                                                              'subvolume, "pv" for particles per cubic angstrom. Second is the number.')
+                                                              'subvolume, "pv" for particles per cubic angstrom. Second is the number. Alternatively, a file containing ' +
+                                                              'information about particles from a previous simulation can be passed in order to continue the calculation.')
     parser.add_argument('--timestep'       , '-ts', default = [1],
                         type = float, nargs = 1   , help    = 'Timestep size in picoseconds')
     parser.add_argument('--iterations'     , '-i' , default = [10000],
@@ -70,19 +69,18 @@ def initialise_parser(debug_flag):
     parser.add_argument('--conv_crit'     , '-cc' , default = [0, 1],
                         type = float, nargs = 2   , help    = 'Value of convergence criteria and number of checks to keep it under criteria to consider convergence.')
 
-    parser.add_argument('--mat_folder'      , '-mf', default  = ['']   ,  type = str, nargs = '*', help     = 'Set folder with material data.'  ) # lattice properties
-    parser.add_argument('--poscar_file'     , '-pf', required = True   , type = str, nargs = '*', help     = 'Set the POSCAR file to be read.' ) # lattice properties
-    parser.add_argument('--hdf_file'        , '-hf', required = True   , type = str, nargs = '*', help     = 'Set the hdf5 file to be read.'   ) # phonon properties of the material
+    parser.add_argument('--mat_folder'      , '-mf', default  = ''  , type = str, nargs = 1, help = 'Set folder with material data.' ) # lattice properties
+    parser.add_argument('--poscar_file'     , '-pf', required = True, type = str, nargs = 1, help = 'Set the POSCAR file to be read.') # lattice properties
+    parser.add_argument('--hdf_file'        , '-hf', required = True, type = str, nargs = 1, help = 'Set the hdf5 file to be read.'  ) # phonon properties of the material
 
-    parser.add_argument('--results_folder'  , '-rf', default  = []     , type = str,nargs = '*', help     = 'Set the results folder.'    ) # 
-    
+    parser.add_argument('--results_folder'  , '-rf', default  = ''  , type = str, nargs = 1, help = 'Set the results folder.')
 
     ############## DEBUG OPTIONS ########################
 
     parser.add_argument('--reference_temp' , '-rt', default = ['local'],
                                       nargs = 1   , help    = [argparse.SUPPRESS, 'Set reference temperature to be considered in the system, in Kelvin. Also accepts "local", so deltas are calculated in relation to local temperature.'][int(debug_flag)]) 
     
-    parser.add_argument('--output'        , '-op' , default = 'file',
+    parser.add_argument('--output'        , '-op' , default = ['file'],
                         type = str  , nargs = 1   , help    = [argparse.SUPPRESS, 'Where to print the output. "file" to save it in outuput.txt. "screen" to print on terminal.'][int(debug_flag)])
     
     return parser

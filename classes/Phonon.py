@@ -34,10 +34,9 @@ np.set_printoptions(precision=3, threshold=sys.maxsize, linewidth=np.nan)
 
 class Phonon(Constants):    
     ''' Class to get phonon properties and manipulate them. '''
-    def __init__(self, arguments, mat_index):
+    def __init__(self, arguments):
         super(Phonon, self).__init__()
         self.args = arguments
-        self.mat_index = int(mat_index)
         self.get_mat_folder()
 
         self.load_base_properties()
@@ -54,28 +53,26 @@ class Phonon(Constants):
     def get_mat_folder(self):
         
         if len(self.args.mat_folder) > 0:
-            folder = os.path.relpath(self.args.mat_folder[self.mat_index])
+            self.mat_folder  = os.path.relpath(self.args.mat_folder[0]) # I don't know why argparse converts a single argument to a list
         else:
-            folder = ''
+            self.mat_folder  = ''
 
-        if not os.path.isabs(folder):
-            folder = os.path.join(os.getcwd(), folder)
-        
-        self.mat_folder = folder
+        if not os.path.isabs(self.mat_folder):
+            self.mat_folder  = os.path.join(os.getcwd(), self.mat_folder)
 
     def load_base_properties(self):
         '''Initialise all phonon properties from input files.'''
-        
-        poscar_file = os.path.join(self.mat_folder, self.args.poscar_file[self.mat_index])
+        poscar_file = os.path.join(self.mat_folder, self.args.poscar_file[0]) # I don't know why argparse converts a single argument to a list
         unitcell, _ = read_crystal_structure(poscar_file, interface_mode='vasp')
         lattice = unitcell.get_cell()   # vectors as lines
         reciprocal_lattice = np.linalg.inv(lattice)*2*np.pi # vectors as columns
 
-        phonon = Phonopy(unitcell,
-                    [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
-                    primitive_matrix=[[1, 0, 0], 
-                                    [0, 1, 0], 
-                                    [0, 0, 1]])
+        phonon = Phonopy(unitcell, [[1, 0, 0],
+                                    [0, 1, 0],
+                                    [0, 0, 1]],
+                         primitive_matrix=[[1, 0, 0], 
+                                           [0, 1, 0], 
+                                           [0, 0, 1]])
 
         symmetry_obj = phonon.primitive_symmetry
         rotations = symmetry_obj.get_reciprocal_operations()
@@ -83,7 +80,7 @@ class Phonon(Constants):
         self.volume_unitcell = unitcell.get_volume()   # angstrom³
         
         print('Reading hdf file...')
-        hdf_file = os.path.join(self.mat_folder, self.args.hdf_file[self.mat_index])
+        hdf_file = os.path.join(self.mat_folder, self.args.hdf_file[0]) # I don't know why argparse converts a single argument to a list
 
         self.load_hdf_data(hdf_file)
 
@@ -102,11 +99,7 @@ class Phonon(Constants):
         self.group_vel = np.around(group_vel, decimals = 10)
 
         self.load_temperature()
-        # print('Expanding heat capacity to FBZ...')  # We don't use heat capacity for anything. Keeping this for future use if needed.
-        # self.load_heat_cap()
-        # qpoints_FBZ,heat_cap=self.expand_FBZ(1,self.weights,self.q_points,self.heat_cap,0,rotations,reciprocal_lattice)
-        # self.heat_cap=heat_cap
-
+        
         print('Expanding gamma to FBZ...')
         self.load_gamma()
         qpoints_FBZ,gamma=self.expand_FBZ(1,self.weights,self.q_points,self.gamma,0,rotations,reciprocal_lattice)
@@ -182,10 +175,6 @@ class Phonon(Constants):
         '''groupvel shape = q_points X p-branches X cartesian coordinates '''
         self.group_vel = np.array(self.data_hdf['group_velocity'])  # THz * angstrom
 
-    # def load_heat_cap(self):
-    #     '''heat_cap shape = temperatures X q-points X p-branches '''
-    #     self.heat_cap = np.array(self.data_hdf['heat_capacity'])    # eV/K
-    
     def get_wavevectors(self):
         q = np.copy(self.q_points)
         k = self.q_to_k(q)
@@ -300,7 +289,7 @@ class Phonon(Constants):
                 Exception('Wrong mat_rotation parameter. Quitting simulaton.')
         
         if len(rot_groups) > 0:
-            group = rot_groups[self.mat_index]
+            group = rot_groups
             
             rot_params = [self.args.mat_rotation[i] for i in group]
             self.rotation_angles = [float(i) for i in rot_params[:-1]]
@@ -316,11 +305,11 @@ class Phonon(Constants):
     def load_gamma(self):
         '''gamma = temperatures X q-pointsX p-branches'''
         self.gamma = np.array(self.data_hdf['gamma'])   # THz
-        if self.mat_index in self.args.isotope_scat:
-            try:
-                self.gamma += np.array(self.data_hdf['gamma_isotope'])
-            except:
-                raise Exception('hdf file does not contain the field "gamma_isotope".')
+        try:
+            self.gamma += np.array(self.data_hdf['gamma_isotope'])
+            print('Considering gamma_isotope to calculate lifetime...')
+        except:
+            print('No gamma_isotope found. Considering only gamma.')
         self.gamma = np.where(self.gamma > 0 , self.gamma, -1)
 
     def calculate_lifetime(self):
