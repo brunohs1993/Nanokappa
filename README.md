@@ -24,7 +24,7 @@ Firstly, install [Anaconda](https://www.anaconda.com/) on your computer.
 
 Create an environment and activate it:
 
-```bash   
+```bash
 $ conda create -n nanokappa
 $ conda activate nanokappa
 ```
@@ -157,9 +157,9 @@ We want the user to always have more flexibility, prettier visuals, faster simul
 # "I like it! What can I do?"
 
 - If you are a researcher, feel free to use Nano-&#954;, as long as you cite us;
-  
+
 - If you find any bugs, please report on Nano-&#954;'s repository or send us an email so we can fix it as quick as possible;
-  
+
 - If you think you could contribute to Nano-&#954;'s development, please send us a message and we could have a coffee and talk about how.
 
 # Aknowledgements

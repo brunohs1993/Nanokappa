@@ -1,0 +1,26 @@
+--mat_folder       test_material/Si/
+--hdf_file         kappa-m313131.hdf5
+--poscar_file      POSCAR
+--geometry         box
+--dimensions       5e3 1e3 1e3
+--scale            1 1 1
+--geo_rotation     0 0 0 xyz
+--subvolumes       slice 10 0
+--bound_pos        relative -0.1 0.5 0.5 1.1 0.5 0.5 0.5 0.5 -0.1 0.5 0.5 1.1
+--bound_cond       T T R R P
+--connect_pos      relative 0.5 -0.1 0.5 0.5 1.1 0.5
+--bound_values     302 298 0 0
+--reference_temp   local
+--temp_dist        cold
+--temp_interp      linear
+--particles        total 1e5
+--part_dist        random_subvol
+--timestep         1
+--iterations       1000
+--n_mean           10
+--results_folder   test_results/test
+--conv_crit        0 10
+--colormap         jet
+--fig_plot         energy
+--output           file
+--max_sim_time     0-00:00:00

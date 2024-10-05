@@ -1,4 +1,4 @@
-# subvols final state data 
+# subvols final state data
 # Date and time: 2023-07-26T21:42:24.315262
 # hdf file = ['kappa-m313131.hdf5'], POSCAR file = ['POSCAR']
 # subvol id, subvol x, subvol y, subvol z, subvol volume, T [K], sigma T [K], HF x [W/m^2], HF y [W/m^2], HF z [W/m^2], sigma HF x [W/m^2], sigma HF y [W/m^2], sigma HF z [W/m^2], kappa [W/m K], sigma kappa [W/m K]

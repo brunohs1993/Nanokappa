@@ -49,7 +49,7 @@ These standard geometries can be modified by entering the parameters `--scale` a
         --dimensions 100 100 200
 
 2. ...or by inputing any dimensions and scaling it by x, y and z factors, such as...
-   
+
         --geometry   box
         --dimensions 100 100 100
         --scale      1 1 2
@@ -80,7 +80,7 @@ The parameters that treat the material data are:
 | Parameter          | Keyword          | Reduced | Description | Types | Default |
 | ------------------ | ---------------- | ----- | ----------- | ----- | ------- |
 | Material folder    | `--mat_folder`   | `-mf` | Path of the folder containing the material files. Full path advised. | String | |
-| hdf5 file          | `--hdf_file`     | `-hf` | File name with extension. | String | | 
+| hdf5 file          | `--hdf_file`     | `-hf` | File name with extension. | String | |
 | POSCAR file        | `--poscar_file`  | `-pf` | File name with extension. | String | |
 | Material rotation  | `--mat_rotation` | `-mr` | Euler angles to change crystal orientation (see [scipy.rotation.from_euler](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.from_euler.html)) | Float, String |  |
 | Isotope scattering | `--isotope_scat` | `-is` | Additional scattering due to impurities/defects. | Int | |
@@ -103,7 +103,7 @@ The boundary conditions (BC) consist of heat transfer restrictions (such as impo
 
 | Parameter                 | Keyword              | Reduced | Description | Types | Default |
 | ------------------------- | -------------------- | ------- | ----------- | ----- | ------- |
-| Positions with imposed BC | `--bound_pos`        | `-bp`   | Set the coordinates from which to find the closest facet to apply the specific boundary conditions. First value is a keyword `relative` (normalises the bounding box between 0 and 1) or `absolute` (direct positions). The points are passed as $x_1~y_1~z_1~x_2~y_2~z_2...$.| String Float | | 
+| Positions with imposed BC | `--bound_pos`        | `-bp`   | Set the coordinates from which to find the closest facet to apply the specific boundary conditions. First value is a keyword `relative` (normalises the bounding box between 0 and 1) or `absolute` (direct positions). The points are passed as $x_1~y_1~z_1~x_2~y_2~z_2...$.| String Float | |
 | Boundary conditions       | `--bound_cond`       | `-bc`   | Type of boundary condition for each facet detected from the coordinates declared in `--bound_pos`. Accepts `T` for temperature, `P` for periodic, `R` for roughness/reflection. If one extra condition is given, it is considered to be the same for all non informed facets.  | String | |
 | Boundary condition values | `--bound_values`     | `-bv`   | Values for each imposed boundary condition. Temperatures in Kelvin, roughness in angstroms. | Float | |
 | Connected facets          | `--connect_pos`      | `-cp`   | Declared the same way as in `-bp`, it declares which facets are connected. They are treated in pairs: the first is connected to the second, the third to the fourth, etc. | String Float | |
@@ -176,7 +176,7 @@ The initial state of the domain is set by a temperature distribution that can be
 | ------------------------- | -------------------- | ------- | ----------- | ----- | ------- |
 | Temperature distribution  | `--temp_dist`        | `-td`   | Shape of the initial temperature profile. Accepts `cold`, `hot`, `mean`, `linear`, `random`, `custom`. | String | `cold` |
 | Subvolume temperature     | `--subvol_temp`      | `-st`   | Initial temperature of each subvolume when `custom` is informed in `-td`, in Kelvin. | Float or String | |
-| Particle distribution     | `--part_dist`        | `-pd`   | Txt file with particle data to be imported. | String | | 
+| Particle distribution     | `--part_dist`        | `-pd`   | Txt file with particle data to be imported. | String | |
 
 Particles are initialised in each SV with their Bose-Einstein occupation at the local temperature. The temperature is based on the imposed temperatures of the reservoirs. If there is no imposed temperature as BC, the only available option is `custom`, and the desired temperature for each SV should be informed to `--subvol_temp`.
 
