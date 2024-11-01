@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2023 BRUNO HARTMANN DA SILVA
+Copyright (c) 2023-2024 BRUNO HARTMANN DA SILVA
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

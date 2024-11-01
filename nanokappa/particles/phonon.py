@@ -1,4 +1,2 @@
-
-
 class Phonon(Particle):
     pass

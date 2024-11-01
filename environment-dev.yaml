@@ -1,0 +1,12 @@
+name: nanokappa
+channels:
+  - conda-forge
+dependencies:
+  - pytest
+  - ipykernel
+  - pydantic
+  - scipy
+  - numpy
+  - matplotlib
+  - phonopy
+  
