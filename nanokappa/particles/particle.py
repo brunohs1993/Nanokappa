@@ -6,6 +6,15 @@ from pydantic import BaseModel
 
 
 class Particle(BaseModel):
+    """Base particle classe.
+
+    Attributes
+    ----------
+    position : np.ndarray
+        Position of the particle.
+    velocity : np.ndarray
+        Velocity of the particle.
+    """
     position: np.ndarray
     velocity: np.ndarray
 
@@ -14,6 +23,6 @@ class Particle(BaseModel):
 
         Parameters
         ----------
-        dt: The time step in seconds.
+        dt: The time step.
         """
         self.position = self.velocity * dt
