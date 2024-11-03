@@ -1,4 +1,4 @@
-# Copyright (C) 2024, Bruno Hartmann da Silva
+# Copyright (C) 2023-2024, Bruno Hartmann da Silva
 # License: MIT
 
 from enum import Enum
@@ -13,5 +13,5 @@ class Constants(Enum):
     ev_in_J = ct.physical_constants["electron volt"][0]  # J/eV
     a_in_m = 1e-10  # m/angs
     ps_in_s = 1e-12  # s/ps
-    eVpsa2_in_Wm2 = ev_in_J / (ps_in_s * (a_in_m) ** 2)  # eV/ps a² ---> W/m²
+    eVpsa2_in_Wm2 = ev_in_J / (ps_in_s * (a_in_m) ** 2)  # eV/ps a² -> W/m²
     pi = ct.pi

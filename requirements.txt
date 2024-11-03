@@ -1,7 +1,3 @@
 phonopy
 scipy
 matplotlib
-h5py
-trimesh
-shapely
-imageio
