@@ -3,5 +3,6 @@
 
 from nanokappa.geometry.subvol_classifier import SubvolClassifier
 from nanokappa.geometry.triangle import Triangle
+from nanokappa.geometry.facet import Facet
 
-__all__ = ["SubvolClassifier", "Triangle"]
+__all__ = ["SubvolClassifier", "Triangle", "Facet"]
