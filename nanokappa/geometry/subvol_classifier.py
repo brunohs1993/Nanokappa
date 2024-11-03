@@ -1,3 +1,6 @@
+# Copyright (C) 2023-2024, Bruno Hartmann da Silva
+# License: MIT
+
 import numpy as np
 from typing import Optional, Literal
 from nanokappa.base import BaseModel, VectorList3D
