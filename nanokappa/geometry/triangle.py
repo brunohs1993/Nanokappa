@@ -39,3 +39,17 @@ class Triangle(BaseModel, frozen=True):
     @cached_property
     def bounds(self) -> float:
         return np.vstack((self.vertices.min(axis=0), self.vertices.max(axis=0)))
+
+    @computed_field
+    @cached_property
+    def area(self) -> float:
+        v1 = self.vertices[1] - self.origin
+        v2 = self.vertices[2] - self.origin
+        cross = np.cross(v1, v2)
+        return np.linalg.norm(cross) / 2
+
+    @computed_field
+    @cached_property
+    def centroid(self) -> Vector3D:
+        return np.mean(self.vertices, axis=0)
+
