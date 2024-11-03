@@ -86,6 +86,22 @@ class Facet(BaseModel, frozen=True):
     @cached_property
     def n_edges(self) -> int:
         return len(self.edges)
+
+    @computed_field
+    @cached_property
+    def border_edges(self) -> np.ndarray:
+        unique, counts = np.unique(self.faces_edges, return_counts=True)
+        return unique[counts == 1]
+
+    @computed_field
+    @cached_property
+    def area(self) -> int:
+        return sum([tri.area for tri in self.faces])
+
+    @computed_field
+    @cached_property
+    def centroid(self) -> int:
+        wfc = [tri.area * tri.centroid for tri in self.faces]
+        return np.sum(wfc, axis=0) / self.area
     
-
-
+    
