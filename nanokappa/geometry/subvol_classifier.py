@@ -1,20 +1,20 @@
 import numpy as np
+from typing import Optional, Literal
+from nanokappa.base import BaseModel, VectorList3D
 from scipy.interpolate import NearestNDInterpolator
 
 
-class SubvolClassifier:
-    def __init__(self, n, xc=None, a=None):
+class SubvolClassifier(BaseModel):
+    n: int
+    xc: Optional[VectorList3D] = None
+    a: Optional[Literal[0] | Literal[1] | Literal[2]] = None
 
-        self.n = n  # number of subvolumes
-
-        if xc is None:
-            self.a = a  # slicing axis
+    def __init__(self):
+        super.__init__()
+        if not self.xc:
             self.xc = np.ones((self.n, 3)) * 0.5
-
             # center positions
-            self.xc[:, self.a] = np.linspace(0, 1 - 1 / n, n) + 1 / (2 * n)
-        else:
-            self.xc = xc
+            self.xc[:, self.a] = np.linspace(0, 1 - 1 / self.n, self.n) + 1 / (2 * self.n)
 
         self.f = NearestNDInterpolator(self.xc, np.arange(self.n, dtype=int))
 
