@@ -5,4 +5,4 @@ from pydantic import BaseModel as PdtBaseModel, ConfigDict
 
 
 class BaseModel(PdtBaseModel):
-    model_config = ConfigDict(extra="ignore", arbitrary_types_allowed=True)
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
