@@ -9,5 +9,6 @@ import numpy.typing as npt
 DType = TypeVar("DType", bound=np.generic)
 
 Vector3D = Annotated[npt.NDArray[DType], Literal[3]]
+VectorList2D = Annotated[npt.NDArray[DType], [int, Literal[2]]]
 VectorList3D = Annotated[npt.NDArray[DType], [int, Literal[3]]]
-TriVectors = Annotated[npt.NDArray[DType], Literal[3, 3]]
+TriVectors = Annotated[npt.NDArray[DType], [Literal[3], Literal[3]]]
