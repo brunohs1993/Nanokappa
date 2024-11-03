@@ -2,7 +2,7 @@
 # License: MIT
 
 import numpy as np
-from nanokappa.utils import BaseModel
+from nanokappa.base import BaseModel
 
 
 class Particle(BaseModel):
