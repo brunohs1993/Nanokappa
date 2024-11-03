@@ -1,4 +1,4 @@
-# Copyright (C) 2024, Bruno Hartmann da Silva
+# Copyright (C) 2023-2024, Bruno Hartmann da Silva
 # License: MIT
 
 import numpy as np
@@ -35,11 +35,12 @@ class Phonon(Particle):
         T : float
             The temperature the phonon is subjected to.
         """
-        n0 = self.occupation_function(T)
+        n0 = self.bose_einstein(self.omega, T)
         tau = self.tau_function(T)
         self.occupation = n0 + (self.occupation - n0) * np.exp(-self.dt / tau)
 
-    def occupation_function(self, T):
+    @staticmethod
+    def bose_einstein(omega: float, T: float):
         """Bose-Einstein distribution.
 
         Parameters
@@ -52,4 +53,4 @@ class Phonon(Particle):
         n : float
             The phonon occupation at that temperature.
         """
-        return 0.5 + 1 / (np.exp(C.hbar * self.omega / (C.kb * T)) - 1)
+        return 0.5 + 1 / (np.exp(C.hbar * omega / (C.kb * T)) - 1)

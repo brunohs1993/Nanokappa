@@ -1,8 +1,8 @@
-# Copyright (C) 2024, Bruno Hartmann da Silva
+# Copyright (C) 2023-2024, Bruno Hartmann da Silva
 # License: MIT
 
 import numpy as np
-from pydantic import BaseModel
+from nanokappa.utils import BaseModel
 
 
 class Particle(BaseModel):
