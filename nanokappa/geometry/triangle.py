@@ -8,7 +8,7 @@ from nanokappa.base import BaseModel, TriVectors, Vector3D
 
 
 class Triangle(BaseModel, frozen=True):
-    vertices: TriVectors
+    vertices: TriVectors[np.float64]
 
     @computed_field
     @cached_property
@@ -27,7 +27,8 @@ class Triangle(BaseModel, frozen=True):
     def normal(self) -> Vector3D:
         v1 = self.vertices[1] - self.origin
         v2 = self.vertices[2] - self.origin
-        return np.cross(v1, v2)
+        cross = np.cross(v1, v2)
+        return cross / np.linalg.norm(cross)
 
     @computed_field
     @cached_property
