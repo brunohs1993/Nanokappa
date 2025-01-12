@@ -9,4 +9,5 @@ dependencies:
   - numpy
   - matplotlib
   - phonopy
+  - networkx
   
